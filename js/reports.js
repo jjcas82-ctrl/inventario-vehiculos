@@ -63,10 +63,12 @@ function buildData() {
   let cols = [], rows = [];
 
   if (type === "inventory") {
-    cols = ["VIN", "Marca", "Modelo", "Año", "Condición", "Agencia", "Ubicación", "Ingreso", "Registró", "Estado"];
+    cols = ["VIN", "Marca", "Modelo", "Año modelo", "Color", "No. de motor", "Kilometraje", "Tipo",
+            "Ubicación", "Condición", "Agencia", "Ingreso", "Registró", "Estado"];
     rows = store.listVehicles().filter(v => v.status !== "fuera").filter(matchVehicle).map(v => [
-      v.vin, v.make || "", v.model || "", v.year || "", v.condition || "",
-      v.currentAgency || "", v.currentLocation || "",
+      v.vin, v.make || "", v.model || "", v.year || "", v.color || "",
+      v.engineNo || "", (v.mileage != null && v.mileage !== "" ? v.mileage : ""), v.vehType || v.bodyClass || "",
+      v.currentLocation || "", v.condition || "", v.currentAgency || "",
       v.entryAt ? new Date(v.entryAt).toLocaleString() : "", v.entryBy || v.lastBy || "",
       v.status || "",
     ]);

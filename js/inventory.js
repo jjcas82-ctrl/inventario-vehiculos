@@ -26,7 +26,7 @@ export function renderInventory() {
 
   if (q) {
     list = list.filter(v =>
-      [v.vin, v.make, v.model, v.color, v.plate].filter(Boolean)
+      [v.vin, v.make, v.model, v.color, v.plate, v.engineNo, v.vehType].filter(Boolean)
         .some(f => String(f).toLowerCase().includes(q))
     );
   }
@@ -45,9 +45,13 @@ export function renderInventory() {
       <td>${escapeHtml(v.make || "")}</td>
       <td>${escapeHtml(v.model || "")}</td>
       <td>${escapeHtml(v.year || "")}</td>
+      <td>${escapeHtml(v.color || "")}</td>
+      <td>${escapeHtml(v.engineNo || "")}</td>
+      <td>${escapeHtml(v.mileage != null && v.mileage !== "" ? Number(v.mileage).toLocaleString() + " km" : "")}</td>
+      <td>${escapeHtml(v.vehType || v.bodyClass || "")}</td>
+      <td>${escapeHtml(v.currentLocation || "")}</td>
       <td>${escapeHtml(v.condition || "")}</td>
       <td>${escapeHtml(v.currentAgency || "")}</td>
-      <td>${escapeHtml(v.currentLocation || "")}</td>
       <td>${escapeHtml(v.entryAt ? new Date(v.entryAt).toLocaleString() : "")}</td>
       <td>${escapeHtml(v.entryBy || v.lastBy || "")}</td>
       <td>${statusTag}</td>
@@ -124,6 +128,9 @@ export function openVehicle(vin) {
         <div class="field"><label>Marca</label><input id="f-make" type="text" value="${escapeHtml(v.make || "")}" ${dis} /></div>
         <div class="field"><label>Modelo</label><input id="f-model" type="text" value="${escapeHtml(v.model || "")}" ${dis} /></div>
         <div class="field"><label>Color</label><input id="f-color" type="text" value="${escapeHtml(v.color || "")}" ${dis} /></div>
+        <div class="field"><label>No. de motor</label><input id="f-engineNo" type="text" value="${escapeHtml(v.engineNo || "")}" ${dis} /></div>
+        <div class="field"><label>Kilometraje</label><input id="f-mileage" type="number" min="0" value="${escapeHtml(v.mileage ?? "")}" ${dis} /></div>
+        <div class="field"><label>Tipo (carrocería)</label><input id="f-vehType" type="text" value="${escapeHtml(v.vehType || v.bodyClass || "")}" placeholder="Sedán, SUV, Pickup…" ${dis} /></div>
         <div class="field"><label>Placa / Matrícula</label><input id="f-plate" type="text" value="${escapeHtml(v.plate || "")}" ${dis} /></div>
         <div class="field"><label>Condición</label>
           <select id="f-condition" ${dis}>
@@ -144,11 +151,15 @@ export function openVehicle(vin) {
 
   const saveBtn = body.querySelector("#save-veh");
   if (saveBtn) saveBtn.addEventListener("click", () => {
+    const mileageRaw = body.querySelector("#f-mileage").value.trim();
     store.upsertVehicle({
       vin,
       make: body.querySelector("#f-make").value.trim(),
       model: body.querySelector("#f-model").value.trim(),
       color: body.querySelector("#f-color").value.trim(),
+      engineNo: body.querySelector("#f-engineNo").value.trim(),
+      mileage: mileageRaw === "" ? "" : Number(mileageRaw),
+      vehType: body.querySelector("#f-vehType").value.trim(),
       plate: body.querySelector("#f-plate").value.trim(),
       condition: body.querySelector("#f-condition").value,
       notes: body.querySelector("#f-notes").value.trim(),
