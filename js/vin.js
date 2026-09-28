@@ -58,9 +58,15 @@ function countryFromWMI(vin) {
 
 // Marca/fabricante por WMI (3 y luego 2 caracteres). Tabla ampliable.
 const WMI_MAKE = {
-  "1G1":"Chevrolet","1GC":"Chevrolet","1GN":"Chevrolet","1GB":"Chevrolet","1GT":"GMC",
-  "2G1":"Chevrolet","3G1":"Chevrolet","3GN":"Chevrolet","KL1":"Chevrolet","KL8":"Chevrolet",
-  "1G4":"Buick","1G8":"Saturn","1GY":"Cadillac","1GM":"Pontiac","1GK":"GMC","1GKS":"GMC",
+  // Chevrolet / GM — plantas de todo el mundo
+  "1G1":"Chevrolet","1GC":"Chevrolet","1GN":"Chevrolet","1GB":"Chevrolet",
+  "2G1":"Chevrolet","2GC":"Chevrolet","2GN":"Chevrolet","2CN":"Chevrolet",
+  "3G1":"Chevrolet","3GC":"Chevrolet","3GN":"Chevrolet","3GB":"Chevrolet", // 3G* = GM México
+  "KL1":"Chevrolet","KL8":"Chevrolet","KL7":"Chevrolet",                    // GM Corea (Aveo, Spark, etc.)
+  "9BG":"Chevrolet","8AG":"Chevrolet","93C":"Chevrolet",                    // GM Brasil/Argentina
+  "MA6":"Chevrolet","LZG":"Chevrolet","LSG":"Chevrolet","L2C":"Chevrolet",  // GM India/China
+  "1GT":"GMC","1GK":"GMC","1GKS":"GMC","2GK":"GMC","3GK":"GMC",
+  "1G4":"Buick","1G8":"Saturn","1GY":"Cadillac","1GM":"Pontiac","1G3":"Oldsmobile","1G6":"Cadillac",
   "1FA":"Ford","1FT":"Ford","1FM":"Ford","1FD":"Ford","2FA":"Ford","3FA":"Ford","MAJ":"Ford",
   "1HG":"Honda","2HG":"Honda","3HG":"Honda","JHM":"Honda","5FN":"Honda","19X":"Honda",
   "JTD":"Toyota","JTM":"Toyota","JTE":"Toyota","4T1":"Toyota","5TD":"Toyota","5TF":"Toyota","2T1":"Toyota","3TM":"Toyota",

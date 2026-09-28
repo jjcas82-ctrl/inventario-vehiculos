@@ -63,10 +63,12 @@ function buildData() {
   let cols = [], rows = [];
 
   if (type === "inventory") {
-    cols = ["VIN", "Marca", "Modelo", "Año", "Condición", "Agencia", "Ubicación", "Estado"];
+    cols = ["VIN", "Marca", "Modelo", "Año", "Condición", "Agencia", "Ubicación", "Ingreso", "Registró", "Estado"];
     rows = store.listVehicles().filter(v => v.status !== "fuera").filter(matchVehicle).map(v => [
       v.vin, v.make || "", v.model || "", v.year || "", v.condition || "",
-      v.currentAgency || "", v.currentLocation || "", v.status || "",
+      v.currentAgency || "", v.currentLocation || "",
+      v.entryAt ? new Date(v.entryAt).toLocaleString() : "", v.entryBy || v.lastBy || "",
+      v.status || "",
     ]);
   }
   else if (type === "aging") {
@@ -86,16 +88,16 @@ function buildData() {
     }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
   }
   else if (type === "flow") {
-    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación"];
+    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Registró"];
     rows = store.listEvents().filter(e => {
       const d = new Date(e.at);
       if (from && d < from) return false;
       if (to && d > to) return false;
       if (agency && e.agency !== agency) return false;
-      if (q && ![e.vin, e.location, e.agency].filter(Boolean).some(f => String(f).toLowerCase().includes(q))) return false;
+      if (q && ![e.vin, e.location, e.agency, e.by].filter(Boolean).some(f => String(f).toLowerCase().includes(q))) return false;
       return true;
     }).sort((a, b) => b.at.localeCompare(a.at)).map(e => [
-      new Date(e.at).toLocaleString(), EVENT_LABELS[e.type] || e.type, e.vin, e.agency || "", e.location || "",
+      new Date(e.at).toLocaleString(), EVENT_LABELS[e.type] || e.type, e.vin, e.agency || "", e.location || "", e.by || "—",
     ]);
   }
   else if (type === "incomplete") {

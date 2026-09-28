@@ -8,13 +8,15 @@
 const ENDPOINT = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/";
 
 // Devuelve un objeto con los campos útiles (o null si falla / sin internet).
-export async function enrichVin(vin, { timeoutMs = 8000 } = {}) {
+// Pasar `year` (calculado localmente) mejora mucho la precisión de NHTSA.
+export async function enrichVin(vin, { timeoutMs = 8000, year = null } = {}) {
   if (!navigator.onLine) return { online: false, data: null, error: "sin conexión" };
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(ENDPOINT + encodeURIComponent(vin) + "?format=json", { signal: ctrl.signal });
+    const yq = year ? "&modelyear=" + encodeURIComponent(year) : "";
+    const res = await fetch(ENDPOINT + encodeURIComponent(vin) + "?format=json" + yq, { signal: ctrl.signal });
     clearTimeout(t);
     if (!res.ok) return { online: true, data: null, error: "HTTP " + res.status };
     const json = await res.json();

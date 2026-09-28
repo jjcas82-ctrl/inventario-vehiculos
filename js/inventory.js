@@ -45,6 +45,8 @@ export function renderInventory() {
       <td>${escapeHtml(v.condition || "")}</td>
       <td>${escapeHtml(v.currentAgency || "")}</td>
       <td>${escapeHtml(v.currentLocation || "")}</td>
+      <td>${escapeHtml(v.entryAt ? new Date(v.entryAt).toLocaleString() : "")}</td>
+      <td>${escapeHtml(v.entryBy || v.lastBy || "")}</td>
       <td>${statusTag}</td>
       <td><button class="btn open-veh" data-vin="${escapeHtml(v.vin)}">Ver / Editar</button></td>
     `;
@@ -69,15 +71,21 @@ export function openVehicle(vin) {
 
   const timeline = events.map(e => {
     const gps = (e.lat != null) ? ` · 📍 ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
+    const who = e.by ? ` · 👤 ${escapeHtml(e.by)}` : "";
     return `<li><b>${EVENT_LABELS[e.type] || e.type}</b> — ${escapeHtml(e.location || "")}
       <span class="muted">(${escapeHtml(e.agency || "")})</span><br>
-      <span class="muted">${new Date(e.at).toLocaleString()}${gps}</span></li>`;
+      <span class="muted">${new Date(e.at).toLocaleString()}${who}${gps}</span></li>`;
   }).join("");
 
   const incomplete = !v.model || !v.color;
 
   body.innerHTML = `
     ${incomplete ? '<p class="hint" style="color:var(--danger)">⚠️ Ficha incompleta: faltan datos por completar.</p>' : ''}
+    <p class="ficha-meta">
+      📅 Ingreso: <b>${v.entryAt ? new Date(v.entryAt).toLocaleString() : "—"}</b>
+      &nbsp;·&nbsp; 👤 Registró: <b>${escapeHtml(v.entryBy || v.lastBy || "—")}</b>
+      ${v.exitAt ? `&nbsp;·&nbsp; 🚪 Salida: <b>${new Date(v.exitAt).toLocaleString()}</b> (${escapeHtml(v.exitBy || "—")})` : ""}
+    </p>
     <div class="grid grid-2">
       <div>
         <p class="muted">Datos leídos del VIN (no editables)</p>

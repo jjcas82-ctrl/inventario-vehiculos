@@ -10,13 +10,45 @@ import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
 import { initReports, renderReports, refreshReportAgencies } from "./reports.js";
-import { notify, confirmDialog } from "./ui.js";
+import { notify, confirmDialog, promptDialog } from "./ui.js";
 
 let currentDecode = null;   // resultado del último VIN decodificado
 let scanner = null;
 
 // Compat: mantenemos toast() pero ahora usa el aviso bonito.
 function toast(msg, type = "info") { notify(msg, { type }); }
+
+// ---------- Usuario que registra ----------
+function refreshUserLabel() {
+  const el = document.getElementById("user-name");
+  const u = store.getUser();
+  el.textContent = u || "Sin usuario";
+}
+
+async function askUser({ force = false } = {}) {
+  const current = store.getUser();
+  if (current && !force) return current;
+  const name = await promptDialog({
+    icon: "👤",
+    title: "¿Quién registra?",
+    message: "Escribe tu nombre o iniciales. Quedará guardado en cada entrada, salida y movimiento que registres.",
+    placeholder: "Ej. Juan Pérez",
+    value: current || "",
+  });
+  if (name && name.trim()) {
+    store.setUser(name.trim());
+    refreshUserLabel();
+    return name.trim();
+  }
+  return current;
+}
+
+function setupUser() {
+  refreshUserLabel();
+  document.getElementById("user-btn").addEventListener("click", () => askUser({ force: true }));
+  // Si no hay usuario, lo pedimos al inicio (no bloqueante, una sola vez).
+  if (!store.getUser()) setTimeout(() => askUser(), 400);
+}
 
 // ---------- Navegación por pestañas ----------
 function setupTabs() {
@@ -134,7 +166,7 @@ async function tryEnrich(dec) {
   note.textContent = "Consultando datos oficiales del VIN (en línea)…";
   box.appendChild(note);
 
-  const { online, data, error } = await enrichVin(dec.vin);
+  const { online, data, error } = await enrichVin(dec.vin, { year: dec.year });
   // Puede que el usuario ya haya escaneado otro VIN mientras tanto.
   if (!currentDecode || currentDecode.vin !== dec.vin) return;
 
@@ -355,12 +387,16 @@ function setupEventButtons() {
     // Es el error que más confunde, así que aquí SÍ mostramos un diálogo claro,
     // pero con la acción correcta a un toque (registrar movimiento).
     if (type === "entry" && status === "dentro") {
+      const ingreso = existing?.entryAt ? new Date(existing.entryAt).toLocaleString() : "—";
+      const quien = existing?.entryBy || existing?.lastBy || "—";
       const choice = await confirmDialog({
         icon: "🚗",
         title: "La unidad ya está dentro",
         message:
-          `El VIN ${vin} ya tiene una ENTRADA registrada y no ha salido.\n` +
-          `Ubicación actual: ${curLocation || "—"} (${curAgency || "—"}).\n\n` +
+          `El VIN ${vin} ya tiene una ENTRADA registrada y no ha salido.\n\n` +
+          `📍 Ubicación actual: ${curLocation || "—"} (${curAgency || "—"})\n` +
+          `📅 Ingreso: ${ingreso}\n` +
+          `👤 Registró: ${quien}\n\n` +
           `¿Deseas registrar un MOVIMIENTO interno a "${location}"?`,
         buttons: [
           { label: "Cancelar", value: "cancel", variant: "ghost" },
@@ -394,9 +430,12 @@ function setupEventButtons() {
         country: currentDecode.country,
       });
     }
-    await registerEvent({ vin, type, agency, location, condition }, onGps);
+    // Asegura que haya un usuario asociado al registro.
+    let by = store.getUser();
+    if (!by) by = await askUser();
+    await registerEvent({ vin, type, agency, location, condition, by }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
-    notify(`${labels[type]} registrada correctamente.`, { type: "success", title: vin });
+    notify(`${labels[type]} registrada por ${by || "—"}.`, { type: "success", title: vin });
     refreshAll();
   };
 
@@ -487,6 +526,7 @@ function refreshAll() {
 
 // ---------- Arranque ----------
 function main() {
+  setupUser();
   setupTabs();
   setupScanner();
   setupEventButtons();

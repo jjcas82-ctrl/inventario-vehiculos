@@ -8,6 +8,7 @@
 //   agencies: [ { id, name, lat, lng, locations: [string] } ]
 
 const KEY = "inv_vehiculos_v1";
+const USER_KEY = "inv_usuario_actual";
 
 const DEFAULT_LOCATIONS = [
   "Piso 1", "Piso 2", "Piso 3",
@@ -72,11 +73,17 @@ export const store = {
     return db.vehicles[v.vin];
   },
 
+  // ---- Usuario actual (quién registra) ----
+  getUser() { try { return localStorage.getItem(USER_KEY) || ""; } catch (e) { return ""; } },
+  setUser(name) { try { localStorage.setItem(USER_KEY, name || ""); } catch (e) {} },
+
   // ---- Eventos ----
   listEvents() { return read().events; },
   addEvent(ev) {
     const db = read();
-    const rec = { id: cryptoId(), at: new Date().toISOString(), ...ev };
+    const by = ev.by || store.getUser() || "—";
+    const rec = { id: cryptoId(), at: new Date().toISOString(), by, ...ev };
+    rec.by = by; // asegurar que 'by' quede aunque ev no lo trajera
     db.events.push(rec);
     // Actualiza estado del vehículo según el evento
     const v = db.vehicles[ev.vin] || { vin: ev.vin };
@@ -84,10 +91,18 @@ export const store = {
       v.currentAgency = ev.agency;
       v.currentLocation = ev.location;
       v.status = "dentro";
+      if (ev.type === "entry") {
+        // Fecha de ingreso y usuario del ingreso actual
+        v.entryAt = rec.at;
+        v.entryBy = by;
+      }
     } else if (ev.type === "exit") {
       v.status = "fuera";
+      v.exitAt = rec.at;
+      v.exitBy = by;
     }
     if (ev.condition) v.condition = ev.condition;
+    v.lastBy = by;
     db.vehicles[ev.vin] = { ...v, updatedAt: rec.at, createdAt: v.createdAt || rec.at };
     write(db);
     return rec;
