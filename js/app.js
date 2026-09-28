@@ -181,19 +181,24 @@ function setupScanner() {
     ocrBtn.textContent = "Leyendo…";
     try {
       setStatus("Tomando foto y leyendo el texto del VIN…", "muted");
-      const text = await readVinFromVideo(video, { onProgress: (m) => setStatus(m, "muted") });
-      diagLog("OCR bruto: " + JSON.stringify(String(text).slice(0, 60)));
-      const vin = extractVin(text);
+      const { vin, raw } = await readVinFromVideo(video, {
+        onProgress: (m) => setStatus(m, "muted"),
+        onCandidate: (c) => diagLog("OCR leyó: " + JSON.stringify(c)),
+      });
       if (vin) {
         handleScannedText(vin);
         stopCamera();
         setStatus("✓ VIN leído por texto: " + vin, "ok");
       } else {
-        const cleaned = normalizeVin(text);
-        setStatus("No se detectó un VIN de 17 caracteres. Se leyó: “" + cleaned.slice(0, 30) +
-          "”. Acerca más, mejora la luz y reintenta, o corrígelo en la captura manual.", "error");
-        // Rellenamos el campo con lo que se leyó para que el usuario lo corrija fácil.
-        if (cleaned) document.getElementById("vin-input").value = cleaned.slice(0, 17);
+        // No salió exacto: precargamos lo mejor leído para que el usuario lo corrija.
+        const guess = (raw || "").slice(0, 17);
+        setStatus("No salió exacto (17 caracteres). Se leyó: “" + (raw || "—") +
+          "”. Lo puse en el campo para que lo corrijas y pulses “Leer VIN”. Reintenta con más luz/enfoque.", "error");
+        if (guess) {
+          document.getElementById("vin-input").value = guess;
+          // Si por casualidad ya son 17 válidos, lo mostramos decodificado
+          if (guess.length === 17) handleScannedText(guess);
+        }
       }
     } catch (e) {
       setStatus("Error de OCR: " + (e.message || e) + ". Usa la captura manual.", "error");
