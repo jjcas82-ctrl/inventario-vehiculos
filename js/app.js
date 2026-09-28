@@ -13,6 +13,8 @@ import { initReports, renderReports, refreshReportAgencies } from "./reports.js"
 import { notify, confirmDialog, promptDialog, loginDialog } from "./ui.js";
 import * as auth from "./auth.js";
 import { initUsers, renderUsers } from "./users.js";
+import { getPosition } from "./events.js";
+import { nearestAgency } from "./geo.js";
 import "./audit.js";
 
 let currentDecode = null;   // resultado del último VIN decodificado
@@ -142,20 +144,6 @@ function fillEventSelectors() {
       // Sin sububicaciones: la ubicación es la propia área.
       subField.style.display = "none";
       locSel.innerHTML = `<option value="">${escapeHtml(areaSel.value || "")}</option>`;
-    }
-    updateRemoteHint();
-  };
-
-  // Aviso: los "Puntos de venta" son ubicaciones remotas; el GPS del evento
-  // registra dónde está realmente la unidad (Zacatlán, Chignahuapan, etc.).
-  const updateRemoteHint = () => {
-    const gpsStatus = document.getElementById("gps-status");
-    if (!gpsStatus) return;
-    if (/puntos de venta/i.test(areaSel.value)) {
-      gpsStatus.textContent = "📍 Punto de venta remoto: al registrar se guardará la ubicación GPS de la unidad. Verifica el permiso de ubicación.";
-      gpsStatus.style.color = "var(--primary)";
-    } else {
-      gpsStatus.textContent = "";
     }
   };
 
@@ -506,53 +494,95 @@ function setupEventButtons() {
     }
     const vin = currentDecode.vin;
     const existing = store.getVehicle(vin);
-    const agency = document.getElementById("ev-agency").value;
-    const { area, location } = getSelectedLocation();
     const condition = document.getElementById("ev-condition").value;
 
     const status = existing?.status; // "dentro" | "fuera" | undefined
     const curLocation = existing?.currentLocation;
     const curAgency = existing?.currentAgency;
 
-    // === CASO IMPORTANTE: intentan "Entrada" cuando la unidad YA está dentro. ===
-    // Es el error que más confunde, así que aquí SÍ mostramos un diálogo claro,
-    // pero con la acción correcta a un toque (registrar movimiento).
+    // ============ MOVIMIENTO INTERNO: agencia/área elegidas por el capturista ============
+    if (type === "move") {
+      const agency = document.getElementById("ev-agency").value;
+      const { area, location } = getSelectedLocation();
+      if (status !== "dentro") {
+        notify("Nota: la unidad no figuraba dentro. Se registró el movimiento.", { type: "warn", title: "Aviso" });
+      }
+      return finalizeEvent(vin, "move", agency, area, location, condition, existing);
+    }
+
+    // ============ ENTRADA / SALIDA: la AGENCIA se detecta por GPS ============
+    onGps("Detectando ubicación por GPS…", "info");
+    let pos;
+    try {
+      pos = await getPosition();
+    } catch (e) {
+      notify("No se pudo obtener el GPS: " + e.message + ". Activa la ubicación para registrar entradas/salidas.",
+        { type: "error", title: "GPS requerido" });
+      onGps("Sin GPS: " + e.message, "warn");
+      return;
+    }
+
+    const agencies = store.listAgencies().filter(a => a.lat != null && a.lng != null);
+    if (!agencies.length) {
+      notify("No hay agencias con ubicación registrada. Pide al administrador que configure las coordenadas en la pestaña Agencias.",
+        { type: "error", title: "Sin agencias configuradas" });
+      return;
+    }
+    const near = nearestAgency(pos.lat, pos.lng, agencies);
+    if (!near || !near.withinRadius) {
+      const d = near ? Math.round(near.distance) : "—";
+      const cercana = near ? near.agency.name : "—";
+      const choice = await confirmDialog({
+        icon: "📍", title: "Fuera de agencias conocidas",
+        message: `Tu ubicación no coincide con ninguna agencia registrada.\n\n` +
+          `La más cercana es "${cercana}" a ${d} m (fuera del radio).\n\n` +
+          `¿Registrar de todos modos en "${cercana}"?`,
+        buttons: [
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: `Usar "${cercana}"`, value: "force", variant: "primary" },
+        ],
+      });
+      if (choice !== "force" || !near) { onGps("Registro cancelado (fuera de rango).", "warn"); return; }
+    }
+
+    const agency = near.agency.name;
+    onGps(`Agencia detectada: ${agency} (a ${Math.round(near.distance)} m).`, "ok");
+
+    // Para entrada/salida la "ubicación" es la agencia (el área interna es para movimientos).
+    const area = "";
+    const location = agency;
+
+    // Caso: intentan ENTRADA cuando la unidad ya está dentro.
     if (type === "entry" && status === "dentro") {
       const ingreso = existing?.entryAt ? new Date(existing.entryAt).toLocaleString() : "—";
       const quien = existing?.entryBy || existing?.lastBy || "—";
       const choice = await confirmDialog({
-        icon: "🚗",
-        title: "La unidad ya está dentro",
+        icon: "🚗", title: "La unidad ya está dentro",
         message:
           `El VIN ${vin} ya tiene una ENTRADA registrada y no ha salido.\n\n` +
           `📍 Ubicación actual: ${curLocation || "—"} (${curAgency || "—"})\n` +
-          `📅 Ingreso: ${ingreso}\n` +
-          `👤 Registró: ${quien}\n\n` +
-          `¿Deseas registrar un MOVIMIENTO interno a "${location}"?`,
+          `📅 Ingreso: ${ingreso}\n👤 Registró: ${quien}\n\n` +
+          `Si la unidad realmente reingresó, confirma para registrar la nueva entrada en "${agency}".`,
         buttons: [
-          { label: "Cancelar", value: "cancel", variant: "ghost" },
-          { label: `Mover a ${location}`, value: "move", variant: "primary" },
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: "Registrar entrada", value: "entry", variant: "primary" },
         ],
       });
-      if (choice !== "move") { notify("No se registró nada. Verifica la unidad.", { type: "info" }); return; }
-      return finalizeEvent(vin, "move", agency, area, location, condition, existing);
+      if (choice !== "entry") { notify("No se registró nada. Verifica la unidad.", { type: "info" }); return; }
     }
 
-    // === Casos menores: NO bloqueamos con diálogo. Registramos y avisamos suave. ===
-    // (Evita la sensación de "muchos mensajes de error".)
     if (type === "exit" && status === "fuera") {
       notify("Nota: esta unidad ya figuraba fuera. Se registró la salida igualmente.", { type: "warn", title: "Aviso" });
     } else if (type === "exit" && !existing) {
       notify("Nota: no había entrada previa de esta unidad. Se registró la salida.", { type: "warn", title: "Aviso" });
-    } else if (type === "move" && status !== "dentro") {
-      notify("Nota: la unidad no figuraba dentro. Se registró el movimiento.", { type: "warn", title: "Aviso" });
     }
 
-    return finalizeEvent(vin, type, agency, area, location, condition, existing);
+    // Pasamos la posición ya capturada para no volver a pedir GPS.
+    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos);
   };
 
   // Guarda datos básicos del VIN (1ª vez) y registra el evento.
-  const finalizeEvent = async (vin, type, agency, area, location, condition, existing) => {
+  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos) => {
     if (!existing) {
       store.upsertVehicle({
         vin,
@@ -568,7 +598,7 @@ function setupEventButtons() {
       if (!auth.can("event.register")) return;
     }
     const by = auth.currentUser()?.name || store.getUser() || "—";
-    await registerEvent({ vin, type, agency, area, location, condition, by }, onGps);
+    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
     notify(`${labels[type]} registrada por ${by || "—"}.`, { type: "success", title: vin });
     refreshAll();

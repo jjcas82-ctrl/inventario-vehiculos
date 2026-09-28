@@ -74,18 +74,7 @@
           <div id="event-form" hidden>
             <hr />
             <h3>Registrar evento</h3>
-            <div class="field">
-              <label for="ev-agency">Agencia</label>
-              <select id="ev-agency"></select>
-            </div>
-            <div class="field">
-              <label for="ev-area">Área</label>
-              <select id="ev-area"></select>
-            </div>
-            <div class="field" id="ev-sub-field">
-              <label for="ev-location">Ubicación</label>
-              <select id="ev-location"></select>
-            </div>
+
             <div class="field">
               <label for="ev-condition">Condición</label>
               <select id="ev-condition">
@@ -93,11 +82,35 @@
                 <option value="usado">Usado</option>
               </select>
             </div>
-            <p id="gps-status" class="hint"></p>
-            <div class="row gap wrap">
-              <button id="ev-entry" class="btn btn-primary">Registrar entrada</button>
+
+            <!-- ENTRADA / SALIDA: la agencia la determina el GPS automáticamente -->
+            <div class="loc-card">
+              <b>Entrada / Salida</b>
+              <p class="hint" style="margin-top:2px">📍 La agencia se detecta <b>automáticamente por GPS</b>. No se selecciona manualmente.</p>
+              <p id="gps-status" class="hint"></p>
+              <div class="row gap wrap">
+                <button id="ev-entry" class="btn btn-primary">Registrar entrada</button>
+                <button id="ev-exit" class="btn btn-danger">Registrar salida</button>
+              </div>
+            </div>
+
+            <!-- MOVIMIENTO INTERNO: el capturista elige el área manualmente -->
+            <div class="loc-card" style="margin-top:12px">
+              <b>Movimiento interno</b>
+              <p class="hint" style="margin-top:2px">El capturista elige el área dentro de la agencia (el GPS no distingue áreas cercanas).</p>
+              <div class="field">
+                <label for="ev-agency">Agencia</label>
+                <select id="ev-agency"></select>
+              </div>
+              <div class="field">
+                <label for="ev-area">Área</label>
+                <select id="ev-area"></select>
+              </div>
+              <div class="field" id="ev-sub-field">
+                <label for="ev-location">Ubicación</label>
+                <select id="ev-location"></select>
+              </div>
               <button id="ev-move" class="btn">Registrar movimiento</button>
-              <button id="ev-exit" class="btn btn-danger">Registrar salida</button>
             </div>
           </div>
         </div>

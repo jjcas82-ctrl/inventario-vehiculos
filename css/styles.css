@@ -151,6 +151,7 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 .agency { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
 .agency-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .loc-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.loc-card { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-top: 8px; }
 .loc-chip { font-size: 12px; padding: 4px 8px; background: #f1f5f9; border-radius: 999px; }
 
 .ficha-meta { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px; }
