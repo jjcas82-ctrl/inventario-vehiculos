@@ -516,41 +516,51 @@ function setupEventButtons() {
     try {
       pos = await getPosition();
     } catch (e) {
-      notify("No se pudo obtener el GPS: " + e.message + ". Activa la ubicación para registrar entradas/salidas.",
-        { type: "error", title: "GPS requerido" });
+      // ---- Contingencia: el GPS falló. Ofrecer reintentar o registro manual. ----
+      pos = null;
       onGps("Sin GPS: " + e.message, "warn");
-      return;
     }
 
-    const agencies = store.listAgencies().filter(a => a.lat != null && a.lng != null);
-    if (!agencies.length) {
-      notify("No hay agencias con ubicación registrada. Pide al administrador que configure las coordenadas en la pestaña Agencias.",
-        { type: "error", title: "Sin agencias configuradas" });
-      return;
-    }
-    const near = nearestAgency(pos.lat, pos.lng, agencies);
-    if (!near || !near.withinRadius) {
-      const d = near ? Math.round(near.distance) : "—";
-      const cercana = near ? near.agency.name : "—";
-      const choice = await confirmDialog({
-        icon: "📍", title: "Fuera de agencias conocidas",
-        message: `Tu ubicación no coincide con ninguna agencia registrada.\n\n` +
-          `La más cercana es "${cercana}" a ${d} m (fuera del radio).\n\n` +
-          `¿Registrar de todos modos en "${cercana}"?`,
-        buttons: [
-          { label: "Cancelar", value: null, variant: "ghost" },
-          { label: `Usar "${cercana}"`, value: "force", variant: "primary" },
-        ],
-      });
-      if (choice !== "force" || !near) { onGps("Registro cancelado (fuera de rango).", "warn"); return; }
-    }
+    let agency, sinGps = false;
+    const area = "";        // el área interna es para movimientos
+    let location;
 
-    const agency = near.agency.name;
-    onGps(`Agencia detectada: ${agency} (a ${Math.round(near.distance)} m).`, "ok");
-
-    // Para entrada/salida la "ubicación" es la agencia (el área interna es para movimientos).
-    const area = "";
-    const location = agency;
+    if (pos) {
+      // GPS OK → detectar agencia por cercanía.
+      const agencies = store.listAgencies().filter(a => a.lat != null && a.lng != null);
+      if (!agencies.length) {
+        notify("No hay agencias con ubicación registrada. Pide al administrador que configure las coordenadas en Agencias.",
+          { type: "error", title: "Sin agencias configuradas" });
+        return;
+      }
+      const near = nearestAgency(pos.lat, pos.lng, agencies);
+      if (!near || !near.withinRadius) {
+        const d = near ? Math.round(near.distance) : "—";
+        const cercana = near ? near.agency.name : "—";
+        const choice = await confirmDialog({
+          icon: "📍", title: "Fuera de agencias conocidas",
+          message: `Tu ubicación no coincide con ninguna agencia registrada.\n\n` +
+            `La más cercana es "${cercana}" a ${d} m (fuera del radio).\n\n¿Registrar de todos modos en "${cercana}"?`,
+          buttons: [
+            { label: "Cancelar", value: null, variant: "ghost" },
+            { label: `Usar "${cercana}"`, value: "force", variant: "primary" },
+          ],
+        });
+        if (choice !== "force" || !near) { onGps("Registro cancelado (fuera de rango).", "warn"); return; }
+      }
+      agency = near.agency.name;
+      location = agency;
+      onGps(`Agencia detectada: ${agency} (a ${Math.round(near.distance)} m).`, "ok");
+    } else {
+      // ---- Modo contingencia: sin GPS → elegir reintentar o agencia manual ----
+      const cont = await contingencyLocation(type);
+      if (!cont) { onGps("Registro cancelado.", "warn"); return; }
+      if (cont.retry) return doEvent(type); // reintentar todo el flujo (vuelve a pedir GPS)
+      agency = cont.agency;
+      location = agency;
+      sinGps = true;
+      onGps(`⚠️ Registro en CONTINGENCIA (sin GPS) — agencia: ${agency}.`, "warn");
+    }
 
     // Caso: intentan ENTRADA cuando la unidad ya está dentro.
     if (type === "entry" && status === "dentro") {
@@ -578,11 +588,11 @@ function setupEventButtons() {
     }
 
     // Pasamos la posición ya capturada para no volver a pedir GPS.
-    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos);
+    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos, sinGps);
   };
 
   // Guarda datos básicos del VIN (1ª vez) y registra el evento.
-  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos) => {
+  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos, sinGps = false) => {
     if (!existing) {
       store.upsertVehicle({
         vin,
@@ -598,11 +608,33 @@ function setupEventButtons() {
       if (!auth.can("event.register")) return;
     }
     const by = auth.currentUser()?.name || store.getUser() || "—";
-    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos }, onGps);
+    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
-    notify(`${labels[type]} registrada por ${by || "—"}.`, { type: "success", title: vin });
+    notify(`${labels[type]} registrada por ${by || "—"}${sinGps ? " (contingencia sin GPS)" : ""}.`,
+      { type: sinGps ? "warn" : "success", title: vin });
     refreshAll();
   };
+
+  // Diálogo de contingencia: sin GPS, ofrece reintentar o elegir agencia manual.
+  async function contingencyLocation(type) {
+    const label = type === "entry" ? "entrada" : "salida";
+    const agencies = store.listAgencies();
+    // Construimos los botones: reintentar + una opción por agencia (máx. 5) + cancelar.
+    const buttons = [{ label: "🔄 Reintentar GPS", value: "__retry", variant: "primary" }];
+    agencies.slice(0, 5).forEach(a => buttons.push({ label: "📍 " + a.name, value: a.name, variant: "ghost" }));
+    buttons.push({ label: "Cancelar", value: null, variant: "ghost" });
+
+    const choice = await confirmDialog({
+      icon: "⚠️", title: "GPS no disponible",
+      message: `No se pudo obtener la ubicación para registrar la ${label}.\n\n` +
+        `Puedes reintentar el GPS o, si es una contingencia, seleccionar la agencia manualmente. ` +
+        `El registro quedará MARCADO como "sin GPS" para revisión del administrador.`,
+      buttons,
+    });
+    if (!choice) return null;
+    if (choice === "__retry") return { retry: true };
+    return { agency: choice };
+  }
 
   document.getElementById("ev-entry").addEventListener("click", () => doEvent("entry"));
   document.getElementById("ev-move").addEventListener("click", () => doEvent("move"));
@@ -671,6 +703,25 @@ function setupInstall() {
   window.addEventListener("appinstalled", () => (btn.hidden = true));
 }
 
+// ---------- Indicador de conexión (online/offline) ----------
+function setupConnectivity() {
+  const badge = document.getElementById("online-badge");
+  const update = () => {
+    if (navigator.onLine) {
+      badge.textContent = "En línea";
+      badge.style.background = "rgba(255,255,255,.25)";
+      badge.title = "Con conexión a internet";
+    } else {
+      badge.textContent = "⚠️ Sin conexión";
+      badge.style.background = "#b45309";
+      badge.title = "Trabajando sin internet — los registros se guardan localmente";
+    }
+  };
+  window.addEventListener("online", () => { update(); notify("Conexión restablecida.", { type: "success" }); });
+  window.addEventListener("offline", () => { update(); notify("Sin conexión: seguirás trabajando localmente (GPS y registros funcionan).", { type: "warn", timeout: 5000 }); });
+  update();
+}
+
 // ---------- Service Worker ----------
 function setupServiceWorker() {
   if ("serviceWorker" in navigator) {
@@ -698,6 +749,7 @@ function main() {
   setupEventButtons();
   setupDataButtons();
   setupInstall();
+  setupConnectivity();
   setupServiceWorker();
 
   initAgencies(refreshAll);

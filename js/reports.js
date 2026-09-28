@@ -88,7 +88,7 @@ function buildData() {
     }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
   }
   else if (type === "flow") {
-    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Registró"];
+    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Registró", "GPS"];
     rows = store.listEvents().filter(e => {
       const d = new Date(e.at);
       if (from && d < from) return false;
@@ -98,6 +98,7 @@ function buildData() {
       return true;
     }).sort((a, b) => b.at.localeCompare(a.at)).map(e => [
       new Date(e.at).toLocaleString(), EVENT_LABELS[e.type] || e.type, e.vin, e.agency || "", e.location || "", e.by || "—",
+      e.sinGps ? "⚠️ Sin GPS" : "OK",
     ]);
   }
   else if (type === "incomplete") {

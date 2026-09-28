@@ -153,6 +153,7 @@ export const store = {
     }
     if (ev.condition) v.condition = ev.condition;
     v.lastBy = by;
+    v.lastSinGps = !!ev.sinGps; // marca si el último evento fue en contingencia (sin GPS)
     db.vehicles[ev.vin] = { ...v, updatedAt: rec.at, createdAt: v.createdAt || rec.at };
     write(db);
     return rec;
