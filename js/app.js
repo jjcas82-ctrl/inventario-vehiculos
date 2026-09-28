@@ -585,14 +585,33 @@ function setupEventButtons() {
       location = agency;
       onGps(`Agencia detectada: ${agency} (a ${Math.round(near.distance)} m).`, "ok");
     } else {
-      // ---- Modo contingencia: sin GPS → elegir reintentar o agencia manual ----
+      // ---- GPS falló ----
+      // El registro manual (contingencia) SOLO se habilita si NO hay internet.
+      // Con internet, un fallo de GPS solo permite reintentar (no es contingencia real).
+      if (navigator.onLine) {
+        const choice = await confirmDialog({
+          icon: "📡", title: "GPS no disponible",
+          message: "No se pudo obtener la ubicación por GPS.\n\n" +
+            "Como hay conexión a internet, activa/permite la ubicación del dispositivo y reintenta. " +
+            "El registro manual solo se habilita cuando no hay servicio de internet (contingencia).",
+          buttons: [
+            { label: "Cancelar", value: null, variant: "ghost" },
+            { label: "🔄 Reintentar GPS", value: "retry", variant: "primary" },
+          ],
+        });
+        if (choice === "retry") return doEvent(type);
+        onGps("Registro cancelado (activa la ubicación y reintenta).", "warn");
+        return;
+      }
+
+      // Sin internet Y sin GPS → contingencia real: permitir agencia manual.
       const cont = await contingencyLocation(type);
       if (!cont) { onGps("Registro cancelado.", "warn"); return; }
       if (cont.retry) return doEvent(type); // reintentar todo el flujo (vuelve a pedir GPS)
       agency = cont.agency;
       location = agency;
       sinGps = true;
-      onGps(`⚠️ Registro en CONTINGENCIA (sin GPS) — agencia: ${agency}.`, "warn");
+      onGps(`⚠️ Registro en CONTINGENCIA (sin internet ni GPS) — agencia: ${agency}.`, "warn");
     }
 
     // Caso: intentan ENTRADA cuando la unidad ya está dentro.
@@ -657,9 +676,9 @@ function setupEventButtons() {
     buttons.push({ label: "Cancelar", value: null, variant: "ghost" });
 
     const choice = await confirmDialog({
-      icon: "⚠️", title: "GPS no disponible",
-      message: `No se pudo obtener la ubicación para registrar la ${label}.\n\n` +
-        `Puedes reintentar el GPS o, si es una contingencia, seleccionar la agencia manualmente. ` +
+      icon: "⚠️", title: "Contingencia: sin internet ni GPS",
+      message: `No hay servicio de internet ni se pudo obtener el GPS para registrar la ${label}.\n\n` +
+        `Puedes reintentar el GPS o seleccionar la agencia manualmente. ` +
         `El registro quedará MARCADO como "sin GPS" para revisión del administrador.`,
       buttons,
     });
