@@ -240,8 +240,46 @@ function showVinResult(dec) {
 
   // Mostrar formulario de evento sólo si el VIN tiene 17 caracteres válidos de formato
   const form = document.getElementById("event-form");
-  form.hidden = dec.vin.length !== 17 || dec.errors.some(e => e.includes("caracteres no válidos") || e.includes("17"));
+  const valido = dec.vin.length === 17 && !dec.errors.some(e => e.includes("caracteres no válidos") || e.includes("17"));
+  form.hidden = !valido;
   fillEventSelectors();
+  if (valido) updateEventButtons(dec.vin);
+}
+
+// Ajusta qué botones/secciones se muestran según el ESTADO de la unidad:
+//  - No registrada / fuera → solo ENTRADA (Movimiento interno oculto).
+//  - Dentro → MOVIMIENTO interno y SALIDA (Entrada oculta).
+function updateEventButtons(vin) {
+  const v = store.getVehicle(vin);
+  const status = v?.status; // "dentro" | "fuera" | undefined
+  const entryBtn = document.getElementById("ev-entry");
+  const exitBtn = document.getElementById("ev-exit");
+  const moveCard = document.getElementById("move-card");
+  const entryExitCard = document.getElementById("entry-exit-card");
+
+  const dentro = status === "dentro";
+  // Entrada: solo si NO está dentro. Salida: solo si está dentro.
+  entryBtn.style.display = dentro ? "none" : "";
+  exitBtn.style.display = dentro ? "" : "none";
+  // El apartado de movimiento interno solo aparece si la unidad está dentro.
+  if (moveCard) moveCard.style.display = dentro ? "" : "none";
+  // La tarjeta de entrada/salida se muestra siempre (para entrada nueva o salida).
+  if (entryExitCard) entryExitCard.style.display = "";
+
+  // Info de estado actual
+  const info = document.getElementById("ev-status-info");
+  if (info) {
+    if (dentro) {
+      info.textContent = `🚗 Unidad DENTRO en: ${v.currentLocation || "—"} (${v.currentAgency || "—"}). Puedes moverla internamente o registrar su salida.`;
+      info.style.color = "var(--primary)";
+    } else if (status === "fuera") {
+      info.textContent = "La unidad figura FUERA. Puedes registrar su entrada.";
+      info.style.color = "var(--muted)";
+    } else {
+      info.textContent = "Unidad nueva (sin registro previo). Registra su entrada.";
+      info.style.color = "var(--muted)";
+    }
+  }
 }
 
 // Intenta extraer un VIN de 17 caracteres de un texto (el QR/código puede traer
@@ -543,6 +581,38 @@ function setupEventButtons() {
       return finalizeEvent(vin, "move", agency, area, location, condition, existing);
     }
 
+    // Si intentan ENTRADA y la unidad YA está dentro: ofrecer movimiento interno
+    // (en vez de pedir GPS y registrar otra entrada).
+    if (type === "entry" && status === "dentro") {
+      const ingreso = existing?.entryAt ? new Date(existing.entryAt).toLocaleString() : "—";
+      const quien = existing?.entryBy || existing?.lastBy || "—";
+      const choice = await confirmDialog({
+        icon: "🚗", title: "La unidad ya está dentro",
+        message:
+          `El VIN ${vin} ya tiene una ENTRADA registrada y no ha salido.\n\n` +
+          `📍 Ubicación actual: ${curLocation || "—"} (${curAgency || "—"})\n` +
+          `📅 Ingreso: ${ingreso}\n👤 Registró: ${quien}\n\n` +
+          `¿Deseas registrar un MOVIMIENTO interno para actualizar su ubicación?`,
+        buttons: [
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: "Registrar movimiento interno", value: "move", variant: "primary" },
+        ],
+      });
+      if (choice === "move") {
+        // Mostrar y resaltar el apartado de movimiento interno.
+        const moveCard = document.getElementById("move-card");
+        if (moveCard) {
+          moveCard.style.display = "";
+          moveCard.scrollIntoView({ behavior: "smooth", block: "center" });
+          moveCard.classList.add("pulse");
+          setTimeout(() => moveCard.classList.remove("pulse"), 1500);
+        }
+      } else {
+        notify("No se registró nada. Verifica la unidad.", { type: "info" });
+      }
+      return;
+    }
+
     // ============ ENTRADA / SALIDA: la AGENCIA se detecta por GPS ============
     onGps("Detectando ubicación por GPS…", "info");
     let pos;
@@ -614,25 +684,6 @@ function setupEventButtons() {
       onGps(`⚠️ Registro en CONTINGENCIA (sin internet ni GPS) — agencia: ${agency}.`, "warn");
     }
 
-    // Caso: intentan ENTRADA cuando la unidad ya está dentro.
-    if (type === "entry" && status === "dentro") {
-      const ingreso = existing?.entryAt ? new Date(existing.entryAt).toLocaleString() : "—";
-      const quien = existing?.entryBy || existing?.lastBy || "—";
-      const choice = await confirmDialog({
-        icon: "🚗", title: "La unidad ya está dentro",
-        message:
-          `El VIN ${vin} ya tiene una ENTRADA registrada y no ha salido.\n\n` +
-          `📍 Ubicación actual: ${curLocation || "—"} (${curAgency || "—"})\n` +
-          `📅 Ingreso: ${ingreso}\n👤 Registró: ${quien}\n\n` +
-          `Si la unidad realmente reingresó, confirma para registrar la nueva entrada en "${agency}".`,
-        buttons: [
-          { label: "Cancelar", value: null, variant: "ghost" },
-          { label: "Registrar entrada", value: "entry", variant: "primary" },
-        ],
-      });
-      if (choice !== "entry") { notify("No se registró nada. Verifica la unidad.", { type: "info" }); return; }
-    }
-
     if (type === "exit" && status === "fuera") {
       notify("Nota: esta unidad ya figuraba fuera. Se registró la salida igualmente.", { type: "warn", title: "Aviso" });
     } else if (type === "exit" && !existing) {
@@ -664,6 +715,8 @@ function setupEventButtons() {
     notify(`${labels[type]} registrada por ${by || "—"}${sinGps ? " (contingencia sin GPS)" : ""}.`,
       { type: sinGps ? "warn" : "success", title: vin });
     refreshAll();
+    // Actualiza los botones según el nuevo estado de la unidad.
+    if (currentDecode && currentDecode.vin === vin) updateEventButtons(vin);
   };
 
   // Diálogo de contingencia: sin GPS, ofrece reintentar o elegir agencia manual.
@@ -690,6 +743,24 @@ function setupEventButtons() {
   document.getElementById("ev-entry").addEventListener("click", () => doEvent("entry"));
   document.getElementById("ev-move").addEventListener("click", () => doEvent("move"));
   document.getElementById("ev-exit").addEventListener("click", () => doEvent("exit"));
+  document.getElementById("ev-new").addEventListener("click", nuevoRegistro);
+}
+
+// Limpia la pantalla para escanear/registrar otra unidad desde cero.
+function nuevoRegistro() {
+  currentDecode = null;
+  document.getElementById("vin-input").value = "";
+  document.getElementById("vin-result").innerHTML =
+    '<p class="muted">Escanea o escribe un VIN para ver sus datos.</p>';
+  document.getElementById("event-form").hidden = true;
+  const diag = document.getElementById("scan-diag");
+  if (diag) { diag.hidden = true; diag.textContent = ""; }
+  const st = document.getElementById("scan-status");
+  if (st) st.textContent = "";
+  const gps = document.getElementById("gps-status");
+  if (gps) gps.textContent = "";
+  document.getElementById("vin-input").focus();
+  notify("Listo para un nuevo registro.", { type: "info", timeout: 1500 });
 }
 
 // ---------- Respaldo de datos ----------
