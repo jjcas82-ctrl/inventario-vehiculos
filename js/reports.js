@@ -2,13 +2,14 @@
 import { store } from "./storage.js";
 import { escapeHtml } from "./agencies.js";
 import { EVENT_LABELS } from "./events.js";
+import { allStages } from "./stages.js";
 
 let lastRows = [];   // filas actuales (para copiar/exportar)
 let lastCols = [];   // columnas actuales
 let sortState = { col: null, dir: 1 };
 
 export function initReports() {
-  const ids = ["rep-type", "rep-agency", "rep-condition", "rep-from", "rep-to", "rep-days", "rep-search"];
+  const ids = ["rep-type", "rep-agency", "rep-condition", "rep-stage", "rep-from", "rep-to", "rep-days", "rep-search"];
   ids.forEach(id => {
     const el = document.getElementById(id);
     el.addEventListener("input", render);
@@ -17,6 +18,10 @@ export function initReports() {
   document.getElementById("rep-print").addEventListener("click", () => window.print());
   document.getElementById("rep-copy").addEventListener("click", copyForExcel);
   document.getElementById("rep-csv").addEventListener("click", exportCsv);
+  // Poblar filtro de etapa
+  const stSel = document.getElementById("rep-stage");
+  if (stSel) stSel.innerHTML = '<option value="">Todas</option>' +
+    allStages().map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
   refreshReportAgencies();
   render();
 }
@@ -46,6 +51,7 @@ function buildData() {
   const type = document.getElementById("rep-type").value;
   const agency = document.getElementById("rep-agency").value;
   const condition = document.getElementById("rep-condition").value;
+  const stage = document.getElementById("rep-stage") ? document.getElementById("rep-stage").value : "";
   const from = document.getElementById("rep-from").value ? new Date(document.getElementById("rep-from").value) : null;
   const to = document.getElementById("rep-to").value ? new Date(document.getElementById("rep-to").value + "T23:59:59") : null;
   const minDays = parseInt(document.getElementById("rep-days").value, 10) || 0;
@@ -55,6 +61,7 @@ function buildData() {
   const matchVehicle = (v) => {
     if (agency && v.currentAgency !== agency) return false;
     if (condition && v.condition !== condition) return false;
+    if (stage && v.stage !== stage) return false;
     if (q && ![v.vin, v.make, v.model, v.color, v.plate].filter(Boolean)
       .some(f => String(f).toLowerCase().includes(q))) return false;
     return true;
@@ -64,14 +71,27 @@ function buildData() {
 
   if (type === "inventory") {
     cols = ["VIN", "Marca", "Modelo", "Año modelo", "Color", "No. de motor", "Kilometraje", "Tipo",
-            "Ubicación", "Condición", "Agencia", "Ingreso", "Registró", "Estado"];
+            "Ubicación", "Etapa", "Condición", "Agencia", "Ingreso", "Registró", "Estado"];
     rows = store.listVehicles().filter(v => v.status !== "fuera").filter(matchVehicle).map(v => [
       v.vin, v.make || "", v.model || "", v.year || "", v.color || "",
       v.engineNo || "", (v.mileage != null && v.mileage !== "" ? v.mileage : ""), v.vehType || v.bodyClass || "",
-      v.currentLocation || "", v.condition || "", v.currentAgency || "",
+      v.currentLocation || "", v.stage || "", v.condition || "", v.currentAgency || "",
       v.entryAt ? new Date(v.entryAt).toLocaleString() : "", v.entryBy || v.lastBy || "",
       v.status || "",
     ]);
+  }
+  else if (type === "stages") {
+    // Resumen: cuántas unidades dentro hay en cada etapa.
+    cols = ["Etapa", "Unidades", "Nuevos", "Usados"];
+    const dentro = store.listVehicles().filter(v => v.status !== "fuera").filter(matchVehicle);
+    const byStage = {};
+    dentro.forEach(v => {
+      const s = v.stage || "Sin etapa";
+      byStage[s] = byStage[s] || { total: 0, nuevo: 0, usado: 0 };
+      byStage[s].total++;
+      if (v.condition === "usado") byStage[s].usado++; else byStage[s].nuevo++;
+    });
+    rows = Object.entries(byStage).map(([s, c]) => [s, c.total, c.nuevo, c.usado]);
   }
   else if (type === "aging") {
     cols = ["VIN", "Marca", "Modelo", "Agencia", "Ubicación", "Días en inventario"];

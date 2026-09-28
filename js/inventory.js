@@ -5,6 +5,7 @@ import { EVENT_LABELS } from "./events.js";
 import * as auth from "./auth.js";
 import { notify, confirmDialog } from "./ui.js";
 import { decodeVin } from "./vin.js";
+import { stagesFor } from "./stages.js";
 
 let onChange = () => {};
 
@@ -50,6 +51,7 @@ export function renderInventory() {
       <td>${escapeHtml(v.mileage != null && v.mileage !== "" ? Number(v.mileage).toLocaleString() + " km" : "")}</td>
       <td>${escapeHtml(v.vehType || v.bodyClass || "")}</td>
       <td>${escapeHtml(v.currentLocation || "")}</td>
+      <td>${v.stage ? `<span class="tag" style="background:#dbeafe;color:#1e40af">${escapeHtml(v.stage)}</span>` : ""}</td>
       <td>${escapeHtml(v.condition || "")}</td>
       <td>${escapeHtml(v.currentAgency || "")}</td>
       <td>${escapeHtml(v.entryAt ? new Date(v.entryAt).toLocaleString() : "")}</td>
@@ -138,6 +140,12 @@ export function openVehicle(vin) {
             <option value="usado" ${v.condition==="usado"?"selected":""}>Usado</option>
           </select>
         </div>
+        <div class="field"><label>Etapa (estatus comercial)</label>
+          <select id="f-stage" ${dis}>
+            ${stagesFor(v.condition).map(s => `<option value="${escapeHtml(s)}" ${v.stage===s?"selected":""}>${escapeHtml(s)}</option>`).join("")}
+          </select>
+          ${v.stageAt ? `<p class="hint">Última actualización: ${new Date(v.stageAt).toLocaleString()} · 👤 ${escapeHtml(v.stageBy || "—")}</p>` : ""}
+        </div>
         <div class="field"><label>Notas</label>
           <textarea id="f-notes" rows="3" ${dis} style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">${escapeHtml(v.notes || "")}</textarea>
         </div>
@@ -147,7 +155,21 @@ export function openVehicle(vin) {
     <hr />
     <h3>Historial de movimientos</h3>
     <ul>${timeline || '<li class="muted">Sin eventos.</li>'}</ul>
+    ${(v.stageHistory && v.stageHistory.length) ? `
+      <h3>Historial de etapas</h3>
+      <ul>${v.stageHistory.slice().reverse().map(h =>
+        `<li><b>${escapeHtml(h.stage)}</b>${h.from ? ` <span class="muted">(desde ${escapeHtml(h.from)})</span>` : ""}<br>
+         <span class="muted">${new Date(h.at).toLocaleString()} · 👤 ${escapeHtml(h.by || "—")}</span></li>`).join("")}</ul>` : ""}
   `;
+
+  // Al cambiar la condición, actualizar las opciones de etapa (nuevo/usado difieren).
+  const condSel = body.querySelector("#f-condition");
+  const stageSel = body.querySelector("#f-stage");
+  if (condSel && stageSel) condSel.addEventListener("change", () => {
+    const actual = stageSel.value;
+    const opciones = stagesFor(condSel.value);
+    stageSel.innerHTML = opciones.map(s => `<option value="${escapeHtml(s)}" ${actual===s?"selected":""}>${escapeHtml(s)}</option>`).join("");
+  });
 
   const saveBtn = body.querySelector("#save-veh");
   if (saveBtn) saveBtn.addEventListener("click", () => {
@@ -164,6 +186,10 @@ export function openVehicle(vin) {
       condition: body.querySelector("#f-condition").value,
       notes: body.querySelector("#f-notes").value.trim(),
     });
+    // La etapa se guarda aparte para llevar bitácora de quién/cuándo la cambió.
+    const nuevaEtapa = body.querySelector("#f-stage").value;
+    const quien = auth.currentUser()?.name || "—";
+    store.setStage(vin, nuevaEtapa, quien);
     closeModal();
     renderInventory();
     onChange();

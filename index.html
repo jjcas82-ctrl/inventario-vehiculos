@@ -151,7 +151,7 @@
               <tr>
                 <th>VIN</th><th>Marca</th><th>Modelo</th><th>Año modelo</th>
                 <th>Color</th><th>No. de motor</th><th>Kilometraje</th><th>Tipo</th>
-                <th>Ubicación</th><th>Condición</th><th>Agencia</th>
+                <th>Ubicación</th><th>Etapa</th><th>Condición</th><th>Agencia</th>
                 <th>Ingreso</th><th>Registró</th><th>Estado</th><th></th>
               </tr>
             </thead>
@@ -184,6 +184,7 @@
             <label for="rep-type">Reporte</label>
             <select id="rep-type">
               <option value="inventory">Inventario actual</option>
+              <option value="stages">Resumen por etapa</option>
               <option value="aging">Antigüedad en inventario</option>
               <option value="idle">Unidades sin movimiento</option>
               <option value="flow">Entradas y salidas por periodo</option>
@@ -195,6 +196,7 @@
             <label for="rep-condition">Condición</label>
             <select id="rep-condition"><option value="">Todas</option><option value="nuevo">Nuevo</option><option value="usado">Usado</option></select>
           </div>
+          <div class="field"><label for="rep-stage">Etapa</label><select id="rep-stage"><option value="">Todas</option></select></div>
           <div class="field"><label for="rep-from">Desde</label><input id="rep-from" type="date" /></div>
           <div class="field"><label for="rep-to">Hasta</label><input id="rep-to" type="date" /></div>
           <div class="field"><label for="rep-days">Días mínimos</label><input id="rep-days" type="number" min="0" placeholder="0" /></div>

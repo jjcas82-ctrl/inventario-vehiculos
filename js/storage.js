@@ -188,6 +188,13 @@ export const store = {
         // Fecha de ingreso y usuario del ingreso actual
         v.entryAt = rec.at;
         v.entryBy = by;
+        // Etapa inicial al ingresar (si no tenía una).
+        if (!v.stage) {
+          v.stage = "Recepción";
+          v.stageAt = rec.at;
+          v.stageBy = by;
+          v.stageHistory = (v.stageHistory || []).concat([{ stage: "Recepción", by, at: rec.at, from: null }]);
+        }
       }
     } else if (ev.type === "exit") {
       v.status = "fuera";
@@ -219,6 +226,24 @@ export const store = {
     const db = read();
     db.agencies = db.agencies.filter(x => x.id !== id);
     write(db);
+  },
+
+  // Actualiza la etapa (estatus comercial) del vehículo, con bitácora quién/cuándo.
+  setStage(vin, stage, by) {
+    const db = read();
+    const v = db.vehicles[vin];
+    if (!v) return null;
+    const now = new Date().toISOString();
+    if (v.stage !== stage) {
+      v.stageHistory = v.stageHistory || [];
+      v.stageHistory.push({ stage, by: by || "—", at: now, from: v.stage || null });
+      v.stage = stage;
+      v.stageAt = now;
+      v.stageBy = by || "—";
+      v.updatedAt = now;
+      write(db);
+    }
+    return v;
   },
 
   // Cambia el VIN (clave) de un vehículo y actualiza sus eventos. Solo admin en la UI.
