@@ -64,15 +64,39 @@ function showVinResult(dec) {
     ? '<span class="chk-ok">✓ Coincide</span>'
     : '<span class="chk-bad">✗ No coincide</span>';
 
+  // Resalta cada sección del VIN con color, como en el diagrama del VIN.
+  const v = dec.vin;
+  const seg = (a, b, cls) => `<span class="vinseg ${cls}">${escapeHtml(v.slice(a, b))}</span>`;
+  const vinColored = v.length === 17
+    ? seg(0,3,"s-wmi") + seg(3,8,"s-vds") + seg(8,9,"s-chk") + seg(9,10,"s-year") + seg(10,11,"s-plant") + seg(11,17,"s-serial")
+    : `<code>${escapeHtml(v)}</code>`;
+
+  const rows = (dec.breakdown || []).map(b => `
+    <tr>
+      <td class="vinpos">${escapeHtml(b.pos)}</td>
+      <td><code>${escapeHtml(b.value)}</code></td>
+      <td>${escapeHtml(b.label)}</td>
+      <td class="muted">${escapeHtml(b.detail || "")}</td>
+    </tr>`).join("");
+
   box.innerHTML = `
+    <div class="vin-colored">${vinColored}</div>
     <dl>
-      <dt>VIN</dt><dd><code>${escapeHtml(dec.vin)}</code></dd>
       <dt>Marca</dt><dd>${escapeHtml(dec.make || "—")}</dd>
-      <dt>Año</dt><dd>${escapeHtml(dec.year || "—")}</dd>
-      <dt>País</dt><dd>${escapeHtml(dec.country || "—")}</dd>
-      <dt>Serie (VIS)</dt><dd><code>${escapeHtml(dec.vis || "—")}</code></dd>
-      <dt>Dígito verificador</dt><dd>${chk}</dd>
+      <dt>Año del modelo</dt><dd>${escapeHtml(dec.year || "—")}</dd>
+      <dt>País de origen</dt><dd>${escapeHtml(dec.country || "—")}</dd>
+      <dt>Planta (pos. 11)</dt><dd><code>${escapeHtml(dec.plant || "—")}</code></dd>
+      <dt>N.º de serie (12-17)</dt><dd><code>${escapeHtml(dec.serial || "—")}</code></dd>
+      <dt>Dígito de control</dt><dd>${chk}${dec.checkDigit.expected && !dec.checkDigit.ok ? ` <span class="muted">(esperado ${escapeHtml(dec.checkDigit.expected)})</span>` : ""}</dd>
     </dl>
+    ${dec.breakdown && dec.breakdown.length ? `
+      <details class="vin-details">
+        <summary>Ver desglose completo del VIN</summary>
+        <table class="table vin-breakdown">
+          <thead><tr><th>Pos.</th><th>Valor</th><th>Significado</th><th>Detalle</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </details>` : ""}
     ${dec.errors.length ? `<p class="hint" style="color:var(--danger)">${dec.errors.map(escapeHtml).join("<br>")}</p>` : ""}
   `;
 

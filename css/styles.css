@@ -106,6 +106,20 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
   border-radius: 10px; box-shadow: 0 0 0 9999px rgba(0,0,0,.25);
 }
 
+/* VIN coloreado por secciones */
+.vin-colored { font-family: ui-monospace, monospace; font-size: 22px; letter-spacing: 1px; margin-bottom: 12px; word-break: break-all; }
+.vinseg { padding: 2px 1px; border-radius: 3px; }
+.s-wmi   { background: #fde68a; }  /* país/fabricante/tipo */
+.s-vds   { background: #bfdbfe; }  /* descripción */
+.s-chk   { background: #fecaca; font-weight: 700; } /* dígito control */
+.s-year  { background: #bbf7d0; }  /* año */
+.s-plant { background: #ddd6fe; }  /* planta */
+.s-serial{ background: #e2e8f0; }  /* serie */
+.vin-details { margin-top: 10px; }
+.vin-details summary { cursor: pointer; color: var(--primary); font-size: 14px; }
+.vin-breakdown { margin-top: 8px; font-size: 13px; }
+.vin-breakdown .vinpos { font-weight: 600; color: var(--muted); }
+
 /* VIN result */
 .vin-result dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
 .vin-result dt { color: var(--muted); font-size: 13px; }
