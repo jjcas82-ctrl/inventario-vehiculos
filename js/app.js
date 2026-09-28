@@ -1,6 +1,6 @@
 // app.js — Orquestador: navegación por pestañas, flujo de escaneo, registro de
 // eventos, respaldo de datos e instalación PWA.
-import { decodeVin } from "./vin.js";
+import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
@@ -81,14 +81,25 @@ function showVinResult(dec) {
   fillEventSelectors();
 }
 
+// Intenta extraer un VIN de 17 caracteres de un texto (el QR/código puede traer
+// texto extra o el VIN incrustado en una URL/etiqueta).
+function extractVin(text) {
+  const norm = normalizeVin(text);
+  if (norm.length === 17) return norm;
+  // Busca una subcadena de 17 caracteres válidos de VIN
+  const m = norm.match(/[A-HJ-NPR-Z0-9]{17}/);
+  return m ? m[0] : null;
+}
+
 function handleScannedText(text) {
-  // El código puede traer el VIN "crudo"; lo decodificamos
-  const dec = decodeVin(text);
+  const vin = extractVin(text) || normalizeVin(text);
+  const dec = decodeVin(vin);
   document.getElementById("vin-input").value = dec.vin;
   showVinResult(dec);
   if (dec.vin.length === 17) {
     toast(dec.checkDigit.ok ? "VIN leído correctamente" : "VIN leído (verifica el dígito)");
   }
+  return dec;
 }
 
 // ---------- Escáner ----------
@@ -98,12 +109,33 @@ function setupScanner() {
   const stopBtn = document.getElementById("scan-stop");
   const status = document.getElementById("scan-status");
 
+  const setStatus = (msg, kind) => {
+    status.textContent = msg;
+    status.style.color = kind === "error" ? "var(--danger)"
+      : (kind === "ok" ? "var(--primary)" : "var(--muted)");
+  };
+
+  const stopCamera = () => {
+    scanner.stop();
+    startBtn.hidden = false;
+    stopBtn.hidden = true;
+  };
+
   scanner = new Scanner(video, {
-    onResult: (text) => { handleScannedText(text); },
-    onStatus: (msg, kind) => {
-      status.textContent = msg;
-      status.style.color = kind === "error" ? "var(--danger)" : (kind === "ok" ? "var(--primary)" : "var(--muted)");
+    onResult: (text) => {
+      const vin = extractVin(text);
+      if (vin) {
+        // ¡VIN encontrado! Lo procesamos y detenemos la cámara.
+        handleScannedText(vin);
+        stopCamera();
+        setStatus("✓ VIN leído: " + vin, "ok");
+      } else {
+        // Se leyó un código, pero no parece un VIN de 17 caracteres.
+        setStatus("Código leído pero no es un VIN de 17 caracteres: “" +
+          String(text).slice(0, 30) + "”. Sigue apuntando o usa la captura manual.", "error");
+      }
     },
+    onStatus: setStatus,
   });
 
   startBtn.addEventListener("click", async () => {
@@ -114,11 +146,8 @@ function setupScanner() {
     } catch (e) { /* onStatus ya mostró el error */ }
   });
   stopBtn.addEventListener("click", () => {
-    scanner.stop();
-    startBtn.hidden = false;
-    stopBtn.hidden = true;
-    status.textContent = "Cámara detenida.";
-    status.style.color = "var(--muted)";
+    stopCamera();
+    setStatus("Cámara detenida.", "muted");
   });
 
   // Captura manual
