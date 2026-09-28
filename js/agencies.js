@@ -1,6 +1,7 @@
 // agencies.js — Gestión de agencias y sus ubicaciones internas (pestaña Agencias).
 import { store } from "./storage.js";
 import { getPosition } from "./events.js";
+import { notify, confirmDialog } from "./ui.js";
 
 let onChange = () => {};
 
@@ -56,14 +57,23 @@ function render() {
         store.updateAgency(btn.dataset.id, { lat: pos.lat, lng: pos.lng });
         render(); onChange();
       } catch (e) {
-        alert("No se pudo obtener la ubicación: " + e.message);
+        notify("No se pudo obtener la ubicación: " + e.message, { type: "error" });
         btn.disabled = false; btn.textContent = "Usar mi ubicación actual";
       }
     })
   );
   wrap.querySelectorAll(".del-ag").forEach(btn =>
-    btn.addEventListener("click", () => {
-      if (confirm("¿Eliminar esta agencia?")) { store.removeAgency(btn.dataset.id); render(); onChange(); }
+    btn.addEventListener("click", async () => {
+      const choice = await confirmDialog({
+        icon: "🏢",
+        title: "Eliminar agencia",
+        message: "¿Seguro que quieres eliminar esta agencia? Sus ubicaciones ya no estarán disponibles para nuevos registros.",
+        buttons: [
+          { label: "Cancelar", value: "cancel", variant: "ghost" },
+          { label: "Eliminar", value: "del", variant: "danger" },
+        ],
+      });
+      if (choice === "del") { store.removeAgency(btn.dataset.id); render(); onChange(); }
     })
   );
   wrap.querySelectorAll(".save-loc").forEach(btn =>

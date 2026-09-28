@@ -10,18 +10,13 @@ import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
 import { initReports, renderReports, refreshReportAgencies } from "./reports.js";
+import { notify, confirmDialog } from "./ui.js";
 
 let currentDecode = null;   // resultado del último VIN decodificado
 let scanner = null;
 
-// ---------- Toast ----------
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.hidden = false;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => (el.hidden = true), 2600);
-}
+// Compat: mantenemos toast() pero ahora usa el aviso bonito.
+function toast(msg, type = "info") { notify(msg, { type }); }
 
 // ---------- Navegación por pestañas ----------
 function setupTabs() {
@@ -123,7 +118,8 @@ function handleScannedText(text) {
   document.getElementById("vin-input").value = dec.vin;
   showVinResult(dec);
   if (dec.vin.length === 17) {
-    toast(dec.checkDigit.ok ? "VIN leído correctamente" : "VIN leído (verifica el dígito)");
+    notify(dec.checkDigit.ok ? "VIN leído correctamente." : "VIN leído. Revisa el dígito de control.",
+      { type: dec.checkDigit.ok ? "success" : "warn" });
     // Enriquecer con la API de NHTSA en segundo plano (si hay internet).
     tryEnrich(dec);
   }
@@ -342,7 +338,7 @@ function setupEventButtons() {
 
   const doEvent = async (type) => {
     if (!currentDecode || currentDecode.vin.length !== 17) {
-      toast("Primero escanea o captura un VIN válido");
+      notify("Primero escanea o captura un VIN válido.", { type: "warn" });
       return;
     }
     const vin = currentDecode.vin;
@@ -351,52 +347,38 @@ function setupEventButtons() {
     const location = document.getElementById("ev-location").value;
     const condition = document.getElementById("ev-condition").value;
 
-    // ---- Validación de coherencia del evento ----
     const status = existing?.status; // "dentro" | "fuera" | undefined
-    const curAgency = existing?.currentAgency;
     const curLocation = existing?.currentLocation;
+    const curAgency = existing?.currentAgency;
 
+    // === CASO IMPORTANTE: intentan "Entrada" cuando la unidad YA está dentro. ===
+    // Es el error que más confunde, así que aquí SÍ mostramos un diálogo claro,
+    // pero con la acción correcta a un toque (registrar movimiento).
     if (type === "entry" && status === "dentro") {
-      // Ya está dentro: registrar otra entrada no tiene sentido.
-      const ok = confirm(
-        "⚠️ Esta unidad YA SE ENCUENTRA DENTRO y no ha registrado salida.\n\n" +
-        `VIN: ${vin}\n` +
-        `Ubicación actual: ${curLocation || "—"} (${curAgency || "—"})\n\n` +
-        "¿Querías registrar un MOVIMIENTO interno en su lugar?\n\n" +
-        "• Aceptar = registrar MOVIMIENTO a la ubicación seleccionada\n" +
-        "• Cancelar = no hacer nada (verifica la unidad)"
-      );
-      if (!ok) { toast("Entrada cancelada: la unidad ya está dentro"); return; }
-      // Reinterpretamos como movimiento
+      const choice = await confirmDialog({
+        icon: "🚗",
+        title: "La unidad ya está dentro",
+        message:
+          `El VIN ${vin} ya tiene una ENTRADA registrada y no ha salido.\n` +
+          `Ubicación actual: ${curLocation || "—"} (${curAgency || "—"}).\n\n` +
+          `¿Deseas registrar un MOVIMIENTO interno a "${location}"?`,
+        buttons: [
+          { label: "Cancelar", value: "cancel", variant: "ghost" },
+          { label: `Mover a ${location}`, value: "move", variant: "primary" },
+        ],
+      });
+      if (choice !== "move") { notify("No se registró nada. Verifica la unidad.", { type: "info" }); return; }
       return finalizeEvent(vin, "move", agency, location, condition, existing);
     }
 
+    // === Casos menores: NO bloqueamos con diálogo. Registramos y avisamos suave. ===
+    // (Evita la sensación de "muchos mensajes de error".)
     if (type === "exit" && status === "fuera") {
-      const ok = confirm(
-        "⚠️ Esta unidad YA FIGURA FUERA (salida ya registrada).\n\n" +
-        `VIN: ${vin}\n\n` +
-        "¿Registrar otra salida de todos modos?"
-      );
-      if (!ok) { toast("Salida cancelada: la unidad ya está fuera"); return; }
-    }
-
-    if (type === "exit" && !existing) {
-      const ok = confirm(
-        "⚠️ Esta unidad NO tiene ninguna entrada registrada.\n\n" +
-        `VIN: ${vin}\n\n` +
-        "¿Registrar salida de todos modos? (lo normal es registrar primero la ENTRADA)"
-      );
-      if (!ok) { toast("Salida cancelada: la unidad no tiene entrada previa"); return; }
-    }
-
-    if (type === "move" && status !== "dentro") {
-      const ok = confirm(
-        "⚠️ Esta unidad NO está registrada como DENTRO.\n\n" +
-        `VIN: ${vin}\n\n` +
-        "Para moverla primero debería tener una ENTRADA.\n" +
-        "¿Registrar el movimiento de todos modos?"
-      );
-      if (!ok) { toast("Movimiento cancelado"); return; }
+      notify("Nota: esta unidad ya figuraba fuera. Se registró la salida igualmente.", { type: "warn", title: "Aviso" });
+    } else if (type === "exit" && !existing) {
+      notify("Nota: no había entrada previa de esta unidad. Se registró la salida.", { type: "warn", title: "Aviso" });
+    } else if (type === "move" && status !== "dentro") {
+      notify("Nota: la unidad no figuraba dentro. Se registró el movimiento.", { type: "warn", title: "Aviso" });
     }
 
     return finalizeEvent(vin, type, agency, location, condition, existing);
@@ -414,7 +396,7 @@ function setupEventButtons() {
     }
     await registerEvent({ vin, type, agency, location, condition }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
-    toast(`${labels[type]} registrada: ${vin}`);
+    notify(`${labels[type]} registrada correctamente.`, { type: "success", title: vin });
     refreshAll();
   };
 
@@ -442,17 +424,26 @@ function setupDataButtons() {
     if (!file) return;
     try {
       store.import(await file.text());
-      toast("Respaldo importado");
+      notify("Respaldo importado correctamente.", { type: "success" });
       refreshAll();
-    } catch (e) { alert("Archivo no válido: " + e.message); }
+    } catch (e) { notify("Archivo no válido: " + e.message, { type: "error" }); }
     fileInput.value = "";
   });
 
-  document.getElementById("wipe-data").addEventListener("click", () => {
-    if (confirm("¿Borrar TODOS los datos de este dispositivo? Esta acción no se puede deshacer.")) {
+  document.getElementById("wipe-data").addEventListener("click", async () => {
+    const choice = await confirmDialog({
+      icon: "🗑️",
+      title: "Borrar todos los datos",
+      message: "Se eliminarán TODOS los vehículos, eventos y agencias de este dispositivo. Esta acción no se puede deshacer.\n\nSugerencia: exporta un respaldo antes.",
+      buttons: [
+        { label: "Cancelar", value: "cancel", variant: "ghost" },
+        { label: "Sí, borrar todo", value: "wipe", variant: "danger" },
+      ],
+    });
+    if (choice === "wipe") {
       store.wipe();
-      toast("Datos borrados");
-      location.reload();
+      notify("Datos borrados.", { type: "success" });
+      setTimeout(() => location.reload(), 600);
     }
   });
 }
