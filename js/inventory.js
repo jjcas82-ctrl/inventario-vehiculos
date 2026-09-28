@@ -85,6 +85,10 @@ export function openVehicle(vin) {
           <dt>Marca</dt><dd>${escapeHtml(v.make || "—")}</dd>
           <dt>Año</dt><dd>${escapeHtml(v.year || "—")}</dd>
           <dt>País</dt><dd>${escapeHtml(v.country || "—")}</dd>
+          ${v.bodyClass ? `<dt>Carrocería</dt><dd>${escapeHtml(v.bodyClass)}</dd>` : ""}
+          ${v.engine ? `<dt>Motor</dt><dd>${escapeHtml(v.engine)}</dd>` : ""}
+          ${v.fuelType ? `<dt>Combustible</dt><dd>${escapeHtml(v.fuelType)}</dd>` : ""}
+          ${v.transmission ? `<dt>Transmisión</dt><dd>${escapeHtml(v.transmission)}</dd>` : ""}
         </dl>
       </div>
       <div>

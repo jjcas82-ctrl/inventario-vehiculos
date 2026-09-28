@@ -3,6 +3,7 @@
 import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
 import { readVinFromVideo } from "./ocr.js";
+import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
@@ -123,8 +124,89 @@ function handleScannedText(text) {
   showVinResult(dec);
   if (dec.vin.length === 17) {
     toast(dec.checkDigit.ok ? "VIN leído correctamente" : "VIN leído (verifica el dígito)");
+    // Enriquecer con la API de NHTSA en segundo plano (si hay internet).
+    tryEnrich(dec);
   }
   return dec;
+}
+
+// Consulta online los datos que el VIN sí codifica (modelo, carrocería, motor…).
+async function tryEnrich(dec) {
+  const box = document.getElementById("vin-result");
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.textContent = "Consultando datos oficiales del VIN (en línea)…";
+  box.appendChild(note);
+
+  const { online, data, error } = await enrichVin(dec.vin);
+  // Puede que el usuario ya haya escaneado otro VIN mientras tanto.
+  if (!currentDecode || currentDecode.vin !== dec.vin) return;
+
+  if (!online) { note.textContent = "Sin conexión: se muestran solo los datos calculados del VIN."; return; }
+  if (!data || error) { note.textContent = "No se obtuvieron datos oficiales adicionales" + (error ? " (" + error + ")" : "") + "."; return; }
+
+  // Fusionamos: la API tiene prioridad para marca/modelo/carrocería/motor.
+  dec.apiMake = data.make;
+  dec.model = data.model;
+  dec.bodyClass = data.bodyClass;
+  dec.vehicleType = data.vehicleType;
+  dec.fuelType = data.fuelType;
+  dec.engine = [data.displacementL ? data.displacementL + " L" : null,
+                data.engineCyl ? data.engineCyl + " cil." : null,
+                data.engineHP ? data.engineHP + " HP" : null].filter(Boolean).join(" · ");
+  dec.transmission = data.transmission;
+  dec.driveType = data.driveType;
+  dec.plantCity = [data.plantCity, data.plantCountry].filter(Boolean).join(", ");
+  dec.series = data.series;
+  dec.trim = data.trim;
+  if (data.make && (!dec.make || dec.make === "Desconocido")) dec.make = data.make;
+
+  currentDecode = dec;
+  renderApiExtras(dec);       // añade los campos extra a la vista
+  saveVinBasics(dec);         // actualiza los datos guardados del vehículo
+}
+
+// Guarda/actualiza en el almacén los datos básicos derivados del VIN + API.
+function saveVinBasics(dec) {
+  const patch = { vin: dec.vin };
+  if (dec.make) patch.make = dec.make;
+  if (dec.year) patch.year = dec.year;
+  if (dec.country) patch.country = dec.country;
+  if (dec.model) patch.model = dec.model;
+  if (dec.bodyClass) patch.bodyClass = dec.bodyClass;
+  if (dec.fuelType) patch.fuelType = dec.fuelType;
+  if (dec.engine) patch.engine = dec.engine;
+  if (dec.transmission) patch.transmission = dec.transmission;
+  store.upsertVehicle(patch);
+  renderInventory();
+}
+
+// Muestra los datos oficiales extra debajo del desglose.
+function renderApiExtras(dec) {
+  const box = document.getElementById("vin-result");
+  let extra = box.querySelector("#vin-api-extra");
+  if (!extra) {
+    extra = document.createElement("dl");
+    extra.id = "vin-api-extra";
+    extra.style.marginTop = "10px";
+    box.appendChild(extra);
+  }
+  const row = (label, val) => val ? `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(val)}</dd>` : "";
+  extra.innerHTML =
+    `<dt style="grid-column:1/-1;color:var(--primary);font-weight:600;">Datos oficiales (NHTSA)</dt>` +
+    row("Modelo", dec.model) +
+    row("Carrocería", dec.bodyClass) +
+    row("Tipo", dec.vehicleType) +
+    row("Motor", dec.engine) +
+    row("Combustible", dec.fuelType) +
+    row("Transmisión", dec.transmission) +
+    row("Tracción", dec.driveType) +
+    row("Versión", dec.trim || dec.series) +
+    row("Planta", dec.plantCity);
+  // Quita cualquier nota de "consultando…"
+  box.querySelectorAll("p.hint").forEach(p => {
+    if (/Consultando datos oficiales/.test(p.textContent)) p.remove();
+  });
 }
 
 // ---------- Escáner ----------
@@ -264,8 +346,65 @@ function setupEventButtons() {
       return;
     }
     const vin = currentDecode.vin;
-    // Guardar datos básicos del VIN la primera vez
-    if (!store.getVehicle(vin)) {
+    const existing = store.getVehicle(vin);
+    const agency = document.getElementById("ev-agency").value;
+    const location = document.getElementById("ev-location").value;
+    const condition = document.getElementById("ev-condition").value;
+
+    // ---- Validación de coherencia del evento ----
+    const status = existing?.status; // "dentro" | "fuera" | undefined
+    const curAgency = existing?.currentAgency;
+    const curLocation = existing?.currentLocation;
+
+    if (type === "entry" && status === "dentro") {
+      // Ya está dentro: registrar otra entrada no tiene sentido.
+      const ok = confirm(
+        "⚠️ Esta unidad YA SE ENCUENTRA DENTRO y no ha registrado salida.\n\n" +
+        `VIN: ${vin}\n` +
+        `Ubicación actual: ${curLocation || "—"} (${curAgency || "—"})\n\n` +
+        "¿Querías registrar un MOVIMIENTO interno en su lugar?\n\n" +
+        "• Aceptar = registrar MOVIMIENTO a la ubicación seleccionada\n" +
+        "• Cancelar = no hacer nada (verifica la unidad)"
+      );
+      if (!ok) { toast("Entrada cancelada: la unidad ya está dentro"); return; }
+      // Reinterpretamos como movimiento
+      return finalizeEvent(vin, "move", agency, location, condition, existing);
+    }
+
+    if (type === "exit" && status === "fuera") {
+      const ok = confirm(
+        "⚠️ Esta unidad YA FIGURA FUERA (salida ya registrada).\n\n" +
+        `VIN: ${vin}\n\n` +
+        "¿Registrar otra salida de todos modos?"
+      );
+      if (!ok) { toast("Salida cancelada: la unidad ya está fuera"); return; }
+    }
+
+    if (type === "exit" && !existing) {
+      const ok = confirm(
+        "⚠️ Esta unidad NO tiene ninguna entrada registrada.\n\n" +
+        `VIN: ${vin}\n\n` +
+        "¿Registrar salida de todos modos? (lo normal es registrar primero la ENTRADA)"
+      );
+      if (!ok) { toast("Salida cancelada: la unidad no tiene entrada previa"); return; }
+    }
+
+    if (type === "move" && status !== "dentro") {
+      const ok = confirm(
+        "⚠️ Esta unidad NO está registrada como DENTRO.\n\n" +
+        `VIN: ${vin}\n\n` +
+        "Para moverla primero debería tener una ENTRADA.\n" +
+        "¿Registrar el movimiento de todos modos?"
+      );
+      if (!ok) { toast("Movimiento cancelado"); return; }
+    }
+
+    return finalizeEvent(vin, type, agency, location, condition, existing);
+  };
+
+  // Guarda datos básicos del VIN (1ª vez) y registra el evento.
+  const finalizeEvent = async (vin, type, agency, location, condition, existing) => {
+    if (!existing) {
       store.upsertVehicle({
         vin,
         make: currentDecode.make,
@@ -273,10 +412,6 @@ function setupEventButtons() {
         country: currentDecode.country,
       });
     }
-    const agency = document.getElementById("ev-agency").value;
-    const location = document.getElementById("ev-location").value;
-    const condition = document.getElementById("ev-condition").value;
-
     await registerEvent({ vin, type, agency, location, condition }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
     toast(`${labels[type]} registrada: ${vin}`);
