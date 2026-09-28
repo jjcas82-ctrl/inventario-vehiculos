@@ -7,3 +7,6 @@ Thumbs.db
 # Logs / temporales
 *.log
 node_modules/
+
+# Configuración interna de Kiro
+.kiro/
