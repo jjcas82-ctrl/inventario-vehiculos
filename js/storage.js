@@ -28,7 +28,36 @@ const AEROPLASA_AUTO_AREAS = [
   { name: "Bodega",                     subs: [] },
   { name: "Estacionamiento Seminuevos", subs: [] },
   { name: "Área de Entrega",            subs: [] },
-  { name: "Puntos de venta",            subs: ["Zacatlán", "Chignahuapan"] },
+];
+
+// Los puntos de venta son sitios remotos (con GPS propio) → áreas simples.
+const PUNTO_VENTA_AREAS = [
+  { name: "Exhibición", subs: [] },
+  { name: "Entrega",    subs: [] },
+];
+
+// Sitios que se precargan con sus direcciones y coordenadas reales.
+const SEED_SITES = [
+  {
+    name: "Agencia Aeropuerto",
+    address: "Blvd. Puerto Aéreo 141, Col. Federal, Venustiano Carranza, 15700 Ciudad de México, CDMX",
+    lat: 19.425222, lng: -99.093219, radius: 200, areas: DEFAULT_AREAS,
+  },
+  {
+    name: "Agencia Aeroplasa Auto",
+    address: "Carretera Federal México-Tuxpan Km 190 S/N, Col. El Potro, C.P. 73176, Huauchinango, Puebla",
+    lat: 20.173122, lng: -98.070828, radius: 200, areas: AEROPLASA_AUTO_AREAS,
+  },
+  {
+    name: "Punto de Venta Zacatlán",
+    address: "5 de Mayo LB, Cabañas del Mirador, 73310 Zacatlán, Pue.",
+    lat: 19.930012, lng: -97.959983, radius: 150, areas: PUNTO_VENTA_AREAS,
+  },
+  {
+    name: "Punto de Venta Chignahuapan",
+    address: "Vicente Guerrero 31, Centro, 73300 Chignahuapan, Pue.",
+    lat: 19.840180, lng: -98.031988, radius: 150, areas: PUNTO_VENTA_AREAS,
+  },
 ];
 
 function cloneAreas(list) {
@@ -40,10 +69,10 @@ function seed() {
   return {
     vehicles: {},
     events: [],
-    agencies: [
-      { id: cryptoId(), name: "Agencia Aeropuerto",     lat: null, lng: null, areas: cloneAreas(DEFAULT_AREAS) },
-      { id: cryptoId(), name: "Agencia Aeroplasa Auto", lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS) },
-    ],
+    agencies: SEED_SITES.map(s => ({
+      id: cryptoId(), name: s.name, address: s.address,
+      lat: s.lat, lng: s.lng, radius: s.radius, areas: cloneAreas(s.areas),
+    })),
     users: [],   // el admin inicial (jcabrera) lo crea auth.ensureSeedAdmin()
     audits: [],
   };
@@ -82,18 +111,32 @@ function read() {
   if (!Array.isArray(_cache.users)) _cache.users = [];
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
 
-  // Alta / actualización de la Agencia Aeroplasa Auto para instalaciones previas.
-  const aeroAuto = _cache.agencies.find(a => /aeroplasa auto/i.test(a.name));
-  if (!aeroAuto) {
-    _cache.agencies.push({
-      id: cryptoId(), name: "Agencia Aeroplasa Auto",
-      lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS),
-    });
-  } else if (aeroAuto.areas && aeroAuto.areas.some(a => a.name === "Patio")
-             && !aeroAuto.areas.some(a => a.name === "Puntos de venta")) {
-    // Estructura anterior (con "Patio", sin "Puntos de venta"): actualizar.
-    aeroAuto.areas = cloneAreas(AEROPLASA_AUTO_AREAS);
-  }
+  // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
+  // No pisa coordenadas que el admin ya haya ajustado manualmente.
+  SEED_SITES.forEach(site => {
+    let a = _cache.agencies.find(x => x.name.toLowerCase() === site.name.toLowerCase());
+    // Reconciliar nombres antiguos
+    if (!a && /aeroplasa auto/i.test(site.name)) a = _cache.agencies.find(x => /aeroplasa auto/i.test(x.name));
+    if (!a && /aeropuerto/i.test(site.name)) a = _cache.agencies.find(x => /aeropuerto/i.test(x.name));
+    if (!a) {
+      // Sitio nuevo (p. ej. puntos de venta): crearlo con sus datos.
+      _cache.agencies.push({
+        id: cryptoId(), name: site.name, address: site.address,
+        lat: site.lat, lng: site.lng, radius: site.radius, areas: cloneAreas(site.areas),
+      });
+    } else {
+      // Normaliza el nombre y completa datos que falten (sin pisar coords manuales).
+      a.name = site.name;
+      if (!a.address) a.address = site.address;
+      if (a.lat == null || a.lng == null) { a.lat = site.lat; a.lng = site.lng; }
+      if (!a.radius) a.radius = site.radius;
+      // Si Aeroplasa Auto tenía la vieja área "Puntos de venta" o "Patio", actualizar estructura.
+      if (/aeroplasa auto/i.test(a.name) &&
+          a.areas && a.areas.some(ar => ar.name === "Patio" || ar.name === "Puntos de venta")) {
+        a.areas = cloneAreas(AEROPLASA_AUTO_AREAS);
+      }
+    }
+  });
   return _cache;
 }
 

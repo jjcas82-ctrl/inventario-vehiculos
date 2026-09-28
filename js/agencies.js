@@ -38,6 +38,7 @@ function render() {
         <button class="btn btn-danger del-ag" data-id="${a.id}">Eliminar</button>
       </div>
       <p class="hint">${coords}</p>
+      ${a.address ? `<p class="hint">🏢 ${escapeHtml(a.address)}</p>` : ""}
 
       <div class="loc-card">
         <b>Ubicación / dirección de esta agencia</b>
