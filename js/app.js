@@ -10,7 +10,7 @@ import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
 import { initReports, renderReports, refreshReportAgencies } from "./reports.js";
-import { notify, confirmDialog, promptDialog, loginDialog } from "./ui.js";
+import { notify, confirmDialog, promptDialog } from "./ui.js";
 import * as auth from "./auth.js";
 import { initUsers, renderUsers } from "./users.js";
 import { getPosition } from "./events.js";
@@ -50,25 +50,51 @@ function applyPermissions() {
   }
 }
 
-// Flujo de inicio de sesión: usuario + contraseña.
-async function login() {
-  const creds = await loginDialog({ title: "Iniciar sesión" });
-  if (!creds) return false;
-  const res = await auth.login(creds.username, creds.password);
-  if (!res.ok) {
-    notify(res.error, { type: "error", title: "No se pudo iniciar sesión" });
-    return false;
+// Muestra u oculta la pantalla de login (bloquea la app hasta autenticarse).
+function showLoginScreen(show) {
+  const screen = document.getElementById("login-screen");
+  if (show) {
+    screen.classList.remove("hidden");
+    document.body.classList.add("locked");
+    const err = document.getElementById("login-error");
+    err.hidden = true;
+    document.getElementById("login-pass").value = "";
+    setTimeout(() => document.getElementById("login-user").focus(), 80);
+  } else {
+    screen.classList.add("hidden");
+    document.body.classList.remove("locked");
   }
+}
+
+// Procesa el formulario de la pantalla de login.
+async function submitLoginScreen(e) {
+  if (e) e.preventDefault();
+  const err = document.getElementById("login-error");
+  const btn = document.getElementById("login-submit");
+  const username = document.getElementById("login-user").value.trim();
+  const password = document.getElementById("login-pass").value;
+  err.hidden = true;
+  btn.disabled = true; btn.textContent = "Entrando…";
+  const res = await auth.login(username, password);
+  btn.disabled = false; btn.textContent = "Entrar";
+  if (!res.ok) {
+    err.textContent = res.error;
+    err.hidden = false;
+    return;
+  }
+  showLoginScreen(false);
   refreshUserLabel();
   applyPermissions();
   renderUsers();
   notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
-  return true;
 }
 
 async function setupUser() {
   await auth.ensureSeedAdmin(); // crea jcabrera/1234 si no hay usuarios con credenciales
   refreshUserLabel();
+
+  document.getElementById("login-form").addEventListener("submit", submitLoginScreen);
+
   document.getElementById("user-btn").addEventListener("click", async () => {
     if (auth.currentUser()) {
       const choice = await confirmDialog({
@@ -76,18 +102,25 @@ async function setupUser() {
         message: `Usuario: ${auth.currentUser().username}\nRol: ${auth.ROLES[auth.currentUser().role]?.label || ""}`,
         buttons: [
           { label: "Cerrar sesión", value: "logout", variant: "danger" },
-          { label: "Cambiar de usuario", value: "switch", variant: "primary" },
           { label: "Cerrar", value: null, variant: "ghost" },
         ],
       });
-      if (choice === "logout") { auth.logout(); refreshUserLabel(); applyPermissions(); }
-      else if (choice === "switch") { auth.logout(); refreshUserLabel(); applyPermissions(); await login(); }
-    } else {
-      await login();
+      if (choice === "logout") {
+        auth.logout();
+        refreshUserLabel();
+        applyPermissions();
+        showLoginScreen(true);   // vuelve a la pantalla de login
+      }
     }
   });
+
   applyPermissions();
-  if (!auth.currentUser()) setTimeout(login, 400);
+  // Al arrancar: si no hay sesión activa, mostrar la pantalla de login (bloquea la app).
+  if (auth.currentUser()) {
+    showLoginScreen(false);
+  } else {
+    showLoginScreen(true);
+  }
 }
 
 // ---------- Navegación por pestañas ----------
@@ -603,9 +636,8 @@ function setupEventButtons() {
     }
     // Asegura que haya sesión iniciada para registrar.
     if (!auth.can("event.register")) {
-      notify("Inicia sesión para registrar eventos.", { type: "warn" });
-      await login();
-      if (!auth.can("event.register")) return;
+      notify("Tu rol no permite registrar eventos.", { type: "warn" });
+      return;
     }
     const by = auth.currentUser()?.name || store.getUser() || "—";
     await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps }, onGps);

@@ -22,6 +22,24 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Pantalla de inicio de sesión */
+.login-screen {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  background: linear-gradient(135deg, #0f766e, #115e59);
+}
+.login-screen.hidden { display: none; }
+.login-card {
+  background: #fff; border-radius: 16px; padding: 28px 24px;
+  width: 100%; max-width: 380px; box-shadow: 0 20px 50px rgba(0,0,0,.3);
+}
+.login-brand { font-size: 20px; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 8px; }
+.login-sub { color: var(--muted); margin: 6px 0 20px; font-size: 14px; }
+.login-error { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
+.login-foot { color: var(--muted); font-size: 12px; margin-top: 16px; text-align: center; }
+/* Mientras no hay sesión, ocultamos la app detrás del login */
+body.locked .topbar, body.locked .tabs, body.locked main { display: none !important; }
+
 /* Topbar */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;

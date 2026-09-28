@@ -11,6 +11,23 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
+  <!-- ================= PANTALLA DE INICIO DE SESIÓN ================= -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-brand"><span class="brand-mark">🚗</span> Inventario de Vehículos</div>
+      <p class="login-sub">Inicia sesión para continuar</p>
+      <form id="login-form" autocomplete="on">
+        <label class="dlg-lbl" for="login-user">Usuario</label>
+        <input class="dlg-input" id="login-user" type="text" autocapitalize="none" autocomplete="username" placeholder="usuario" required />
+        <label class="dlg-lbl" for="login-pass">Contraseña</label>
+        <input class="dlg-input" id="login-pass" type="password" autocomplete="current-password" placeholder="contraseña" required />
+        <p id="login-error" class="login-error" hidden></p>
+        <button type="submit" class="btn btn-primary" id="login-submit" style="width:100%;margin-top:4px;">Entrar</button>
+      </form>
+      <p class="login-foot">Los datos se guardan en este dispositivo. Si no tienes cuenta, pídela al administrador.</p>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="brand-mark">🚗</span>
