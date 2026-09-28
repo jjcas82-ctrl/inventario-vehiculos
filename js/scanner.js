@@ -11,6 +11,7 @@
 // IMPORTANTE: getUserMedia solo funciona en HTTPS o http://localhost.
 
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
+const ZXING_LIB_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/+esm";
 
 // Formatos que nos interesan (QR + los códigos de barras usados en etiquetas de VIN)
 const FORMATS = ["qr_code", "code_128", "code_39", "data_matrix", "pdf417", "codabar", "ean_13", "itf"];
@@ -86,23 +87,34 @@ export class Scanner {
       if (adv.length) await this._track.applyConstraints({ advanced: adv });
     } catch (e) { /* no crítico */ }
 
-    // Elegir motor de detección
+    // Ejecutamos los DOS motores en paralelo:
+    //  - BarcodeDetector nativo: rápido para QR / data matrix.
+    //  - ZXing: mucho mejor para códigos de barras LINEALES del VIN (Code 39 / Code 128).
+    // El primero que detecte un código gana.
+    let started = false;
+
     if ("BarcodeDetector" in window) {
       try {
         const supported = await window.BarcodeDetector.getSupportedFormats();
         const formats = FORMATS.filter(f => supported.includes(f));
-        this.onDetect("motor: BarcodeDetector nativo · formatos: " + (supported.join(",") || "?"), "info");
+        this.onDetect("motor nativo · formatos: " + (supported.join(",") || "?"), "info");
         this._detector = new window.BarcodeDetector(formats.length ? { formats } : undefined);
-        this.onStatus("Cámara activa. Acerca y enfoca el código o QR del VIN…", "ok");
         this._loopNative();
-        return;
+        started = true;
       } catch (e) {
-        this.onDetect("BarcodeDetector falló, usando respaldo ZXing", "info");
+        this.onDetect("BarcodeDetector no disponible", "info");
       }
     } else {
-      this.onDetect("Sin BarcodeDetector nativo, usando respaldo ZXing", "info");
+      this.onDetect("Sin BarcodeDetector nativo", "info");
     }
+
+    // ZXing siempre, en paralelo, para asegurar la lectura de códigos de barras del VIN.
     await this._startZxing();
+
+    this.onStatus("Cámara activa. Acerca y ENFOCA el código de barras del VIN…", "ok");
+    if (!started && !this._zxingReader) {
+      this.onStatus("No se pudo iniciar ningún lector. Usa la captura manual.", "error");
+    }
   }
 
   _grabFrame() {
@@ -138,29 +150,58 @@ export class Scanner {
   }
 
   async _startZxing() {
-    this.onStatus("Cargando lector de respaldo…");
-    let mod;
+    let browserMod, libMod;
     try {
-      mod = await import(/* @vite-ignore */ ZXING_CDN);
+      [browserMod, libMod] = await Promise.all([
+        import(/* @vite-ignore */ ZXING_CDN),
+        import(/* @vite-ignore */ ZXING_LIB_CDN).catch(() => null),
+      ]);
     } catch (e) {
-      this.onStatus("No se pudo cargar el lector de respaldo (¿sin internet?). Usa la captura manual.", "error");
+      this.onDetect("no se pudo cargar ZXing (¿sin internet?)", "info");
       return;
     }
-    const { BrowserMultiFormatReader } = mod;
-    this._zxingReader = new BrowserMultiFormatReader();
-    this.onStatus("Cámara activa (lector de respaldo). Acerca y enfoca el código…", "ok");
-    this._zxingControls = await this._zxingReader.decodeFromStream(
-      this.stream, this.video, (result) => {
-        if (result) {
-          this.onDetect(result.getText(), "zxing");
-          this._emit(result.getText());
-        }
-      });
+    try {
+      const { BrowserMultiFormatReader } = browserMod;
+      // Hints: prioriza los formatos del VIN (Code 39 / Code 128) + QR/DataMatrix.
+      // DecodeHintType/BarcodeFormat viven en @zxing/library.
+      const L = libMod || browserMod;
+      let hints;
+      if (L && L.DecodeHintType && L.BarcodeFormat) {
+        hints = new Map();
+        hints.set(L.DecodeHintType.POSSIBLE_FORMATS, [
+          L.BarcodeFormat.CODE_39,
+          L.BarcodeFormat.CODE_128,
+          L.BarcodeFormat.DATA_MATRIX,
+          L.BarcodeFormat.QR_CODE,
+          L.BarcodeFormat.ITF,
+          L.BarcodeFormat.CODABAR,
+        ]);
+        hints.set(L.DecodeHintType.TRY_HARDER, true);
+        this.onDetect("ZXing con hints VIN (Code39/128) ✓", "info");
+      } else {
+        this.onDetect("ZXing listo (sin hints)", "info");
+      }
+      this._zxingReader = new BrowserMultiFormatReader(hints, 200);
+      this._zxingControls = await this._zxingReader.decodeFromStream(
+        this.stream, this.video, (result) => {
+          if (result) {
+            this.onDetect(result.getText(), "ZXing");
+            this._emit(result.getText());
+          }
+        });
+    } catch (e) {
+      this.onDetect("ZXing falló al iniciar: " + (e.name || e), "info");
+    }
   }
 
   _emit(text) {
     if (!text) return;
     const clean = String(text).trim();
+    // Evita reprocesar el mismo texto en ráfaga (los dos motores pueden repetir).
+    const now = Date.now();
+    if (clean === this._lastEmit && now - (this._lastEmitAt || 0) < 1200) return;
+    this._lastEmit = clean;
+    this._lastEmitAt = now;
     // El consumidor decide si es VIN válido y si detener la cámara.
     this.onResult(clean);
   }
