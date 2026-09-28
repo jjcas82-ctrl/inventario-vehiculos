@@ -16,12 +16,14 @@ import { store } from "./storage.js";
 
 export const ROLES = {
   operador:   { label: "Operador",      desc: "Registra entradas, salidas y movimientos." },
+  consultor:  { label: "Consultor",     desc: "Solo consulta inventario/mapa y emite reportes (sin editar)." },
   capturista: { label: "Capturista",    desc: "Registra y edita fichas; ve inventario y reportes." },
   admin:      { label: "Administrador", desc: "Acceso total, incluye VIN, agencias y usuarios." },
 };
 
 const PERMISSIONS = {
   operador:   ["event.register"],
+  consultor:  ["inventory.view", "reports.view", "map.view"],
   capturista: ["event.register", "inventory.view", "reports.view", "map.view", "vehicle.edit"],
   admin:      ["event.register", "inventory.view", "reports.view", "map.view", "vehicle.edit",
                "vehicle.editVin", "agencies.manage", "users.manage", "data.wipe", "audit.run"],
