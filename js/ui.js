@@ -73,6 +73,42 @@ export function confirmDialog({ title, message, icon = "⚠️", buttons }) {
   });
 }
 
+// ---- Diálogo de login (usuario + contraseña). Devuelve {username, password} o null. ----
+export function loginDialog({ title = "Iniciar sesión", icon = "🔐" } = {}) {
+  return new Promise((resolve) => {
+    const back = document.createElement("div");
+    back.className = "dlg-back";
+    back.innerHTML =
+      `<div class="dlg-card" role="dialog" aria-modal="true">
+         <div class="dlg-head"><span class="dlg-ico">${icon}</span><h3>${esc(title)}</h3></div>
+         <label class="dlg-lbl">Usuario</label>
+         <input class="dlg-input" id="lg-user" type="text" autocapitalize="none" autocomplete="username" placeholder="usuario" />
+         <label class="dlg-lbl">Contraseña</label>
+         <input class="dlg-input" id="lg-pass" type="password" autocomplete="current-password" placeholder="contraseña" />
+         <div class="dlg-actions">
+           <button class="btn btn-ghost" data-v="cancel">Cancelar</button>
+           <button class="btn btn-primary" data-v="ok">Entrar</button>
+         </div>
+       </div>`;
+    document.body.appendChild(back);
+    requestAnimationFrame(() => back.classList.add("show"));
+    const userI = back.querySelector("#lg-user");
+    const passI = back.querySelector("#lg-pass");
+    setTimeout(() => userI.focus(), 60);
+
+    const done = (val) => { back.classList.remove("show"); setTimeout(() => back.remove(), 180); resolve(val); };
+    const submit = () => {
+      if (!userI.value.trim()) { userI.focus(); return; }
+      done({ username: userI.value.trim(), password: passI.value });
+    };
+    back.querySelector('[data-v="ok"]').addEventListener("click", submit);
+    back.querySelector('[data-v="cancel"]').addEventListener("click", () => done(null));
+    passI.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    userI.addEventListener("keydown", (e) => { if (e.key === "Enter") passI.focus(); });
+    back.addEventListener("click", (e) => { if (e.target === back) done(null); });
+  });
+}
+
 // ---- Diálogo con campo de texto. Devuelve el texto (o null si cancela). ----
 export function promptDialog({ title, message, placeholder = "", value = "", icon = "✏️", okLabel = "Guardar" }) {
   return new Promise((resolve) => {

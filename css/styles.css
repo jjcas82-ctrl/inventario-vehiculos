@@ -187,7 +187,8 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 .dlg-head h3 { margin: 0; font-size: 17px; }
 .dlg-msg { color: var(--text); font-size: 14px; line-height: 1.5; white-space: pre-line; margin-bottom: 16px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-.dlg-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; margin-bottom: 16px; }
+.dlg-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; margin-bottom: 12px; }
+.dlg-lbl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 
 /* Print */
 @media print {

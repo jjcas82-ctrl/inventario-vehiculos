@@ -62,7 +62,12 @@ function estimateYear(vin) {
 }
 
 export function normalizeVin(raw) {
-  return (raw || "").toUpperCase().replace(/[\s-]/g, "").trim();
+  // Quita espacios, guiones, asteriscos y cualquier símbolo delimitador.
+  // Los VIN grabados suelen venir entre asteriscos: *MA6CB5CD1LT059127*
+  return (raw || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")   // deja solo letras y números (fuera *, espacios, guiones, etc.)
+    .trim();
 }
 
 // Decodifica el VIN y devuelve datos + desglose por sección

@@ -23,7 +23,9 @@ async function getWorker(onProgress) {
     errorHandler: (err) => { throw err; },
   });
   await worker.setParameters({
-    tessedit_char_whitelist: "ABCDEFGHJKLMNPRSTUVWXYZ0123456789",
+    // Incluimos el asterisco: los VIN grabados suelen venir entre asteriscos (*VIN*).
+    // Reconocerlo ayuda al OCR a separar bien el VIN de los delimitadores.
+    tessedit_char_whitelist: "ABCDEFGHJKLMNPRSTUVWXYZ0123456789*",
     tessedit_pageseg_mode: "7", // una sola línea
   });
   _worker = worker;
@@ -83,9 +85,19 @@ function cleanText(t) {
 
 function bestVinCandidate(clean) {
   if (!clean) return { vin: null, best: "" };
+  // 1) 17 caracteres válidos seguidos.
   const exact = clean.match(/[A-HJ-NPR-Z0-9]{17}/);
   if (exact) return { vin: exact[0], best: exact[0] };
+  // 2) Si hay un bloque de 18-19 (por bordes o restos de asteriscos leídos como
+  //    caracteres), probamos recortando desde el inicio hasta obtener 17 válidos.
   const parts = clean.match(/[A-HJ-NPR-Z0-9]+/g) || [];
+  for (const p of parts) {
+    if (p.length >= 17 && p.length <= 20) {
+      for (let start = 0; start + 17 <= p.length; start++) {
+        return { vin: p.slice(start, start + 17), best: p.slice(start, start + 17) };
+      }
+    }
+  }
   const best = parts.sort((a, b) => b.length - a.length)[0] || clean;
   return { vin: null, best };
 }
@@ -107,8 +119,9 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
     } catch (e) {
       onCandidate && onCandidate("(error worker: " + (e.message || e) + ")");
     }
+    const rawSeen = String(text).replace(/\s+/g, " ").trim();
     const clean = cleanText(text);
-    onCandidate && onCandidate(clean + `  [ink ${(inkRatio * 100).toFixed(1)}%]`);
+    onCandidate && onCandidate(`"${rawSeen}" → ${clean} [ink ${(inkRatio * 100).toFixed(1)}%]`);
     const { vin, best } = bestVinCandidate(clean);
     if (best.length > bestOverall.length) bestOverall = best;
     if (vin) { vinFound = vin; break; }

@@ -10,7 +10,7 @@ import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
 import { initReports, renderReports, refreshReportAgencies } from "./reports.js";
-import { notify, confirmDialog, promptDialog } from "./ui.js";
+import { notify, confirmDialog, promptDialog, loginDialog } from "./ui.js";
 import * as auth from "./auth.js";
 import { initUsers, renderUsers } from "./users.js";
 import "./audit.js";
@@ -48,49 +48,30 @@ function applyPermissions() {
   }
 }
 
-// Flujo de inicio de sesión: elegir usuario; si es admin, pedir PIN.
+// Flujo de inicio de sesión: usuario + contraseña.
 async function login() {
-  const users = auth.listUsers();
-  if (!users.length) { notify("No hay usuarios configurados.", { type: "error" }); return; }
-
-  const choice = await confirmDialog({
-    icon: "👤",
-    title: "Iniciar sesión",
-    message: "Selecciona tu usuario:",
-    buttons: users.slice(0, 6).map(u => ({
-      label: `${u.name} (${auth.ROLES[u.role]?.label || u.role})`,
-      value: u.id,
-      variant: u.role === "admin" ? "primary" : "ghost",
-    })).concat([{ label: "Cancelar", value: null, variant: "ghost" }]),
-  });
-  if (!choice) return;
-  const user = users.find(u => u.id === choice);
-  if (!user) return;
-
-  // El administrador requiere PIN
-  if (user.role === "admin") {
-    const pin = await promptDialog({
-      icon: "🔒", title: "PIN de administrador",
-      message: "Ingresa el PIN para acceder como administrador.",
-      placeholder: "PIN", okLabel: "Entrar",
-    });
-    if (pin === null) return;
-    if (!auth.checkAdminPin(pin)) { notify("PIN incorrecto.", { type: "error" }); return; }
+  const creds = await loginDialog({ title: "Iniciar sesión" });
+  if (!creds) return false;
+  const res = await auth.login(creds.username, creds.password);
+  if (!res.ok) {
+    notify(res.error, { type: "error", title: "No se pudo iniciar sesión" });
+    return false;
   }
-
-  auth.setSession(user);
   refreshUserLabel();
   applyPermissions();
-  notify(`Sesión iniciada: ${user.name} (${auth.ROLES[user.role]?.label}).`, { type: "success" });
+  renderUsers();
+  notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
+  return true;
 }
 
 async function setupUser() {
+  await auth.ensureSeedAdmin(); // crea jcabrera/1234 si no hay usuarios con credenciales
   refreshUserLabel();
   document.getElementById("user-btn").addEventListener("click", async () => {
     if (auth.currentUser()) {
       const choice = await confirmDialog({
         icon: "👤", title: auth.currentUser().name,
-        message: "Rol: " + (auth.ROLES[auth.currentUser().role]?.label || ""),
+        message: `Usuario: ${auth.currentUser().username}\nRol: ${auth.ROLES[auth.currentUser().role]?.label || ""}`,
         buttons: [
           { label: "Cerrar sesión", value: "logout", variant: "danger" },
           { label: "Cambiar de usuario", value: "switch", variant: "primary" },
@@ -98,13 +79,12 @@ async function setupUser() {
         ],
       });
       if (choice === "logout") { auth.logout(); refreshUserLabel(); applyPermissions(); }
-      else if (choice === "switch") { auth.logout(); await login(); }
+      else if (choice === "switch") { auth.logout(); refreshUserLabel(); applyPermissions(); await login(); }
     } else {
       await login();
     }
   });
   applyPermissions();
-  // Si no hay sesión, invitar a iniciar (no bloqueante).
   if (!auth.currentUser()) setTimeout(login, 400);
 }
 

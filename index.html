@@ -280,30 +280,27 @@
         <p class="hint">El rol define qué puede hacer cada usuario. Solo el administrador gestiona esta lista.</p>
         <div class="table-wrap">
           <table class="table" id="users-table">
-            <thead><tr><th>Nombre</th><th>Rol</th><th></th></tr></thead>
+            <thead><tr><th>Nombre completo</th><th>Usuario</th><th>Correo</th><th>Rol</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
         <hr />
-        <h3>Agregar usuario</h3>
-        <div class="row gap wrap">
-          <input id="new-user-name" type="text" placeholder="Nombre del usuario" />
-          <select id="new-user-role">
-            <option value="operador">Operador</option>
-            <option value="capturista">Capturista</option>
-            <option value="admin">Administrador</option>
-          </select>
-          <button id="add-user" class="btn btn-primary">Agregar</button>
+        <h3>Registrar usuario</h3>
+        <div class="filters">
+          <div class="field"><label for="nu-first">Nombre(s)</label><input id="nu-first" type="text" placeholder="Juan" /></div>
+          <div class="field"><label for="nu-last">Apellidos</label><input id="nu-last" type="text" placeholder="Cabrera López" /></div>
+          <div class="field"><label for="nu-email">Correo electrónico</label><input id="nu-email" type="email" placeholder="correo@empresa.com" /></div>
+          <div class="field"><label for="nu-username">Usuario</label><input id="nu-username" type="text" autocapitalize="none" placeholder="jcabrera" /></div>
+          <div class="field"><label for="nu-pass">Contraseña</label><input id="nu-pass" type="password" placeholder="mínimo 4 caracteres" /></div>
+          <div class="field"><label for="nu-role">Rol</label>
+            <select id="nu-role">
+              <option value="operador">Operador</option>
+              <option value="capturista">Capturista</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </div>
         </div>
-      </div>
-
-      <div class="card">
-        <h2>PIN de administrador</h2>
-        <p class="hint">Se solicita al iniciar sesión como administrador. Cámbialo por seguridad.</p>
-        <div class="row gap wrap">
-          <input id="admin-pin" type="password" inputmode="numeric" placeholder="Nuevo PIN" />
-          <button id="save-pin" class="btn">Guardar PIN</button>
-        </div>
+        <button id="add-user" class="btn btn-primary">Registrar usuario</button>
       </div>
     </section>
   </main>

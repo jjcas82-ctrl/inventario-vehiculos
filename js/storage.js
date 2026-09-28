@@ -44,10 +44,7 @@ function seed() {
       { id: cryptoId(), name: "Agencia Aeropuerto",     lat: null, lng: null, areas: cloneAreas(DEFAULT_AREAS) },
       { id: cryptoId(), name: "Agencia Aeroplasa Auto", lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS) },
     ],
-    users: [
-      { id: cryptoId(), name: "Administrador", role: "admin" },
-    ],
-    adminPin: "1234", // PIN inicial; el admin debe cambiarlo
+    users: [],   // el admin inicial (jcabrera) lo crea auth.ensureSeedAdmin()
     audits: [],
   };
 }
@@ -82,10 +79,7 @@ function read() {
   _cache.vehicles = _cache.vehicles || {};
   _cache.events = _cache.events || [];
   _cache.agencies = (_cache.agencies || seed().agencies).map(migrateAgency);
-  if (!Array.isArray(_cache.users) || !_cache.users.length) {
-    _cache.users = [{ id: cryptoId(), name: "Administrador", role: "admin" }];
-  }
-  if (!_cache.adminPin) _cache.adminPin = "1234";
+  if (!Array.isArray(_cache.users)) _cache.users = [];
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
 
   // Alta / actualización de la Agencia Aeroplasa Auto para instalaciones previas.
@@ -201,9 +195,9 @@ export const store = {
 
   // ---- Usuarios y roles ----
   listUsers() { return read().users || []; },
-  addUser(name, role) {
+  addUser(data) {
     const db = read();
-    const u = { id: cryptoId(), name, role };
+    const u = { id: cryptoId(), createdAt: new Date().toISOString(), ...data };
     db.users.push(u);
     write(db);
     return u;
@@ -219,10 +213,6 @@ export const store = {
     db.users = db.users.filter(x => x.id !== id);
     write(db);
   },
-
-  // ---- PIN de administrador ----
-  getAdminPin() { return read().adminPin || ""; },
-  setAdminPin(pin) { const db = read(); db.adminPin = String(pin); write(db); },
 
   // ---- Auditorías / conteo físico ----
   listAudits() { return read().audits || []; },

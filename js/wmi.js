@@ -68,7 +68,7 @@ export const WMI3 = {
   "LGB":"Dongfeng","LGH":"Dongfeng","LVH":"Dongfeng-Honda","LGX":"BYD","LC0":"BYD","L6T":"Geely","LB2":"Geely",
   "LGW":"Great Wall","LVV":"Chery","LVS9":"Ford","LFP":"FAW","LFM":"FAW-Toyota","LJ1":"JAC","LZM":"CAMC",
   // ---- India ----
-  "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"GM India","MBH":"Suzuki","MEE":"Renault India",
+  "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet (GM India)","MBH":"Suzuki","MEE":"Renault India",
 };
 
 // Coincidencias por los 2 primeros caracteres (más generales).
@@ -89,7 +89,7 @@ export const WMI2 = {
   "MA":"India","MB":"India","ME":"India","MAT":"Tata",
 };
 
-// País por el primer carácter (ISO 3780) — resumido.
+// País por el/los primeros caracteres del WMI (ISO 3780) — resumido.
 export function countryFromChar(c, two) {
   // Norteamérica
   if (c === "1" || c === "4" || c === "5") return "Estados Unidos";
@@ -98,10 +98,18 @@ export function countryFromChar(c, two) {
   if (c === "6" || c === "7") return "Oceanía";
   if (c === "8" || c === "9") return "Sudamérica";
   if (/[A-H]/.test(c)) return "África";
-  if (/[J-N]/.test(c)) return "Asia (Japón/otros)";
+  // Asia por rangos más finos (segundo carácter):
+  if (c === "J") return "Japón";
+  if (c === "K") return "Corea del Sur";
+  if (c === "L") return "China";
+  if (c === "M") {
+    if (/^M[A-E]/.test(two)) return "India";
+    if (/^M[F-K]/.test(two)) return "Indonesia/Tailandia";
+    return "Asia";
+  }
+  if (c === "N") return "Turquía/otros";
   if (/[P-R]/.test(c)) return "Asia";
   if (/[S-Z]/.test(c)) return "Europa";
-  if (/[L]/.test(c)) return "China";
   return "Desconocido";
 }
 
