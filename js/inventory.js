@@ -123,8 +123,11 @@ export function openVehicle(vin) {
   });
 
   modal.hidden = false;
+  modal.style.display = "flex";
 }
 
 function closeModal() {
-  document.getElementById("modal").hidden = true;
+  const modal = document.getElementById("modal");
+  modal.hidden = true;
+  modal.style.display = "none";
 }
