@@ -12,6 +12,8 @@
 }
 
 * { box-sizing: border-box; }
+/* El atributo hidden debe ocultar SIEMPRE, incluso sobre display:flex de .modal */
+[hidden] { display: none !important; }
 html, body { margin: 0; padding: 0; }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
