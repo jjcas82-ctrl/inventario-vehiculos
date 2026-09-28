@@ -17,18 +17,20 @@
       <span class="brand-text">Inventario de Vehículos</span>
     </div>
     <div class="topbar-right">
-      <button id="user-btn" class="btn btn-ghost" title="Usuario que registra">👤 <span id="user-name">Sin usuario</span></button>
+      <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
   </header>
 
   <nav class="tabs" role="tablist">
-    <button class="tab is-active" data-tab="scan" role="tab">Escanear</button>
-    <button class="tab" data-tab="inventory" role="tab">Inventario</button>
-    <button class="tab" data-tab="map" role="tab">Mapa</button>
-    <button class="tab" data-tab="reports" role="tab">Reportes</button>
-    <button class="tab" data-tab="settings" role="tab">Agencias</button>
+    <button class="tab is-active" data-tab="scan" role="tab" data-perm="event.register">Escanear</button>
+    <button class="tab" data-tab="inventory" role="tab" data-perm="inventory.view">Inventario</button>
+    <button class="tab" data-tab="map" role="tab" data-perm="map.view">Mapa</button>
+    <button class="tab" data-tab="reports" role="tab" data-perm="reports.view">Reportes</button>
+    <button class="tab" data-tab="audit" role="tab" data-perm="audit.run">Auditoría</button>
+    <button class="tab" data-tab="settings" role="tab" data-perm="agencies.manage">Agencias</button>
+    <button class="tab" data-tab="users" role="tab" data-perm="users.manage">Usuarios</button>
   </nav>
 
   <main>
@@ -202,6 +204,105 @@
           <button id="import-data" class="btn">Importar respaldo</button>
           <input id="import-file" type="file" accept="application/json" hidden />
           <button id="wipe-data" class="btn btn-danger">Borrar todo</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= AUDITORÍA / CONTEO FÍSICO ================= -->
+    <section id="tab-audit" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2>Conteo físico / Auditoría</h2>
+        <p class="hint">Escanea las unidades físicamente presentes y el sistema las compara contra el inventario para detectar faltantes y sobrantes.</p>
+
+        <div id="audit-setup">
+          <div class="filters">
+            <div class="field">
+              <label for="audit-agency">Agencia a auditar</label>
+              <select id="audit-agency"></select>
+            </div>
+            <div class="field">
+              <label for="audit-mode">Tipo de conteo</label>
+              <select id="audit-mode">
+                <option value="full">Total (todo el inventario de la agencia)</option>
+                <option value="random">Rotativo (muestra aleatoria)</option>
+              </select>
+            </div>
+            <div class="field" id="audit-count-field" style="display:none">
+              <label for="audit-count">Cantidad de unidades a auditar</label>
+              <input id="audit-count" type="number" min="1" value="10" />
+            </div>
+          </div>
+          <p id="audit-scope" class="hint"></p>
+          <button id="audit-start" class="btn btn-primary">Iniciar conteo</button>
+        </div>
+
+        <div id="audit-run" hidden>
+          <div class="summary" id="audit-progress"></div>
+          <div class="row gap wrap">
+            <button id="audit-scan" class="btn btn-primary">📷 Escanear unidad</button>
+            <button id="audit-scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
+          </div>
+          <div class="scanner" id="audit-scanner-wrap" hidden style="max-width:420px">
+            <video id="audit-video" playsinline muted></video>
+            <div class="scanner-overlay"><div class="scanner-frame"></div></div>
+          </div>
+          <div class="field" style="margin-top:8px">
+            <label for="audit-manual">O captura el VIN manualmente</label>
+            <div class="row gap">
+              <input id="audit-manual" type="text" maxlength="17" autocapitalize="characters" placeholder="VIN de 17 caracteres" />
+              <button id="audit-manual-btn" class="btn">Marcar presente</button>
+            </div>
+          </div>
+          <p id="audit-status" class="hint"></p>
+          <div class="table-wrap">
+            <table class="table" id="audit-table">
+              <thead><tr><th>VIN</th><th>Marca</th><th>Ubicación esperada</th><th>Resultado</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="row gap wrap">
+            <button id="audit-finish" class="btn btn-primary">Finalizar y guardar resultado</button>
+            <button id="audit-cancel" class="btn btn-ghost">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Auditorías anteriores</h2>
+        <div id="audit-history"></div>
+      </div>
+    </section>
+
+    <!-- ================= USUARIOS ================= -->
+    <section id="tab-users" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2>Usuarios y roles</h2>
+        <p class="hint">El rol define qué puede hacer cada usuario. Solo el administrador gestiona esta lista.</p>
+        <div class="table-wrap">
+          <table class="table" id="users-table">
+            <thead><tr><th>Nombre</th><th>Rol</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <hr />
+        <h3>Agregar usuario</h3>
+        <div class="row gap wrap">
+          <input id="new-user-name" type="text" placeholder="Nombre del usuario" />
+          <select id="new-user-role">
+            <option value="operador">Operador</option>
+            <option value="capturista">Capturista</option>
+            <option value="admin">Administrador</option>
+          </select>
+          <button id="add-user" class="btn btn-primary">Agregar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>PIN de administrador</h2>
+        <p class="hint">Se solicita al iniciar sesión como administrador. Cámbialo por seguridad.</p>
+        <div class="row gap wrap">
+          <input id="admin-pin" type="password" inputmode="numeric" placeholder="Nuevo PIN" />
+          <button id="save-pin" class="btn">Guardar PIN</button>
         </div>
       </div>
     </section>

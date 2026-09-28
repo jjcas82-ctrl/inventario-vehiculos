@@ -11,6 +11,9 @@ import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
 import { initReports, renderReports, refreshReportAgencies } from "./reports.js";
 import { notify, confirmDialog, promptDialog } from "./ui.js";
+import * as auth from "./auth.js";
+import { initUsers, renderUsers } from "./users.js";
+import "./audit.js";
 
 let currentDecode = null;   // resultado del último VIN decodificado
 let scanner = null;
@@ -18,36 +21,91 @@ let scanner = null;
 // Compat: mantenemos toast() pero ahora usa el aviso bonito.
 function toast(msg, type = "info") { notify(msg, { type }); }
 
-// ---------- Usuario que registra ----------
+// ---------- Sesión / Login por rol ----------
 function refreshUserLabel() {
   const el = document.getElementById("user-name");
-  const u = store.getUser();
-  el.textContent = u || "Sin usuario";
+  const u = auth.currentUser();
+  el.textContent = u ? `${u.name} · ${auth.ROLES[u.role]?.label || u.role}` : "Iniciar sesión";
 }
 
-async function askUser({ force = false } = {}) {
-  const current = store.getUser();
-  if (current && !force) return current;
-  const name = await promptDialog({
-    icon: "👤",
-    title: "¿Quién registra?",
-    message: "Escribe tu nombre o iniciales. Quedará guardado en cada entrada, salida y movimiento que registres.",
-    placeholder: "Ej. Juan Pérez",
-    value: current || "",
+// Aplica los permisos a la interfaz: pestañas y acciones visibles según el rol.
+function applyPermissions() {
+  const loggedIn = !!auth.currentUser();
+  // Pestañas: mostrar solo las permitidas
+  document.querySelectorAll(".tab[data-perm]").forEach(tab => {
+    const ok = loggedIn && auth.can(tab.dataset.perm);
+    tab.style.display = ok ? "" : "none";
   });
-  if (name && name.trim()) {
-    store.setUser(name.trim());
-    refreshUserLabel();
-    return name.trim();
+  // Acciones marcadas con data-perm en cualquier parte
+  document.querySelectorAll("[data-perm]:not(.tab)").forEach(el => {
+    el.style.display = (loggedIn && auth.can(el.dataset.perm)) ? "" : "none";
+  });
+  // Si la pestaña activa ya no es visible, saltar a la primera visible
+  const active = document.querySelector(".tab.is-active");
+  if (!active || active.style.display === "none") {
+    const first = [...document.querySelectorAll(".tab")].find(t => t.style.display !== "none");
+    if (first) first.click();
   }
-  return current;
 }
 
-function setupUser() {
+// Flujo de inicio de sesión: elegir usuario; si es admin, pedir PIN.
+async function login() {
+  const users = auth.listUsers();
+  if (!users.length) { notify("No hay usuarios configurados.", { type: "error" }); return; }
+
+  const choice = await confirmDialog({
+    icon: "👤",
+    title: "Iniciar sesión",
+    message: "Selecciona tu usuario:",
+    buttons: users.slice(0, 6).map(u => ({
+      label: `${u.name} (${auth.ROLES[u.role]?.label || u.role})`,
+      value: u.id,
+      variant: u.role === "admin" ? "primary" : "ghost",
+    })).concat([{ label: "Cancelar", value: null, variant: "ghost" }]),
+  });
+  if (!choice) return;
+  const user = users.find(u => u.id === choice);
+  if (!user) return;
+
+  // El administrador requiere PIN
+  if (user.role === "admin") {
+    const pin = await promptDialog({
+      icon: "🔒", title: "PIN de administrador",
+      message: "Ingresa el PIN para acceder como administrador.",
+      placeholder: "PIN", okLabel: "Entrar",
+    });
+    if (pin === null) return;
+    if (!auth.checkAdminPin(pin)) { notify("PIN incorrecto.", { type: "error" }); return; }
+  }
+
+  auth.setSession(user);
   refreshUserLabel();
-  document.getElementById("user-btn").addEventListener("click", () => askUser({ force: true }));
-  // Si no hay usuario, lo pedimos al inicio (no bloqueante, una sola vez).
-  if (!store.getUser()) setTimeout(() => askUser(), 400);
+  applyPermissions();
+  notify(`Sesión iniciada: ${user.name} (${auth.ROLES[user.role]?.label}).`, { type: "success" });
+}
+
+async function setupUser() {
+  refreshUserLabel();
+  document.getElementById("user-btn").addEventListener("click", async () => {
+    if (auth.currentUser()) {
+      const choice = await confirmDialog({
+        icon: "👤", title: auth.currentUser().name,
+        message: "Rol: " + (auth.ROLES[auth.currentUser().role]?.label || ""),
+        buttons: [
+          { label: "Cerrar sesión", value: "logout", variant: "danger" },
+          { label: "Cambiar de usuario", value: "switch", variant: "primary" },
+          { label: "Cerrar", value: null, variant: "ghost" },
+        ],
+      });
+      if (choice === "logout") { auth.logout(); refreshUserLabel(); applyPermissions(); }
+      else if (choice === "switch") { auth.logout(); await login(); }
+    } else {
+      await login();
+    }
+  });
+  applyPermissions();
+  // Si no hay sesión, invitar a iniciar (no bloqueante).
+  if (!auth.currentUser()) setTimeout(login, 400);
 }
 
 // ---------- Navegación por pestañas ----------
@@ -63,6 +121,8 @@ function setupTabs() {
       if (name === "map") { refreshMapVinOptions(); drawMap(); }
       if (name === "reports") { refreshReportAgencies(); renderReports(); }
       if (name === "inventory") renderInventory();
+      if (name === "users") renderUsers();
+      if (name === "audit") window.__initAudit && window.__initAudit();
     })
   );
 }
@@ -191,6 +251,37 @@ function extractVin(text) {
   // Busca una subcadena de 17 caracteres válidos de VIN
   const m = norm.match(/[A-HJ-NPR-Z0-9]{17}/);
   return m ? m[0] : null;
+}
+
+// Captura MANUAL: valida ISO 3779 de forma explícita y guía la corrección.
+function decodeManualVin(raw) {
+  const vin = normalizeVin(raw);
+  document.getElementById("vin-input").value = vin;
+
+  // Validaciones puntuales para dar un mensaje de corrección claro.
+  if (vin.length === 0) { notify("Escribe un VIN.", { type: "warn" }); return null; }
+  if (vin.length !== 17) {
+    notify(`El VIN debe tener 17 caracteres (ISO 3779). Van ${vin.length}. Revisa la captura.`, { type: "error", title: "VIN inválido" });
+    showVinResult(decodeVin(vin));
+    return null;
+  }
+  if (/[IOQ]/.test(vin)) {
+    const pos = [...vin].map((c, i) => "IOQ".includes(c) ? i + 1 : null).filter(Boolean).join(", ");
+    notify(`El VIN no puede contener las letras I, O ni Q (posición ${pos}). Suelen confundirse con 1 y 0.`, { type: "error", title: "VIN inválido" });
+    showVinResult(decodeVin(vin));
+    return null;
+  }
+
+  const dec = decodeVin(vin);
+  showVinResult(dec);
+  if (!dec.checkDigit.ok) {
+    notify(`El dígito de control (posición 9) no coincide: el VIN trae “${dec.checkDigit.actual}” pero según ISO 3779 debería ser “${dec.checkDigit.expected}”. Verifica que no haya un error de captura.`,
+      { type: "warn", title: "Revisa el VIN", timeout: 7000 });
+  } else {
+    notify("VIN válido (ISO 3779) ✓", { type: "success" });
+    tryEnrich(dec);
+  }
+  return dec;
 }
 
 function handleScannedText(text) {
@@ -408,13 +499,15 @@ function setupScanner() {
     }
   });
 
-  // Captura manual
-  document.getElementById("vin-decode").addEventListener("click", () => {
+  // Captura manual con validación ISO 3779 explícita
+  const manualDecode = () => {
     const val = document.getElementById("vin-input").value;
-    handleScannedText(val);
-  });
+    const dec = decodeManualVin(val);
+    return dec;
+  };
+  document.getElementById("vin-decode").addEventListener("click", manualDecode);
   document.getElementById("vin-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); handleScannedText(e.target.value); }
+    if (e.key === "Enter") { e.preventDefault(); manualDecode(); }
   });
 }
 
@@ -488,9 +581,13 @@ function setupEventButtons() {
         country: currentDecode.country,
       });
     }
-    // Asegura que haya un usuario asociado al registro.
-    let by = store.getUser();
-    if (!by) by = await askUser();
+    // Asegura que haya sesión iniciada para registrar.
+    if (!auth.can("event.register")) {
+      notify("Inicia sesión para registrar eventos.", { type: "warn" });
+      await login();
+      if (!auth.can("event.register")) return;
+    }
+    const by = auth.currentUser()?.name || store.getUser() || "—";
     await registerEvent({ vin, type, agency, area, location, condition, by }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
     notify(`${labels[type]} registrada por ${by || "—"}.`, { type: "success", title: vin });
@@ -586,6 +683,7 @@ function refreshAll() {
 function main() {
   setupUser();
   setupTabs();
+  initUsers();
   setupScanner();
   setupEventButtons();
   setupDataButtons();

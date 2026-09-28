@@ -44,6 +44,11 @@ function seed() {
       { id: cryptoId(), name: "Agencia Aeropuerto",     lat: null, lng: null, areas: cloneAreas(DEFAULT_AREAS) },
       { id: cryptoId(), name: "Agencia Aeroplasa Auto", lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS) },
     ],
+    users: [
+      { id: cryptoId(), name: "Administrador", role: "admin" },
+    ],
+    adminPin: "1234", // PIN inicial; el admin debe cambiarlo
+    audits: [],
   };
 }
 
@@ -77,6 +82,11 @@ function read() {
   _cache.vehicles = _cache.vehicles || {};
   _cache.events = _cache.events || [];
   _cache.agencies = (_cache.agencies || seed().agencies).map(migrateAgency);
+  if (!Array.isArray(_cache.users) || !_cache.users.length) {
+    _cache.users = [{ id: cryptoId(), name: "Administrador", role: "admin" }];
+  }
+  if (!_cache.adminPin) _cache.adminPin = "1234";
+  if (!Array.isArray(_cache.audits)) _cache.audits = [];
 
   // Alta / actualización de la Agencia Aeroplasa Auto para instalaciones previas.
   const aeroAuto = _cache.agencies.find(a => /aeroplasa auto/i.test(a.name));
@@ -171,6 +181,63 @@ export const store = {
     const db = read();
     db.agencies = db.agencies.filter(x => x.id !== id);
     write(db);
+  },
+
+  // Cambia el VIN (clave) de un vehículo y actualiza sus eventos. Solo admin en la UI.
+  changeVin(oldVin, newVin) {
+    const db = read();
+    if (!db.vehicles[oldVin]) return { ok: false, error: "El vehículo no existe." };
+    if (db.vehicles[newVin]) return { ok: false, error: "Ya existe un vehículo con el VIN nuevo." };
+    const v = db.vehicles[oldVin];
+    delete db.vehicles[oldVin];
+    v.vin = newVin;
+    v.updatedAt = new Date().toISOString();
+    db.vehicles[newVin] = v;
+    // Reasignar el VIN en los eventos históricos
+    db.events.forEach(e => { if (e.vin === oldVin) e.vin = newVin; });
+    write(db);
+    return { ok: true };
+  },
+
+  // ---- Usuarios y roles ----
+  listUsers() { return read().users || []; },
+  addUser(name, role) {
+    const db = read();
+    const u = { id: cryptoId(), name, role };
+    db.users.push(u);
+    write(db);
+    return u;
+  },
+  updateUser(id, patch) {
+    const db = read();
+    const u = db.users.find(x => x.id === id);
+    if (u) { Object.assign(u, patch); write(db); }
+    return u;
+  },
+  removeUser(id) {
+    const db = read();
+    db.users = db.users.filter(x => x.id !== id);
+    write(db);
+  },
+
+  // ---- PIN de administrador ----
+  getAdminPin() { return read().adminPin || ""; },
+  setAdminPin(pin) { const db = read(); db.adminPin = String(pin); write(db); },
+
+  // ---- Auditorías / conteo físico ----
+  listAudits() { return read().audits || []; },
+  addAudit(audit) {
+    const db = read();
+    const rec = { id: cryptoId(), createdAt: new Date().toISOString(), ...audit };
+    db.audits.push(rec);
+    write(db);
+    return rec;
+  },
+  updateAudit(id, patch) {
+    const db = read();
+    const a = db.audits.find(x => x.id === id);
+    if (a) { Object.assign(a, patch); write(db); }
+    return a;
   },
 
   // ---- Respaldo ----

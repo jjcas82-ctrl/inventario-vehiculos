@@ -2,6 +2,9 @@
 import { store } from "./storage.js";
 import { escapeHtml } from "./agencies.js";
 import { EVENT_LABELS } from "./events.js";
+import * as auth from "./auth.js";
+import { notify, confirmDialog } from "./ui.js";
+import { decodeVin } from "./vin.js";
 
 let onChange = () => {};
 
@@ -78,9 +81,26 @@ export function openVehicle(vin) {
   }).join("");
 
   const incomplete = !v.model || !v.color;
+  const canEdit = auth.can("vehicle.edit");
+  const canEditVin = auth.can("vehicle.editVin");
+  const dis = canEdit ? "" : "disabled";
+
+  // Fila del VIN: editable solo por administrador; para el resto es de solo lectura.
+  const vinRow = canEditVin
+    ? `<div class="field"><label>VIN (solo administrador puede cambiarlo)</label>
+         <div class="row gap">
+           <input id="f-vin" type="text" maxlength="17" value="${escapeHtml(v.vin)}" style="font-family:ui-monospace,monospace" />
+           <button id="change-vin" class="btn btn-danger">Cambiar VIN</button>
+         </div>
+         <p class="hint">Cambiar el VIN afecta todo el historial de la unidad. Úsalo solo para corregir un VIN mal capturado.</p>
+       </div>`
+    : `<div class="field"><label>VIN</label>
+         <div><code style="font-size:15px">${escapeHtml(v.vin)}</code> <span class="tag">🔒 Solo admin</span></div>
+       </div>`;
 
   body.innerHTML = `
     ${incomplete ? '<p class="hint" style="color:var(--danger)">⚠️ Ficha incompleta: faltan datos por completar.</p>' : ''}
+    ${!canEdit ? '<p class="hint">Tu rol permite ver esta ficha, pero no editarla.</p>' : ''}
     <p class="ficha-meta">
       📅 Ingreso: <b>${v.entryAt ? new Date(v.entryAt).toLocaleString() : "—"}</b>
       &nbsp;·&nbsp; 👤 Registró: <b>${escapeHtml(v.entryBy || v.lastBy || "—")}</b>
@@ -99,28 +119,30 @@ export function openVehicle(vin) {
         </dl>
       </div>
       <div>
-        ${field("Marca", "make", v.make)}
-        ${field("Modelo", "model", v.model)}
-        ${field("Color", "color", v.color)}
-        ${field("Placa / Matrícula", "plate", v.plate)}
+        ${vinRow}
+        <div class="field"><label>Marca</label><input id="f-make" type="text" value="${escapeHtml(v.make || "")}" ${dis} /></div>
+        <div class="field"><label>Modelo</label><input id="f-model" type="text" value="${escapeHtml(v.model || "")}" ${dis} /></div>
+        <div class="field"><label>Color</label><input id="f-color" type="text" value="${escapeHtml(v.color || "")}" ${dis} /></div>
+        <div class="field"><label>Placa / Matrícula</label><input id="f-plate" type="text" value="${escapeHtml(v.plate || "")}" ${dis} /></div>
         <div class="field"><label>Condición</label>
-          <select id="f-condition">
+          <select id="f-condition" ${dis}>
             <option value="nuevo" ${v.condition==="nuevo"?"selected":""}>Nuevo</option>
             <option value="usado" ${v.condition==="usado"?"selected":""}>Usado</option>
           </select>
         </div>
         <div class="field"><label>Notas</label>
-          <textarea id="f-notes" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">${escapeHtml(v.notes || "")}</textarea>
+          <textarea id="f-notes" rows="3" ${dis} style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">${escapeHtml(v.notes || "")}</textarea>
         </div>
       </div>
     </div>
-    <div class="row gap"><button id="save-veh" class="btn btn-primary">Guardar cambios</button></div>
+    ${canEdit ? '<div class="row gap"><button id="save-veh" class="btn btn-primary">Guardar cambios</button></div>' : ''}
     <hr />
     <h3>Historial de movimientos</h3>
     <ul>${timeline || '<li class="muted">Sin eventos.</li>'}</ul>
   `;
 
-  body.querySelector("#save-veh").addEventListener("click", () => {
+  const saveBtn = body.querySelector("#save-veh");
+  if (saveBtn) saveBtn.addEventListener("click", () => {
     store.upsertVehicle({
       vin,
       make: body.querySelector("#f-make").value.trim(),
@@ -133,6 +155,34 @@ export function openVehicle(vin) {
     closeModal();
     renderInventory();
     onChange();
+    notify("Ficha guardada.", { type: "success" });
+  });
+
+  // Cambio de VIN (solo admin), con validación ISO 3779 y confirmación.
+  const changeVinBtn = body.querySelector("#change-vin");
+  if (changeVinBtn) changeVinBtn.addEventListener("click", async () => {
+    const nuevo = (body.querySelector("#f-vin").value || "").toUpperCase().trim();
+    if (nuevo === vin) { notify("El VIN es el mismo.", { type: "info" }); return; }
+    const dec = decodeVin(nuevo);
+    if (dec.vin.length !== 17 || dec.errors.length) {
+      notify("VIN inválido (ISO 3779): " + (dec.errors[0] || "revisa el formato."), { type: "error" });
+      return;
+    }
+    const choice = await confirmDialog({
+      icon: "🔑", title: "Cambiar VIN",
+      message: `Vas a cambiar el VIN:\n\n${vin}\n→ ${nuevo}\n\nSe actualizará todo el historial de la unidad. ¿Continuar?`,
+      buttons: [
+        { label: "Cancelar", value: null, variant: "ghost" },
+        { label: "Sí, cambiar VIN", value: "ok", variant: "danger" },
+      ],
+    });
+    if (choice !== "ok") return;
+    const res = store.changeVin(vin, nuevo);
+    if (!res.ok) { notify(res.error, { type: "error" }); return; }
+    closeModal();
+    renderInventory();
+    onChange();
+    notify("VIN actualizado correctamente.", { type: "success" });
   });
 
   modal.hidden = false;
