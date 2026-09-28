@@ -9,6 +9,8 @@
 //   11    planta de ensamblaje
 //   12-17 número de serie de producción
 
+import { makeFromVin, countryFromChar } from "./wmi.js";
+
 const INVALID_CHARS = /[IOQ]/;               // Letras no permitidas en un VIN
 const VIN_REGEX = /^[A-HJ-NPR-Z0-9]{17}$/;
 
@@ -27,65 +29,14 @@ const YEAR_MAP = {
   1:2001, 2:2002, 3:2003, 4:2004, 5:2005, 6:2006, 7:2007, 8:2008, 9:2009,
 };
 
-// País por el 1.er carácter del WMI (rangos del estándar ISO 3780).
-// Se refina con los dos primeros para casos comunes de Norteamérica.
+// País por el 1.er carácter del WMI (usa la tabla de wmi.js).
 function countryFromWMI(vin) {
-  const c = vin[0];
-  const two = vin.slice(0, 2);
-
-  // Refinamiento Norteamérica (por rango de segundo carácter)
-  const naNum = /[1-5]/.test(c);
-  if (naNum) {
-    // 1,4,5 = EE. UU.; 2 = Canadá; 3 = México/Centroamérica
-    if (c === "2") return "Canadá";
-    if (c === "3") {
-      // 3A-3W → México; 3X-37 → Centroamérica (aprox.)
-      return /^3[A-W]/.test(two) || /^3[0-9]/.test(two) ? "México" : "México";
-    }
-    return "Estados Unidos";
-  }
-
-  const ranges = [
-    { re: /[6-7]/, name: "Oceanía (Australia/N. Zelanda)" },
-    { re: /[89]/,  name: "Sudamérica" },
-    { re: /[A-H]/, name: "África" },
-    { re: /[J-R]/, name: "Asia" },
-    { re: /[S-Z]/, name: "Europa" },
-  ];
-  const hit = ranges.find(r => r.re.test(c));
-  return hit ? hit.name : "Desconocido";
+  return countryFromChar(vin[0], vin.slice(0, 2));
 }
 
-// Marca/fabricante por WMI (3 y luego 2 caracteres). Tabla ampliable.
-const WMI_MAKE = {
-  // Chevrolet / GM — plantas de todo el mundo
-  "1G1":"Chevrolet","1GC":"Chevrolet","1GN":"Chevrolet","1GB":"Chevrolet",
-  "2G1":"Chevrolet","2GC":"Chevrolet","2GN":"Chevrolet","2CN":"Chevrolet",
-  "3G1":"Chevrolet","3GC":"Chevrolet","3GN":"Chevrolet","3GB":"Chevrolet", // 3G* = GM México
-  "KL1":"Chevrolet","KL8":"Chevrolet","KL7":"Chevrolet",                    // GM Corea (Aveo, Spark, etc.)
-  "9BG":"Chevrolet","8AG":"Chevrolet","93C":"Chevrolet",                    // GM Brasil/Argentina
-  "MA6":"Chevrolet","LZG":"Chevrolet","LSG":"Chevrolet","L2C":"Chevrolet",  // GM India/China
-  "1GT":"GMC","1GK":"GMC","1GKS":"GMC","2GK":"GMC","3GK":"GMC",
-  "1G4":"Buick","1G8":"Saturn","1GY":"Cadillac","1GM":"Pontiac","1G3":"Oldsmobile","1G6":"Cadillac",
-  "1FA":"Ford","1FT":"Ford","1FM":"Ford","1FD":"Ford","2FA":"Ford","3FA":"Ford","MAJ":"Ford",
-  "1HG":"Honda","2HG":"Honda","3HG":"Honda","JHM":"Honda","5FN":"Honda","19X":"Honda",
-  "JTD":"Toyota","JTM":"Toyota","JTE":"Toyota","4T1":"Toyota","5TD":"Toyota","5TF":"Toyota","2T1":"Toyota","3TM":"Toyota",
-  "1N4":"Nissan","1N6":"Nissan","3N1":"Nissan","JN1":"Nissan","JN8":"Nissan","5N1":"Nissan",
-  "WVW":"Volkswagen","1VW":"Volkswagen","3VW":"Volkswagen","WV1":"Volkswagen","WV2":"Volkswagen",
-  "WBA":"BMW","WBS":"BMW","4US":"BMW","5UX":"BMW",
-  "WDB":"Mercedes-Benz","WDD":"Mercedes-Benz","WDC":"Mercedes-Benz","4JG":"Mercedes-Benz",
-  "KMH":"Hyundai","KM8":"Hyundai","5NP":"Hyundai","KNA":"Kia","KND":"Kia","3KP":"Kia",
-  "MA3":"Suzuki","JS2":"Suzuki","JS3":"Suzuki",
-  "LSF":"Genérico China (LSF)","LFV":"FAW-Volkswagen","LGB":"BYD","LVS":"Ford China",
-  "3VV":"Volkswagen México","3MZ":"Mazda México","JM1":"Mazda","JM3":"Mazda",
-};
-
+// Marca/fabricante por WMI (base de datos amplia en wmi.js).
 function makeFromWMI(vin) {
-  const wmi3 = vin.slice(0, 3);
-  if (WMI_MAKE[wmi3]) return WMI_MAKE[wmi3];
-  const wmi2 = vin.slice(0, 2);
-  const byTwo = Object.entries(WMI_MAKE).find(([k]) => k.startsWith(wmi2));
-  return byTwo ? byTwo[1] : "Desconocido";
+  return makeFromVin(vin) || "Desconocido";
 }
 
 export function computeCheckDigit(vin) {

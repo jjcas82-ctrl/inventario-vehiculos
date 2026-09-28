@@ -110,7 +110,7 @@ function showVinResult(dec) {
   box.innerHTML = `
     <div class="vin-colored">${vinColored}</div>
     <dl>
-      <dt>Marca</dt><dd>${escapeHtml(dec.make || "—")}</dd>
+      <dt>Marca</dt><dd>${dec.make && dec.make !== "Desconocido" ? escapeHtml(dec.make) : '<span class="muted">Se completa manualmente</span>'}</dd>
       <dt>Año del modelo</dt><dd>${escapeHtml(dec.year || "—")}</dd>
       <dt>País de origen</dt><dd>${escapeHtml(dec.country || "—")}</dd>
       <dt>Planta (pos. 11)</dt><dd><code>${escapeHtml(dec.plant || "—")}</code></dd>
@@ -170,8 +170,17 @@ async function tryEnrich(dec) {
   // Puede que el usuario ya haya escaneado otro VIN mientras tanto.
   if (!currentDecode || currentDecode.vin !== dec.vin) return;
 
-  if (!online) { note.textContent = "Sin conexión: se muestran solo los datos calculados del VIN."; return; }
+  if (!online) { note.textContent = "Sin conexión: se muestran los datos calculados del VIN (marca, país, año, planta)."; return; }
   if (!data || error) { note.textContent = "No se obtuvieron datos oficiales adicionales" + (error ? " (" + error + ")" : "") + "."; return; }
+
+  // NHTSA solo cubre vehículos del mercado EE.UU. Si no trae marca ni modelo,
+  // significa que ese VIN no está en su base (p. ej. vehículos hechos en China/Asia).
+  if (!data.make && !data.model && !data.bodyClass) {
+    note.textContent = "Este VIN no está en la base oficial de NHTSA (cubre vehículos del mercado EE.UU.). " +
+      "Se muestran los datos calculados del VIN; completa el modelo manualmente en la ficha.";
+    note.style.color = "var(--muted)";
+    return;
+  }
 
   // Fusionamos: la API tiene prioridad para marca/modelo/carrocería/motor.
   dec.apiMake = data.make;

@@ -88,9 +88,8 @@ export function openVehicle(vin) {
     </p>
     <div class="grid grid-2">
       <div>
-        <p class="muted">Datos leídos del VIN (no editables)</p>
+        <p class="muted">Datos del VIN (año y país no editables)</p>
         <dl class="vin-result">
-          <dt>Marca</dt><dd>${escapeHtml(v.make || "—")}</dd>
           <dt>Año</dt><dd>${escapeHtml(v.year || "—")}</dd>
           <dt>País</dt><dd>${escapeHtml(v.country || "—")}</dd>
           ${v.bodyClass ? `<dt>Carrocería</dt><dd>${escapeHtml(v.bodyClass)}</dd>` : ""}
@@ -100,6 +99,7 @@ export function openVehicle(vin) {
         </dl>
       </div>
       <div>
+        ${field("Marca", "make", v.make)}
         ${field("Modelo", "model", v.model)}
         ${field("Color", "color", v.color)}
         ${field("Placa / Matrícula", "plate", v.plate)}
@@ -123,6 +123,7 @@ export function openVehicle(vin) {
   body.querySelector("#save-veh").addEventListener("click", () => {
     store.upsertVehicle({
       vin,
+      make: body.querySelector("#f-make").value.trim(),
       model: body.querySelector("#f-model").value.trim(),
       color: body.querySelector("#f-color").value.trim(),
       plate: body.querySelector("#f-plate").value.trim(),
