@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>Inventario de Vehículos</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">🚗</span>
+      <span class="brand-text">Inventario de Vehículos</span>
+    </div>
+    <div class="topbar-right">
+      <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
+      <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-tab="scan" role="tab">Escanear</button>
+    <button class="tab" data-tab="inventory" role="tab">Inventario</button>
+    <button class="tab" data-tab="map" role="tab">Mapa</button>
+    <button class="tab" data-tab="reports" role="tab">Reportes</button>
+    <button class="tab" data-tab="settings" role="tab">Agencias</button>
+  </nav>
+
+  <main>
+    <!-- ================= ESCANEAR ================= -->
+    <section id="tab-scan" class="tab-panel is-active" role="tabpanel">
+      <div class="grid grid-2">
+        <div class="card">
+          <h2>Escanear vehículo</h2>
+
+          <div class="scanner">
+            <video id="scan-video" playsinline muted></video>
+            <div class="scanner-overlay"><div class="scanner-frame"></div></div>
+          </div>
+
+          <div class="row gap">
+            <button id="scan-start" class="btn btn-primary">Abrir cámara y escanear</button>
+            <button id="scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
+          </div>
+          <p id="scan-status" class="hint"></p>
+
+          <div class="field">
+            <label for="vin-input">VIN (17 caracteres) — captura manual</label>
+            <div class="row gap">
+              <input id="vin-input" type="text" maxlength="17" autocapitalize="characters"
+                     spellcheck="false" placeholder="Ej. 1G1ZD5STXJF123456" />
+              <button id="vin-decode" class="btn">Leer VIN</button>
+            </div>
+            <p class="hint">Un lector USB de códigos actúa como teclado: enfoca este campo y escanea.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Datos leídos del VIN</h2>
+          <div id="vin-result" class="vin-result">
+            <p class="muted">Escanea o escribe un VIN para ver sus datos.</p>
+          </div>
+
+          <div id="event-form" hidden>
+            <hr />
+            <h3>Registrar evento</h3>
+            <div class="field">
+              <label for="ev-agency">Agencia</label>
+              <select id="ev-agency"></select>
+            </div>
+            <div class="field">
+              <label for="ev-location">Ubicación interna</label>
+              <select id="ev-location"></select>
+            </div>
+            <div class="field">
+              <label for="ev-condition">Condición</label>
+              <select id="ev-condition">
+                <option value="nuevo">Nuevo</option>
+                <option value="usado">Usado</option>
+              </select>
+            </div>
+            <p id="gps-status" class="hint"></p>
+            <div class="row gap wrap">
+              <button id="ev-entry" class="btn btn-primary">Registrar entrada</button>
+              <button id="ev-move" class="btn">Registrar movimiento</button>
+              <button id="ev-exit" class="btn btn-danger">Registrar salida</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= INVENTARIO ================= -->
+    <section id="tab-inventory" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <div class="row between wrap">
+          <h2>Inventario</h2>
+          <input id="inv-search" class="grow" type="search" placeholder="Buscar por VIN, marca, modelo, color..." />
+        </div>
+        <div class="table-wrap">
+          <table id="inv-table" class="table">
+            <thead>
+              <tr>
+                <th>VIN</th><th>Marca</th><th>Modelo</th><th>Año</th>
+                <th>Condición</th><th>Agencia</th><th>Ubicación</th><th>Estado</th><th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="inv-empty" class="muted">Aún no hay vehículos registrados.</p>
+      </div>
+    </section>
+
+    <!-- ================= MAPA ================= -->
+    <section id="tab-map" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2>Mapa y trazado de movimientos</h2>
+        <div class="field">
+          <label for="map-vin">Filtrar trazado por VIN</label>
+          <select id="map-vin"><option value="">— Todos los eventos recientes —</option></select>
+        </div>
+        <div id="map" class="map"></div>
+        <p class="hint">El mapa muestra la ubicación GPS de cada entrada, salida y movimiento.</p>
+      </div>
+    </section>
+
+    <!-- ================= REPORTES ================= -->
+    <section id="tab-reports" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2>Reportes</h2>
+        <div class="filters">
+          <div class="field">
+            <label for="rep-type">Reporte</label>
+            <select id="rep-type">
+              <option value="inventory">Inventario actual</option>
+              <option value="aging">Antigüedad en inventario</option>
+              <option value="idle">Unidades sin movimiento</option>
+              <option value="flow">Entradas y salidas por periodo</option>
+              <option value="incomplete">Fichas incompletas</option>
+            </select>
+          </div>
+          <div class="field"><label for="rep-agency">Agencia</label><select id="rep-agency"></select></div>
+          <div class="field">
+            <label for="rep-condition">Condición</label>
+            <select id="rep-condition"><option value="">Todas</option><option value="nuevo">Nuevo</option><option value="usado">Usado</option></select>
+          </div>
+          <div class="field"><label for="rep-from">Desde</label><input id="rep-from" type="date" /></div>
+          <div class="field"><label for="rep-to">Hasta</label><input id="rep-to" type="date" /></div>
+          <div class="field"><label for="rep-days">Días mínimos</label><input id="rep-days" type="number" min="0" placeholder="0" /></div>
+          <div class="field grow"><label for="rep-search">Buscar</label><input id="rep-search" type="search" placeholder="VIN, marca, modelo, color" /></div>
+        </div>
+
+        <div id="rep-summary" class="summary"></div>
+
+        <div class="row gap wrap">
+          <button id="rep-print" class="btn">Imprimir / Guardar PDF</button>
+          <button id="rep-copy" class="btn">Copiar para Excel</button>
+          <button id="rep-csv" class="btn">Exportar CSV</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="rep-table" class="table"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= AGENCIAS ================= -->
+    <section id="tab-settings" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2>Agencias y ubicaciones</h2>
+        <p class="hint">Define las agencias y sus ubicaciones internas. Usa "Usar mi ubicación actual" para fijar el centro GPS de la agencia.</p>
+        <div id="agency-list"></div>
+        <hr />
+        <div class="field">
+          <label for="new-agency">Agregar agencia</label>
+          <div class="row gap">
+            <input id="new-agency" type="text" placeholder="Nombre de la agencia" />
+            <button id="add-agency" class="btn btn-primary">Agregar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Datos</h2>
+        <p class="hint">Los datos se guardan solo en este dispositivo/navegador.</p>
+        <div class="row gap wrap">
+          <button id="export-data" class="btn">Exportar respaldo (JSON)</button>
+          <button id="import-data" class="btn">Importar respaldo</button>
+          <input id="import-file" type="file" accept="application/json" hidden />
+          <button id="wipe-data" class="btn btn-danger">Borrar todo</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal de ficha editable -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="row between">
+        <h2 id="modal-title">Ficha del vehículo</h2>
+        <button id="modal-close" class="btn btn-ghost">✕</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
