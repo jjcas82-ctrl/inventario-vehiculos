@@ -40,10 +40,11 @@ function render() {
       </div>
       <p class="hint">${coords}</p>
       <div class="field">
-        <label>Ubicaciones internas (una por línea)</label>
-        <textarea class="loc-edit" data-id="${a.id}" rows="4"
-          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;">${a.locations.join("\n")}</textarea>
-        <button class="btn save-loc" data-id="${a.id}" style="margin-top:6px;">Guardar ubicaciones</button>
+        <label>Ubicaciones internas (estructura por áreas)</label>
+        <p class="hint" style="margin-top:0">Escribe el <b>Área</b> pegada al margen y sus <b>sububicaciones</b> con sangría (2 espacios o tabulador). Un área sin sububicaciones (como "Área de Entrega") se usa tal cual.</p>
+        <textarea class="loc-edit" data-id="${a.id}" rows="12"
+          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:ui-monospace,monospace;">${escapeHtml(areasToText(a.areas))}</textarea>
+        <button class="btn btn-primary save-loc" data-id="${a.id}" style="margin-top:6px;">Guardar ubicaciones</button>
       </div>
     `;
     wrap.appendChild(el);
@@ -79,13 +80,45 @@ function render() {
   wrap.querySelectorAll(".save-loc").forEach(btn =>
     btn.addEventListener("click", () => {
       const ta = wrap.querySelector(`textarea.loc-edit[data-id="${btn.dataset.id}"]`);
-      const locations = ta.value.split("\n").map(s => s.trim()).filter(Boolean);
-      store.updateAgency(btn.dataset.id, { locations });
+      const areas = textToAreas(ta.value);
+      store.updateAgency(btn.dataset.id, { areas });
       render(); onChange();
-      btn.textContent = "Guardado ✓";
-      setTimeout(() => (btn.textContent = "Guardar ubicaciones"), 1500);
+      notify("Ubicaciones guardadas.", { type: "success" });
     })
   );
+}
+
+// Convierte la estructura de áreas a texto editable (áreas al margen, subs con sangría).
+function areasToText(areas) {
+  return (areas || []).map(ar => {
+    const head = ar.name;
+    const subs = (ar.subs || []).map(s => "  " + s).join("\n");
+    return subs ? head + "\n" + subs : head;
+  }).join("\n");
+}
+
+// Convierte el texto editado de vuelta a la estructura de áreas.
+// Regla: línea sin sangría = Área; línea con sangría (espacios/tab) = sububicación.
+function textToAreas(text) {
+  const lines = String(text || "").split("\n");
+  const areas = [];
+  let current = null;
+  for (const raw of lines) {
+    if (!raw.trim()) continue;
+    const indented = /^[\s\t]/.test(raw);
+    const name = raw.trim();
+    if (!indented) {
+      current = { name, subs: [] };
+      areas.push(current);
+    } else if (current) {
+      current.subs.push(name);
+    } else {
+      // sub sin área previa: la tratamos como área
+      current = { name, subs: [] };
+      areas.push(current);
+    }
+  }
+  return areas;
 }
 
 export function escapeHtml(s) {

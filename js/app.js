@@ -70,18 +70,53 @@ function setupTabs() {
 // ---------- Selectores de agencia/ubicación en el formulario de evento ----------
 function fillEventSelectors() {
   const agSel = document.getElementById("ev-agency");
+  const areaSel = document.getElementById("ev-area");
   const locSel = document.getElementById("ev-location");
+  const subField = document.getElementById("ev-sub-field");
   const agencies = store.listAgencies();
+
   const curAg = agSel.value;
   agSel.innerHTML = agencies.map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join("");
   if (curAg) agSel.value = curAg;
 
-  const fillLocs = () => {
-    const a = agencies.find(x => x.name === agSel.value) || agencies[0];
-    locSel.innerHTML = (a?.locations || []).map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join("");
+  const currentAgency = () => agencies.find(x => x.name === agSel.value) || agencies[0];
+
+  // Rellena el selector de Área según la agencia.
+  const fillAreas = () => {
+    const a = currentAgency();
+    const areas = a?.areas || [];
+    areaSel.innerHTML = areas.map(ar => `<option value="${escapeHtml(ar.name)}">${escapeHtml(ar.name)}</option>`).join("");
+    fillSubs();
   };
-  agSel.onchange = fillLocs;
-  fillLocs();
+
+  // Rellena las sububicaciones según el área elegida. Si el área no tiene
+  // sububicaciones (ej. "Área de Entrega"), oculta el 2.º selector.
+  const fillSubs = () => {
+    const a = currentAgency();
+    const area = (a?.areas || []).find(ar => ar.name === areaSel.value);
+    const subs = area?.subs || [];
+    if (subs.length) {
+      subField.style.display = "";
+      locSel.innerHTML = subs.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
+    } else {
+      // Sin sububicaciones: la ubicación es la propia área.
+      subField.style.display = "none";
+      locSel.innerHTML = `<option value="">${escapeHtml(areaSel.value || "")}</option>`;
+    }
+  };
+
+  agSel.onchange = fillAreas;
+  areaSel.onchange = fillSubs;
+  fillAreas();
+}
+
+// Devuelve {area, location} del formulario.
+// location = ubicación legible completa: "Área › Sububicación" (o solo el área).
+function getSelectedLocation() {
+  const area = document.getElementById("ev-area").value;
+  const sub = document.getElementById("ev-location").value;
+  const location = sub ? `${area} › ${sub}` : area;
+  return { area, location };
 }
 
 // ---------- Mostrar datos del VIN ----------
@@ -385,7 +420,7 @@ function setupEventButtons() {
     const vin = currentDecode.vin;
     const existing = store.getVehicle(vin);
     const agency = document.getElementById("ev-agency").value;
-    const location = document.getElementById("ev-location").value;
+    const { area, location } = getSelectedLocation();
     const condition = document.getElementById("ev-condition").value;
 
     const status = existing?.status; // "dentro" | "fuera" | undefined
@@ -413,7 +448,7 @@ function setupEventButtons() {
         ],
       });
       if (choice !== "move") { notify("No se registró nada. Verifica la unidad.", { type: "info" }); return; }
-      return finalizeEvent(vin, "move", agency, location, condition, existing);
+      return finalizeEvent(vin, "move", agency, area, location, condition, existing);
     }
 
     // === Casos menores: NO bloqueamos con diálogo. Registramos y avisamos suave. ===
@@ -426,11 +461,11 @@ function setupEventButtons() {
       notify("Nota: la unidad no figuraba dentro. Se registró el movimiento.", { type: "warn", title: "Aviso" });
     }
 
-    return finalizeEvent(vin, type, agency, location, condition, existing);
+    return finalizeEvent(vin, type, agency, area, location, condition, existing);
   };
 
   // Guarda datos básicos del VIN (1ª vez) y registra el evento.
-  const finalizeEvent = async (vin, type, agency, location, condition, existing) => {
+  const finalizeEvent = async (vin, type, agency, area, location, condition, existing) => {
     if (!existing) {
       store.upsertVehicle({
         vin,
@@ -442,7 +477,7 @@ function setupEventButtons() {
     // Asegura que haya un usuario asociado al registro.
     let by = store.getUser();
     if (!by) by = await askUser();
-    await registerEvent({ vin, type, agency, location, condition, by }, onGps);
+    await registerEvent({ vin, type, agency, area, location, condition, by }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
     notify(`${labels[type]} registrada por ${by || "—"}.`, { type: "success", title: vin });
     refreshAll();

@@ -1,29 +1,49 @@
 // storage.js — Persistencia local (localStorage) con una pequeña capa de acceso.
 // Modelo de datos:
 //   vehicles: { [vin]: { vin, make, country, year, model, color, condition,
-//                        plate, notes, currentAgency, currentLocation, status,
-//                        createdAt, updatedAt } }
-//   events:   [ { id, vin, type: 'entry'|'exit'|'move', agency, location,
-//                 condition, lat, lng, accuracy, at } ]
-//   agencies: [ { id, name, lat, lng, locations: [string] } ]
+//                        plate, notes, currentAgency, currentArea, currentLocation,
+//                        status, entryAt, entryBy, ... } }
+//   events:   [ { id, vin, type: 'entry'|'exit'|'move', agency, area, location,
+//                 condition, by, lat, lng, accuracy, at } ]
+//   agencies: [ { id, name, lat, lng, areas: [{ name, subs: [string] }] } ]
+//
+// Las ubicaciones internas son JERÁRQUICAS: cada agencia tiene "áreas"
+// (categorías) y cada área tiene sububicaciones.
 
 const KEY = "inv_vehiculos_v1";
 const USER_KEY = "inv_usuario_actual";
 
-const DEFAULT_LOCATIONS = [
-  "Piso 1", "Piso 2", "Piso 3",
-  "Área de servicio", "Taller", "Lavado", "Accesorios",
-  "Sala de exhibición - Chevrolet", "Sala de exhibición - Buick",
+// Estructura jerárquica por defecto (Agencia Aeropuerto).
+const DEFAULT_AREAS = [
+  { name: "Sala de Exhibición", subs: ["Ventas Chevrolet", "Ventas Buick"] },
+  { name: "Servicio",           subs: ["Taller", "Preparación", "Lavado"] },
+  { name: "Estacionamiento",    subs: ["Piso 1", "Piso 2", "Piso 3"] },
+  { name: "Área de Entrega",    subs: [] },
 ];
+
+function defaultAreas() {
+  return DEFAULT_AREAS.map(a => ({ name: a.name, subs: [...a.subs] }));
+}
 
 function seed() {
   return {
     vehicles: {},
     events: [],
     agencies: [
-      { id: cryptoId(), name: "Aeroplasa Aeropuerto", lat: null, lng: null, locations: [...DEFAULT_LOCATIONS] },
+      { id: cryptoId(), name: "Agencia Aeropuerto", lat: null, lng: null, areas: defaultAreas() },
     ],
   };
+}
+
+// Migra agencias antiguas (locations planas) al modelo jerárquico (areas).
+function migrateAgency(a) {
+  if (a.areas) return a;
+  if (Array.isArray(a.locations) && a.locations.length) {
+    a.areas = [{ name: "Ubicaciones", subs: [...a.locations] }];
+  } else {
+    a.areas = defaultAreas();
+  }
+  return a;
 }
 
 export function cryptoId() {
@@ -44,7 +64,7 @@ function read() {
   // Migración defensiva
   _cache.vehicles = _cache.vehicles || {};
   _cache.events = _cache.events || [];
-  _cache.agencies = _cache.agencies || seed().agencies;
+  _cache.agencies = (_cache.agencies || seed().agencies).map(migrateAgency);
   return _cache;
 }
 
@@ -89,6 +109,7 @@ export const store = {
     const v = db.vehicles[ev.vin] || { vin: ev.vin };
     if (ev.type === "entry" || ev.type === "move") {
       v.currentAgency = ev.agency;
+      v.currentArea = ev.area || "";
       v.currentLocation = ev.location;
       v.status = "dentro";
       if (ev.type === "entry") {
@@ -109,11 +130,11 @@ export const store = {
   },
   eventsForVin(vin) { return read().events.filter(e => e.vin === vin).sort((a,b)=>a.at.localeCompare(b.at)); },
 
-  // ---- Agencias ----
+  // ---- Agencias (con áreas jerárquicas) ----
   listAgencies() { return read().agencies; },
   addAgency(name) {
     const db = read();
-    db.agencies.push({ id: cryptoId(), name, lat: null, lng: null, locations: [...DEFAULT_LOCATIONS] });
+    db.agencies.push({ id: cryptoId(), name, lat: null, lng: null, areas: defaultAreas() });
     write(db);
   },
   updateAgency(id, patch) {
@@ -136,4 +157,4 @@ export const store = {
   wipe() { write(seed()); },
 };
 
-export { DEFAULT_LOCATIONS };
+export { defaultAreas, DEFAULT_AREAS };
