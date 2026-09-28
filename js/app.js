@@ -186,7 +186,7 @@ function setupScanner() {
     ocrBtn.textContent = "Leyendo…";
     try {
       setStatus("Tomando foto y leyendo el texto del VIN…", "muted");
-      const { vin, raw } = await readVinFromVideo(video, {
+      const { vin, raw, lowInk } = await readVinFromVideo(video, {
         onProgress: (m) => setStatus(m, "muted"),
         onCandidate: (c) => diagLog("OCR leyó: " + JSON.stringify(c)),
       });
@@ -194,6 +194,8 @@ function setupScanner() {
         handleScannedText(vin);
         stopCamera();
         setStatus("✓ VIN leído por texto: " + vin, "ok");
+      } else if (lowInk) {
+        setStatus("No se ve texto en el recuadro. Apunta directamente al VIN (como la fila de letras/números) y que ocupe el ancho del recuadro, bien enfocado. Luego toca 📸 otra vez.", "error");
       } else {
         // No salió exacto: precargamos lo mejor leído para que el usuario lo corrija.
         const guess = (raw || "").slice(0, 17);

@@ -34,22 +34,46 @@ function crop(video, heightFactor) {
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
 
-  // Escala de grises + binarización adaptativa simple (umbral por promedio)
+  // Escala de grises con estiramiento de contraste + binarización por umbral (Otsu simple).
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = img.data;
-  let sum = 0;
-  const gray = new Float32Array(d.length / 4);
+  const n = d.length / 4;
+  const gray = new Float32Array(n);
+  let min = 255, max = 0;
   for (let i = 0, j = 0; i < d.length; i += 4, j++) {
     const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    gray[j] = g; sum += g;
+    gray[j] = g;
+    if (g < min) min = g;
+    if (g > max) max = g;
   }
-  const mean = sum / gray.length;
-  const thr = mean * 0.9; // ligeramente por debajo del promedio
+  const range = Math.max(1, max - min);
+  // Histograma para umbral de Otsu (mejor con bajo contraste, texto sobre vidrio)
+  const hist = new Array(256).fill(0);
+  for (let j = 0; j < n; j++) {
+    const s = Math.round(((gray[j] - min) / range) * 255);
+    gray[j] = s;
+    hist[s]++;
+  }
+  let total = n, sumAll = 0;
+  for (let t = 0; t < 256; t++) sumAll += t * hist[t];
+  let sumB = 0, wB = 0, maxVar = 0, thr = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (wB === 0) continue;
+    const wF = total - wB; if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > maxVar) { maxVar = between; thr = t; }
+  }
+  let dark = 0;
   for (let i = 0, j = 0; i < d.length; i += 4, j++) {
     const v = gray[j] > thr ? 255 : 0;
+    if (v === 0) dark++;
     d[i] = d[i + 1] = d[i + 2] = v;
   }
   ctx.putImageData(img, 0, 0);
+  // Fracción de píxeles "oscuros" (posible texto). Muy baja = casi nada que leer.
+  canvas._inkRatio = dark / n;
   return canvas;
 }
 
@@ -76,9 +100,11 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
   let bestOverall = "";
   let vinFound = null;
 
+  let lowInk = true;
   for (let k = 0; k < heights.length; k++) {
     onProgress && onProgress(`Analizando imagen (intento ${k + 1}/${heights.length})…`);
     const canvas = crop(video, heights[k]);
+    if (canvas._inkRatio > 0.01) lowInk = false; // hay algo con contraste
     let text = "";
     try {
       const { data } = await worker.recognize(canvas);
@@ -90,5 +116,5 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
     if (best.length > bestOverall.length) bestOverall = best;
     if (vin) { vinFound = vin; break; }
   }
-  return { vin: vinFound, raw: bestOverall };
+  return { vin: vinFound, raw: bestOverall, lowInk };
 }
