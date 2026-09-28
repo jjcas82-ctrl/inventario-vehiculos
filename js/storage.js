@@ -23,11 +23,12 @@ const DEFAULT_AREAS = [
 
 // Estructura de la Agencia Aeroplasa Auto.
 const AEROPLASA_AUTO_AREAS = [
-  { name: "Sala de Exhibición",        subs: [] },
-  { name: "Servicio",                  subs: ["Taller", "Preparación", "Lavado"] },
-  { name: "Patio",                     subs: [] },
+  { name: "Sala de Exhibición",         subs: [] },
+  { name: "Servicio",                   subs: ["Taller", "Preparación", "Lavado"] },
+  { name: "Bodega",                     subs: [] },
   { name: "Estacionamiento Seminuevos", subs: [] },
-  { name: "Área de Entrega",           subs: [] },
+  { name: "Área de Entrega",            subs: [] },
+  { name: "Puntos de venta",            subs: ["Zacatlán", "Chignahuapan"] },
 ];
 
 function cloneAreas(list) {
@@ -77,12 +78,17 @@ function read() {
   _cache.events = _cache.events || [];
   _cache.agencies = (_cache.agencies || seed().agencies).map(migrateAgency);
 
-  // Alta de la Agencia Aeroplasa Auto para instalaciones previas (sin perder datos).
-  if (!_cache.agencies.some(a => /aeroplasa auto/i.test(a.name))) {
+  // Alta / actualización de la Agencia Aeroplasa Auto para instalaciones previas.
+  const aeroAuto = _cache.agencies.find(a => /aeroplasa auto/i.test(a.name));
+  if (!aeroAuto) {
     _cache.agencies.push({
       id: cryptoId(), name: "Agencia Aeroplasa Auto",
       lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS),
     });
+  } else if (aeroAuto.areas && aeroAuto.areas.some(a => a.name === "Patio")
+             && !aeroAuto.areas.some(a => a.name === "Puntos de venta")) {
+    // Estructura anterior (con "Patio", sin "Puntos de venta"): actualizar.
+    aeroAuto.areas = cloneAreas(AEROPLASA_AUTO_AREAS);
   }
   return _cache;
 }
