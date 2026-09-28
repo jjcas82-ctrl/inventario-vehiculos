@@ -68,7 +68,7 @@ export const WMI3 = {
   "LGB":"Dongfeng","LGH":"Dongfeng","LVH":"Dongfeng-Honda","LGX":"BYD","LC0":"BYD","L6T":"Geely","LB2":"Geely",
   "LGW":"Great Wall","LVV":"Chery","LVS9":"Ford","LFP":"FAW","LFM":"FAW-Toyota","LJ1":"JAC","LZM":"CAMC",
   // ---- India ----
-  "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet (GM India)","MBH":"Suzuki","MEE":"Renault India",
+  "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet (GM)","MBH":"Suzuki","MEE":"Renault India",
 };
 
 // Coincidencias por los 2 primeros caracteres (más generales).
