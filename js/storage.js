@@ -13,7 +13,7 @@
 const KEY = "inv_vehiculos_v1";
 const USER_KEY = "inv_usuario_actual";
 
-// Estructura jerárquica por defecto (Agencia Aeropuerto).
+// Estructura jerárquica por defecto de la Agencia Aeropuerto.
 const DEFAULT_AREAS = [
   { name: "Sala de Exhibición", subs: ["Ventas Chevrolet", "Ventas Buick"] },
   { name: "Servicio",           subs: ["Taller", "Preparación", "Lavado"] },
@@ -21,16 +21,27 @@ const DEFAULT_AREAS = [
   { name: "Área de Entrega",    subs: [] },
 ];
 
-function defaultAreas() {
-  return DEFAULT_AREAS.map(a => ({ name: a.name, subs: [...a.subs] }));
+// Estructura de la Agencia Aeroplasa Auto.
+const AEROPLASA_AUTO_AREAS = [
+  { name: "Sala de Exhibición",        subs: [] },
+  { name: "Servicio",                  subs: ["Taller", "Preparación", "Lavado"] },
+  { name: "Patio",                     subs: [] },
+  { name: "Estacionamiento Seminuevos", subs: [] },
+  { name: "Área de Entrega",           subs: [] },
+];
+
+function cloneAreas(list) {
+  return list.map(a => ({ name: a.name, subs: [...a.subs] }));
 }
+function defaultAreas() { return cloneAreas(DEFAULT_AREAS); }
 
 function seed() {
   return {
     vehicles: {},
     events: [],
     agencies: [
-      { id: cryptoId(), name: "Agencia Aeropuerto", lat: null, lng: null, areas: defaultAreas() },
+      { id: cryptoId(), name: "Agencia Aeropuerto",     lat: null, lng: null, areas: cloneAreas(DEFAULT_AREAS) },
+      { id: cryptoId(), name: "Agencia Aeroplasa Auto", lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS) },
     ],
   };
 }
@@ -65,6 +76,14 @@ function read() {
   _cache.vehicles = _cache.vehicles || {};
   _cache.events = _cache.events || [];
   _cache.agencies = (_cache.agencies || seed().agencies).map(migrateAgency);
+
+  // Alta de la Agencia Aeroplasa Auto para instalaciones previas (sin perder datos).
+  if (!_cache.agencies.some(a => /aeroplasa auto/i.test(a.name))) {
+    _cache.agencies.push({
+      id: cryptoId(), name: "Agencia Aeroplasa Auto",
+      lat: null, lng: null, areas: cloneAreas(AEROPLASA_AUTO_AREAS),
+    });
+  }
   return _cache;
 }
 
