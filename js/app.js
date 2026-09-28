@@ -129,6 +129,8 @@ function setupScanner() {
     scanner.stop();
     startBtn.hidden = false;
     stopBtn.hidden = true;
+    const ob = document.getElementById("scan-ocr");
+    if (ob) ob.textContent = "🔤 Leer VIN de texto (foto)";
   };
 
   scanner = new Scanner(video, {
@@ -165,19 +167,22 @@ function setupScanner() {
 
   // ---- OCR: leer el VIN de TEXTO (parabrisas, sin código de barras) ----
   const ocrBtn = document.getElementById("scan-ocr");
+  const OCR_LABEL = "🔤 Leer VIN de texto (foto)";
+  const OCR_SHOOT = "📸 Tomar foto y leer VIN";
+
   ocrBtn.addEventListener("click", async () => {
-    // Si la cámara no está abierta, la abrimos primero.
+    // Si la cámara no está abierta, la abrimos primero y NO tomamos foto todavía.
     if (!scanner.running) {
       try {
         await scanner.start();
         startBtn.hidden = true;
         stopBtn.hidden = false;
-        setStatus("Encuadra el VIN dentro del recuadro y toca de nuevo “Leer VIN de texto”.", "ok");
-        return; // dar un momento para encuadrar
+        ocrBtn.textContent = OCR_SHOOT;
+        setStatus("Encuadra el VIN de texto dentro del recuadro, bien enfocado, y toca “📸 Tomar foto y leer VIN”.", "ok");
+        return; // dar tiempo a encuadrar
       } catch (e) { return; }
     }
     ocrBtn.disabled = true;
-    const original = ocrBtn.textContent;
     ocrBtn.textContent = "Leyendo…";
     try {
       setStatus("Tomando foto y leyendo el texto del VIN…", "muted");
@@ -204,7 +209,8 @@ function setupScanner() {
       setStatus("Error de OCR: " + (e.message || e) + ". Usa la captura manual.", "error");
     } finally {
       ocrBtn.disabled = false;
-      ocrBtn.textContent = original;
+      // Si la cámara sigue abierta, deja el botón en modo "tomar foto"; si no, en modo inicial.
+      ocrBtn.textContent = scanner.running ? OCR_SHOOT : OCR_LABEL;
     }
   });
 
