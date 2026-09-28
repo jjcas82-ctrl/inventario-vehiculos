@@ -2,6 +2,7 @@
 // eventos, respaldo de datos e instalación PWA.
 import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
+import { readVinFromVideo } from "./ocr.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
@@ -160,6 +161,46 @@ function setupScanner() {
   stopBtn.addEventListener("click", () => {
     stopCamera();
     setStatus("Cámara detenida.", "muted");
+  });
+
+  // ---- OCR: leer el VIN de TEXTO (parabrisas, sin código de barras) ----
+  const ocrBtn = document.getElementById("scan-ocr");
+  ocrBtn.addEventListener("click", async () => {
+    // Si la cámara no está abierta, la abrimos primero.
+    if (!scanner.running) {
+      try {
+        await scanner.start();
+        startBtn.hidden = true;
+        stopBtn.hidden = false;
+        setStatus("Encuadra el VIN dentro del recuadro y toca de nuevo “Leer VIN de texto”.", "ok");
+        return; // dar un momento para encuadrar
+      } catch (e) { return; }
+    }
+    ocrBtn.disabled = true;
+    const original = ocrBtn.textContent;
+    ocrBtn.textContent = "Leyendo…";
+    try {
+      setStatus("Tomando foto y leyendo el texto del VIN…", "muted");
+      const text = await readVinFromVideo(video, { onProgress: (m) => setStatus(m, "muted") });
+      diagLog("OCR bruto: " + JSON.stringify(String(text).slice(0, 60)));
+      const vin = extractVin(text);
+      if (vin) {
+        handleScannedText(vin);
+        stopCamera();
+        setStatus("✓ VIN leído por texto: " + vin, "ok");
+      } else {
+        const cleaned = normalizeVin(text);
+        setStatus("No se detectó un VIN de 17 caracteres. Se leyó: “" + cleaned.slice(0, 30) +
+          "”. Acerca más, mejora la luz y reintenta, o corrígelo en la captura manual.", "error");
+        // Rellenamos el campo con lo que se leyó para que el usuario lo corrija fácil.
+        if (cleaned) document.getElementById("vin-input").value = cleaned.slice(0, 17);
+      }
+    } catch (e) {
+      setStatus("Error de OCR: " + (e.message || e) + ". Usa la captura manual.", "error");
+    } finally {
+      ocrBtn.disabled = false;
+      ocrBtn.textContent = original;
+    }
   });
 
   // Captura manual

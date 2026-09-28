@@ -42,10 +42,12 @@
             <div class="scanner-overlay"><div class="scanner-frame"></div></div>
           </div>
 
-          <div class="row gap">
-            <button id="scan-start" class="btn btn-primary">Abrir cámara y escanear</button>
+          <div class="row gap wrap">
+            <button id="scan-start" class="btn btn-primary">📷 Escanear código de barras / QR</button>
+            <button id="scan-ocr" class="btn">🔤 Leer VIN de texto (foto)</button>
             <button id="scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
           </div>
+          <p class="hint">Usa <b>código de barras/QR</b> si la etiqueta lo tiene. Usa <b>Leer VIN de texto</b> para el VIN grabado en el parabrisas (sin código de barras): encuadra el VIN en el recuadro y toma la foto.</p>
           <p id="scan-status" class="hint"></p>
           <div id="scan-diag" class="diag" hidden></div>
 
