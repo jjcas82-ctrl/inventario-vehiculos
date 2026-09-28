@@ -103,6 +103,20 @@ function fillEventSelectors() {
       subField.style.display = "none";
       locSel.innerHTML = `<option value="">${escapeHtml(areaSel.value || "")}</option>`;
     }
+    updateRemoteHint();
+  };
+
+  // Aviso: los "Puntos de venta" son ubicaciones remotas; el GPS del evento
+  // registra dónde está realmente la unidad (Zacatlán, Chignahuapan, etc.).
+  const updateRemoteHint = () => {
+    const gpsStatus = document.getElementById("gps-status");
+    if (!gpsStatus) return;
+    if (/puntos de venta/i.test(areaSel.value)) {
+      gpsStatus.textContent = "📍 Punto de venta remoto: al registrar se guardará la ubicación GPS de la unidad. Verifica el permiso de ubicación.";
+      gpsStatus.style.color = "var(--primary)";
+    } else {
+      gpsStatus.textContent = "";
+    }
   };
 
   agSel.onchange = fillAreas;

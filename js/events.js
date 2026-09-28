@@ -30,13 +30,18 @@ export function getPosition(options = {}) {
 // Registra un evento (type: 'entry' | 'move' | 'exit'). Intenta capturar GPS,
 // pero no bloquea el registro si el GPS falla.
 export async function registerEvent({ vin, type, agency, area, location, condition, by }, onGps) {
+  const isRemote = /puntos de venta/i.test(area || "");
   let gps = { lat: null, lng: null, accuracy: null };
   try {
-    if (onGps) onGps("Obteniendo ubicación GPS…", "info");
+    if (onGps) onGps(isRemote ? "Obteniendo ubicación GPS del punto de venta…" : "Obteniendo ubicación GPS…", "info");
     gps = await getPosition();
     if (onGps) onGps(`Ubicación capturada (±${Math.round(gps.accuracy)} m).`, "ok");
   } catch (e) {
-    if (onGps) onGps("Sin GPS: " + e.message + " (el evento se guarda igual).", "warn");
+    // En puntos de venta remotos, el GPS es especialmente importante.
+    const extra = isRemote
+      ? " ⚠️ En un punto de venta conviene tener GPS; el evento se guardó sin ubicación."
+      : " (el evento se guarda igual).";
+    if (onGps) onGps("Sin GPS: " + e.message + extra, "warn");
   }
 
   const rec = store.addEvent({
