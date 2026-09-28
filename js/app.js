@@ -109,10 +109,19 @@ function setupScanner() {
   const stopBtn = document.getElementById("scan-stop");
   const status = document.getElementById("scan-status");
 
+  const diag = document.getElementById("scan-diag");
+  const diagLog = (line) => {
+    diag.hidden = false;
+    const t = new Date().toLocaleTimeString();
+    diag.textContent = `[${t}] ${line}\n` + diag.textContent;
+    diag.textContent = diag.textContent.split("\n").slice(0, 12).join("\n");
+  };
+
   const setStatus = (msg, kind) => {
     status.textContent = msg;
     status.style.color = kind === "error" ? "var(--danger)"
       : (kind === "ok" ? "var(--primary)" : "var(--muted)");
+    diagLog(msg);
   };
 
   const stopCamera = () => {
@@ -134,6 +143,9 @@ function setupScanner() {
         setStatus("Código leído pero no es un VIN de 17 caracteres: “" +
           String(text).slice(0, 30) + "”. Sigue apuntando o usa la captura manual.", "error");
       }
+    },
+    onDetect: (raw, format) => {
+      diagLog(`detectado (${format}): ${String(raw).slice(0, 40)}`);
     },
     onStatus: setStatus,
   });

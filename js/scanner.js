@@ -91,13 +91,16 @@ export class Scanner {
       try {
         const supported = await window.BarcodeDetector.getSupportedFormats();
         const formats = FORMATS.filter(f => supported.includes(f));
+        this.onDetect("motor: BarcodeDetector nativo · formatos: " + (supported.join(",") || "?"), "info");
         this._detector = new window.BarcodeDetector(formats.length ? { formats } : undefined);
         this.onStatus("Cámara activa. Acerca y enfoca el código o QR del VIN…", "ok");
         this._loopNative();
         return;
       } catch (e) {
-        // cae al respaldo ZXing
+        this.onDetect("BarcodeDetector falló, usando respaldo ZXing", "info");
       }
+    } else {
+      this.onDetect("Sin BarcodeDetector nativo, usando respaldo ZXing", "info");
     }
     await this._startZxing();
   }
@@ -117,16 +120,19 @@ export class Scanner {
       // Detectamos sobre el canvas (más fiable que sobre el <video> en algunos equipos)
       const canvas = this._grabFrame();
       const target = canvas || this.video;
+      this._frames = (this._frames || 0) + 1;
+      if (this._frames === 1) {
+        this.onDetect(`analizando cuadros (${target.width || this.video.videoWidth}x${target.height || this.video.videoHeight})…`, "info");
+      }
       const codes = await this._detector.detect(target);
       if (codes && codes.length) {
         this.onDetect(codes[0].rawValue, codes[0].format);
         this._emit(codes[0].rawValue);
       }
     } catch (e) {
-      // ignorar frames fallidos
+      if (!this._loopErrShown) { this._loopErrShown = true; this.onDetect("error al analizar: " + (e.name || e), "info"); }
     }
     if (this.running) {
-      // ~8 fps es suficiente y ahorra batería
       this._timer = setTimeout(() => this._loopNative(), 120);
     }
   }
