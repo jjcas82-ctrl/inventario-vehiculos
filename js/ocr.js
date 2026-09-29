@@ -1,5 +1,6 @@
 // ocr.js — Lectura del VIN por OCR (texto grabado en el parabrisas, sin código de barras).
 // Usa Tesseract.js (ESM) desde CDN con rutas explícitas para evitar fallos en PWA.
+import { computeCheckDigit } from "./vin.js";
 
 const VER = "5";
 const TESSERACT_ESM = `https://cdn.jsdelivr.net/npm/tesseract.js@${VER}/dist/tesseract.esm.min.js`;
@@ -96,11 +97,66 @@ function cropVariants(video, heightFactor, cy = 0.5) {
   binCanvas.width = base.width; binCanvas.height = base.height;
   binCanvas.getContext("2d").putImageData(binData, 0, 0);
 
+  // Versión C: umbral ADAPTATIVO local (media por bloques). Resuelve reflejos y
+  // sombras desiguales del parabrisas, donde un umbral global falla.
+  const W = base.width, H = base.height;
+  const adaptData = bctx.createImageData(W, H);
+  const block = Math.max(15, Math.round(W / 24)); // tamaño de vecindad
+  // Imagen integral para medias rápidas
+  const integ = new Float64Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) {
+    let rowSum = 0;
+    for (let x = 0; x < W; x++) {
+      rowSum += norm[y * W + x];
+      integ[(y + 1) * (W + 1) + (x + 1)] = integ[y * (W + 1) + (x + 1)] + rowSum;
+    }
+  }
+  const half = block >> 1;
+  const C = 8; // constante que se resta a la media (ajuste fino)
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const x1 = Math.max(0, x - half), y1 = Math.max(0, y - half);
+      const x2 = Math.min(W - 1, x + half), y2 = Math.min(H - 1, y + half);
+      const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const sum = integ[(y2 + 1) * (W + 1) + (x2 + 1)] - integ[y1 * (W + 1) + (x2 + 1)]
+                - integ[(y2 + 1) * (W + 1) + x1] + integ[y1 * (W + 1) + x1];
+      const mean = sum / area;
+      const v = norm[y * W + x] > (mean - C) ? 255 : 0;
+      const i = (y * W + x) * 4;
+      adaptData.data[i] = adaptData.data[i+1] = adaptData.data[i+2] = v;
+      adaptData.data[i+3] = 255;
+    }
+  }
+  const adaptCanvas = document.createElement("canvas");
+  adaptCanvas.width = W; adaptCanvas.height = H;
+  adaptCanvas.getContext("2d").putImageData(adaptData, 0, 0);
+
   return {
     gray: grayCanvas.toDataURL("image/png"),
     bin: binCanvas.toDataURL("image/png"),
+    adapt: adaptCanvas.toDataURL("image/png"),
     inkRatio: dark / n,
   };
+}
+
+// Corrige caracteres confundibles del OCR según la POSICIÓN en el VIN.
+// El VIN no usa I,O,Q. Posiciones 1-3,4-8 suelen ser mixtas; 10 (año) letra/num;
+// 12-17 (serie) casi siempre números. Aplicamos correcciones conservadoras.
+function fixCommonOcr(s) {
+  if (s.length !== 17) return s;
+  const arr = s.split("");
+  const toNum = { O: "0", Q: "0", I: "1", L: "1", Z: "2", S: "5", B: "8", G: "6", D: "0" };
+  const toLet = { "0": "D", "1": "T", "8": "B", "5": "S", "6": "G" };
+  // Posiciones 12-17 (índices 11-16): número de serie → preferir dígitos.
+  for (let i = 11; i < 17; i++) {
+    if (toNum[arr[i]]) arr[i] = toNum[arr[i]];
+  }
+  // I,O,Q nunca válidos en ningún lugar → convertir a su número más parecido.
+  for (let i = 0; i < 17; i++) {
+    if (arr[i] === "I") arr[i] = "1";
+    else if (arr[i] === "O" || arr[i] === "Q") arr[i] = "0";
+  }
+  return arr.join("");
 }
 
 function cleanText(t) {
@@ -137,13 +193,15 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
     { h: 0.55, cy: 0.50 },
   ];
   let bestOverall = "", vinFound = null, lowInk = true;
+  let bestValid = null; // candidato de 17 que además pasa el dígito de control
 
-  for (let k = 0; k < passes.length && !vinFound; k++) {
+  for (let k = 0; k < passes.length && !bestValid; k++) {
     onProgress && onProgress(`Analizando imagen (${k + 1}/${passes.length})…`);
-    const { gray, bin, inkRatio } = cropVariants(video, passes[k].h, passes[k].cy);
+    const { gray, bin, adapt, inkRatio } = cropVariants(video, passes[k].h, passes[k].cy);
     if (inkRatio > 0.005) lowInk = false;
 
-    for (const [name, url] of [["gris", gray], ["bin", bin]]) {
+    // Tres variantes: gris (brillos), binaria global (Otsu), adaptativa (sombras/reflejos).
+    for (const [name, url] of [["gris", gray], ["bin", bin], ["adapt", adapt]]) {
       let text = "";
       try {
         const { data } = await worker.recognize(url);
@@ -154,11 +212,19 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
       }
       const rawSeen = String(text).replace(/\s+/g, " ").trim();
       const clean = cleanText(text);
-      onCandidate && onCandidate(`[${name}] "${rawSeen}" → ${clean}`);
       const { vin, best } = bestVinCandidate(clean);
+      let mark = "";
+      if (vin) {
+        const fixed = fixCommonOcr(vin);
+        // Si el dígito de control cuadra, es casi seguro correcto → lo tomamos.
+        if (computeCheckDigit(fixed) === fixed[8]) { bestValid = fixed; mark = " ✓"; }
+        else if (!vinFound) { vinFound = fixed; }
+      }
+      onCandidate && onCandidate(`[${name}] "${rawSeen}" → ${clean}${mark}`);
       if (best.length > bestOverall.length) bestOverall = best;
-      if (vin) { vinFound = vin; break; }
+      if (bestValid) break;
     }
   }
-  return { vin: vinFound, raw: bestOverall, lowInk };
+  // Preferimos el que valida dígito de control; si no, el de 17 caracteres; si no, lo mejor leído.
+  return { vin: bestValid || vinFound, raw: bestOverall, lowInk };
 }
