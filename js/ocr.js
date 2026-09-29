@@ -225,6 +225,14 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
       if (bestValid) break;
     }
   }
-  // Preferimos el que valida dígito de control; si no, el de 17 caracteres; si no, lo mejor leído.
-  return { vin: bestValid || vinFound, raw: bestOverall, lowInk };
+  // Distinguimos claramente:
+  //  - verified: VIN de 17 que ADEMÁS pasa el dígito de control ISO 3779 (confiable).
+  //  - vin: mejor candidato de 17 SIN verificar (requiere confirmación del usuario).
+  //  - raw: lo mejor leído (para precargar y corregir).
+  return {
+    vin: bestValid || vinFound || null,
+    verified: !!bestValid,
+    raw: bestOverall,
+    lowInk,
+  };
 }

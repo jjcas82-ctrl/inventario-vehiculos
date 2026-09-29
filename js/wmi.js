@@ -65,8 +65,10 @@ export const WMI3 = {
   "5YJ":"Tesla","7SA":"Tesla","LRW":"Tesla","XP7":"Tesla",
   // ---- China (seminuevos y nuevos) ----
   "LSF":"SAIC Motor (Chevrolet/MG)","LSJ":"SAIC (MG/Roewe)","LSV":"SAIC-Volkswagen",
-  "LGB":"Dongfeng","LGH":"Dongfeng","LVH":"Dongfeng-Honda","LGX":"BYD","LC0":"BYD","L6T":"Geely","LB2":"Geely",
+  "LGB":"Dongfeng","LGH":"Dongfeng","LVH":"Dongfeng-Honda","LGX":"BYD","LC0":"BYD","LC6":"BYD",
+  "LZW":"BYD","LGX8":"BYD","L6T":"Geely","LB2":"Geely","LZG":"Geely",
   "LGW":"Great Wall","LVV":"Chery","LVS9":"Ford","LFP":"FAW","LFM":"FAW-Toyota","LJ1":"JAC","LZM":"CAMC",
+  "LJD":"JMC","LSD":"SAIC","LDC":"Dongfeng-Peugeot","LNB":"BAIC","LMG":"GAC","L5Y":"Yadea",
   // ---- India ----
   "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet (GM)","MBH":"Suzuki","MEE":"Renault India",
 };

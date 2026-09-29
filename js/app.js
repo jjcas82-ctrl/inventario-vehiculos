@@ -477,6 +477,12 @@ function setupScanner() {
 
   startBtn.addEventListener("click", async () => {
     try {
+      // Limpiar lectura previa para no arrastrar un VIN anterior.
+      currentDecode = null;
+      document.getElementById("vin-input").value = "";
+      document.getElementById("vin-result").innerHTML =
+        '<p class="muted">Escanea o escribe un VIN para ver sus datos.</p>';
+      document.getElementById("event-form").hidden = true;
       await scanner.start();
       startBtn.hidden = true;
       stopBtn.hidden = false;
@@ -496,6 +502,12 @@ function setupScanner() {
     // Si la cámara no está abierta, la abrimos primero y NO tomamos foto todavía.
     if (!scanner.running) {
       try {
+        // Limpiamos cualquier lectura previa para no arrastrar un VIN anterior.
+        currentDecode = null;
+        document.getElementById("vin-input").value = "";
+        document.getElementById("vin-result").innerHTML =
+          '<p class="muted">Escanea o escribe un VIN para ver sus datos.</p>';
+        document.getElementById("event-form").hidden = true;
         await scanner.start();
         startBtn.hidden = true;
         stopBtn.hidden = false;
@@ -508,26 +520,30 @@ function setupScanner() {
     ocrBtn.textContent = "Leyendo…";
     try {
       setStatus("Tomando foto y leyendo el texto del VIN…", "muted");
-      const { vin, raw, lowInk } = await readVinFromVideo(video, {
+      const { vin, verified, raw, lowInk } = await readVinFromVideo(video, {
         onProgress: (m) => setStatus(m, "muted"),
         onCandidate: (c) => diagLog("OCR leyó: " + JSON.stringify(c)),
       });
-      if (vin) {
+
+      if (verified && vin) {
+        // Solo se acepta AUTOMÁTICAMENTE si el dígito de control ISO 3779 es válido.
         handleScannedText(vin);
         stopCamera();
-        setStatus("✓ VIN leído por texto: " + vin, "ok");
+        setStatus("✓ VIN leído y verificado: " + vin, "ok");
       } else if (lowInk) {
-        setStatus("No se ve texto en el recuadro. Apunta directamente al VIN (como la fila de letras/números) y que ocupe el ancho del recuadro, bien enfocado. Luego toca 📸 otra vez.", "error");
+        setStatus("No se ve texto legible en el recuadro. Apunta al VIN, llénalo en el recuadro, enfoca y evita reflejos. Luego toca 📸 otra vez.", "error");
       } else {
-        // No salió exacto: precargamos lo mejor leído para que el usuario lo corrija.
+        // Se leyó algo, pero NO está verificado (dígito de control inválido o incompleto).
+        // NUNCA lo aceptamos como bueno: lo mostramos para que el usuario confirme/corrija.
         const guess = (raw || "").slice(0, 17);
-        setStatus("No salió exacto (17 caracteres). Se leyó: “" + (raw || "—") +
-          "”. Lo puse en el campo para que lo corrijas y pulses “Leer VIN”. Reintenta con más luz/enfoque.", "error");
-        if (guess) {
-          document.getElementById("vin-input").value = guess;
-          // Si por casualidad ya son 17 válidos, lo mostramos decodificado
-          if (guess.length === 17) handleScannedText(guess);
-        }
+        if (guess) document.getElementById("vin-input").value = guess;
+        // Mostrar decodificado para que el usuario vea los datos y valide el dígito.
+        showVinResult(decodeVin(guess));
+        setStatus("⚠️ Lectura NO confiable. Se leyó “" + (raw || "—") +
+          "”, pero el dígito de control no coincide (posible error de lectura). " +
+          "Verifica carácter por carácter en la captura manual y pulsa “Leer VIN”, o reintenta la foto.",
+          "error");
+        notify("Lectura no confiable: revisa el VIN antes de registrar.", { type: "warn", title: "Verifica el VIN", timeout: 6000 });
       }
     } catch (e) {
       setStatus("Error de OCR: " + (e.message || e) + ". Usa la captura manual.", "error");
@@ -570,6 +586,29 @@ function setupEventButtons() {
     const status = existing?.status; // "dentro" | "fuera" | undefined
     const curLocation = existing?.currentLocation;
     const curAgency = existing?.currentAgency;
+
+    // SALVAGUARDA anti-retrabajo: si el VIN NO pasa el dígito de control ISO 3779
+    // y es una unidad NUEVA (no registrada), pedimos confirmación explícita antes
+    // de crearla, para no meter un VIN mal leído al inventario.
+    if (!existing && !currentDecode.checkDigit.ok) {
+      const choice = await confirmDialog({
+        icon: "⚠️", title: "VIN no verificado",
+        message:
+          `El VIN "${vin}" no supera el dígito de control ISO 3779 ` +
+          `(se esperaba "${currentDecode.checkDigit.expected}", trae "${currentDecode.checkDigit.actual}").\n\n` +
+          `Esto suele indicar un error de lectura o captura. Si registras, podría quedar un VIN incorrecto en el inventario.\n\n` +
+          `¿Qué deseas hacer?`,
+        buttons: [
+          { label: "Corregir VIN", value: null, variant: "primary" },
+          { label: "Registrar de todos modos", value: "force", variant: "danger" },
+        ],
+      });
+      if (choice !== "force") {
+        notify("Revisa y corrige el VIN antes de registrar.", { type: "info" });
+        document.getElementById("vin-input").focus();
+        return;
+      }
+    }
 
     // ============ MOVIMIENTO INTERNO: agencia/área elegidas por el capturista ============
     if (type === "move") {
