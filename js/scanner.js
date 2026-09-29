@@ -38,7 +38,7 @@ export class Scanner {
       ["localhost", "127.0.0.1"].includes(location.hostname);
   }
 
-  async start() {
+  async start({ detect = true } = {}) {
     if (this.running) return;
 
     if (!Scanner.isSecureContext()) {
@@ -86,6 +86,13 @@ export class Scanner {
       if (caps.focusMode && caps.focusMode.includes("continuous")) adv.push({ focusMode: "continuous" });
       if (adv.length) await this._track.applyConstraints({ advanced: adv });
     } catch (e) { /* no crítico */ }
+
+    // Si solo queremos la cámara encendida (modo OCR en vivo), NO arrancamos los
+    // detectores de código de barras para no competir por los cuadros del video.
+    if (!detect) {
+      this.onStatus("Cámara activa.", "ok");
+      return;
+    }
 
     // Ejecutamos los DOS motores en paralelo:
     //  - BarcodeDetector nativo: rápido para QR / data matrix.

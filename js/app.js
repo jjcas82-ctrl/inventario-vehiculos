@@ -521,7 +521,8 @@ function setupScanner() {
         '<p class="muted">Escanea o escribe un VIN para ver sus datos.</p>';
       document.getElementById("event-form").hidden = true;
 
-      await scanner.start();      // abre la cámara (comparte el mismo <video>)
+      // Solo cámara, SIN el detector de código de barras (para no competir con el OCR).
+      await scanner.start({ detect: false });
       startBtn.hidden = true;
       stopBtn.hidden = false;
       ocrBtn.textContent = "⏹️ Detener escaneo de VIN";
