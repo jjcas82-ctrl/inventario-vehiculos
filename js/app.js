@@ -531,7 +531,7 @@ function setupScanner() {
       // Lectura continua: en cuanto obtiene un VIN verificado, lo captura.
       liveOcr = startLiveVinOcr(video, {
         onStatus: (m, k) => setStatus(m, k || "muted"),
-        onTick: (leido) => { if (leido) diagLog("leyendo: " + leido); },
+        onTick: (leido) => { if (leido) diagLog(leido); },
         onFound: (vin) => {
           stopLiveOcr();
           handleScannedText(vin);

@@ -244,23 +244,34 @@ export function startLiveVinOcr(video, { onFound, onTick, onStatus } = {}) {
     while (running) {
       if (!video.videoWidth) { await sleep(120); continue; }
       frames++;
-      // Área amplia, pero probamos SOLO una variante por ciclo (rota entre las tres)
-      // para que cada ciclo sea rápido y no se sienta trabado.
       const variants = cropVariants(video, 0.88, 0.50);
       const which = frames % 3;
       const url = which === 0 ? variants.gray : (which === 1 ? variants.adapt : variants.bin);
 
+      // Latido: confirma que el bucle SÍ corre (aunque no lea nada).
+      onTick && onTick("· ciclo " + frames + " analizando…", 0);
+
       let text = "";
-      try { const { data } = await worker.recognize(url); text = data?.text || ""; }
-      catch (e) { await sleep(80); continue; }
+      try {
+        // Tiempo límite: si recognize se cuelga (bug de Tesseract en móvil), lo abortamos.
+        const rec = worker.recognize(url);
+        const res = await Promise.race([
+          rec,
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000)),
+        ]);
+        text = res?.data?.text || "";
+      } catch (e) {
+        onTick && onTick("(recognize " + (e.message || e) + ")", 0);
+        await sleep(80);
+        continue;
+      }
 
       const { vin } = bestVinCandidate(cleanText(text));
-      onTick && onTick(vin ? vin : (text || "").trim().slice(0, 20), 0);
+      const shown = (text || "").replace(/\s+/g, "").slice(0, 20);
+      if (shown) onTick && onTick("leyó: " + shown, 0);
 
       if (vin) {
         const fixed = fixCommonOcr(vin);
-        // Un VIN que pasa el dígito de control es matemáticamente correcto:
-        // basta UNA lectura verificada para aceptarlo (rápido y confiable).
         let verified = (computeCheckDigit(fixed) === fixed[8]) ? fixed : resolveByCheckDigit(fixed);
         if (verified) { running = false; onFound && onFound(verified); return; }
       }
