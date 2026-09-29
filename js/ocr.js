@@ -202,22 +202,27 @@ function resolveByCheckDigit(s) {
 }
 
 function cleanText(t) {
-  return String(t || "").toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+  // Mayúsculas y quita separadores/símbolos. IMPORTANTE: NO borramos I/O/Q,
+  // las CONVERTIMOS a su número (I→1, O→0, Q→0). En un VIN esas letras no existen,
+  // así que casi siempre son dígitos mal leídos por el OCR. Borrarlas quitaría un
+  // carácter y el VIN quedaría con 16 (el bug del "0" perdido).
+  return String(t || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")   // fuera espacios, *, guiones, etc.
+    .replace(/I/g, "1")
+    .replace(/[OQ]/g, "0");
 }
 
 function bestVinCandidate(clean) {
   if (!clean) return { vin: null, best: "" };
-  // 1) 17 caracteres válidos seguidos.
+  // Buscamos exactamente 17 caracteres válidos de VIN (ya sin I/O/Q).
   const exact = clean.match(/[A-HJ-NPR-Z0-9]{17}/);
   if (exact) return { vin: exact[0], best: exact[0] };
-  // 2) Si hay un bloque de 18-19 (por bordes o restos de asteriscos leídos como
-  //    caracteres), probamos recortando desde el inicio hasta obtener 17 válidos.
+  // Bloques de 18-20 (por bordes/asteriscos): recortar a 17.
   const parts = clean.match(/[A-HJ-NPR-Z0-9]+/g) || [];
   for (const p of parts) {
     if (p.length >= 17 && p.length <= 20) {
-      for (let start = 0; start + 17 <= p.length; start++) {
-        return { vin: p.slice(start, start + 17), best: p.slice(start, start + 17) };
-      }
+      return { vin: p.slice(0, 17), best: p.slice(0, 17) };
     }
   }
   const best = parts.sort((a, b) => b.length - a.length)[0] || clean;
