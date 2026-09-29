@@ -338,3 +338,131 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
   const rawSorted = [...seenRaw.entries()].sort((a, b) => b[1] - a[1]);
   return { vin: rawSorted.length ? rawSorted[0][0] : null, verified: false, raw: bestOverall, lowInk };
 }
+
+
+
+// ---- OCR de UNA FOTO (cámara nativa del celular). Lo más fiable en móvil ----
+// Procesa la imagen UNA sola vez con varias versiones (gris, binaria, adaptativa)
+// y con varias escalas/recortes. No usa el video en vivo (que colapsa en móvil).
+
+// Genera un canvas escalado desde una imagen (Image/Bitmap) a un ancho objetivo.
+function scaleToCanvas(img, targetW) {
+  const w = img.width || img.videoWidth, h = img.height || img.videoHeight;
+  const scale = Math.min(2, Math.max(1, targetW / w));
+  const cw = Math.round(w * scale), ch = Math.round(h * scale);
+  const c = document.createElement("canvas");
+  c.width = cw; c.height = ch;
+  c.getContext("2d").drawImage(img, 0, 0, cw, ch);
+  return c;
+}
+
+// Aplica gris+contraste / Otsu / adaptativo a un canvas y devuelve los 3 dataURLs.
+function processCanvas(srcCanvas) {
+  const ctx = srcCanvas.getContext("2d");
+  const W = srcCanvas.width, H = srcCanvas.height;
+  const img = ctx.getImageData(0, 0, W, H);
+  const d = img.data, n = d.length / 4;
+  const gray = new Float32Array(n);
+  let min = 255, max = 0;
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    gray[j] = g; if (g < min) min = g; if (g > max) max = g;
+  }
+  const range = Math.max(1, max - min);
+  const norm = new Uint8Array(n);
+  const hist = new Array(256).fill(0);
+  for (let j = 0; j < n; j++) { const s = Math.round(((gray[j] - min) / range) * 255); norm[j] = s; hist[s]++; }
+
+  const mk = (fn) => {
+    const out = ctx.createImageData(W, H);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      const v = fn(norm[j], j);
+      out.data[i] = out.data[i+1] = out.data[i+2] = v; out.data[i+3] = 255;
+    }
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    c.getContext("2d").putImageData(out, 0, 0);
+    return c.toDataURL("image/png");
+  };
+
+  // Otsu
+  let sumAll = 0; for (let t = 0; t < 256; t++) sumAll += t * hist[t];
+  let sumB = 0, wB = 0, maxVar = 0, thr = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = n - wB; if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+    const bv = wB * wF * (mB - mF) * (mB - mF);
+    if (bv > maxVar) { maxVar = bv; thr = t; }
+  }
+  // Adaptativo (imagen integral)
+  const integ = new Float64Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) { let rs = 0; for (let x = 0; x < W; x++) { rs += norm[y*W+x]; integ[(y+1)*(W+1)+(x+1)] = integ[y*(W+1)+(x+1)] + rs; } }
+  const blk = Math.max(15, Math.round(W / 30)), half = blk >> 1, CC = 8;
+  const adaptVal = (v, j) => {
+    const x = j % W, y = (j / W) | 0;
+    const x1 = Math.max(0, x-half), y1 = Math.max(0, y-half), x2 = Math.min(W-1, x+half), y2 = Math.min(H-1, y+half);
+    const area = (x2-x1+1)*(y2-y1+1);
+    const sum = integ[(y2+1)*(W+1)+(x2+1)] - integ[y1*(W+1)+(x2+1)] - integ[(y2+1)*(W+1)+x1] + integ[y1*(W+1)+x1];
+    return v > (sum/area - CC) ? 255 : 0;
+  };
+
+  return {
+    gray: mk((v) => v),
+    bin: mk((v) => v > thr ? 255 : 0),
+    adapt: mk((v, j) => adaptVal(v, j)),
+  };
+}
+
+// Lee el VIN de un archivo de imagen (la foto tomada con la cámara del celular).
+export async function readVinFromImageFile(file, { onProgress, onCandidate } = {}) {
+  const worker = await getWorker(onProgress);
+  onProgress && onProgress("Preparando la foto…");
+
+  const bitmap = await createImageBitmap(file).catch(async () => {
+    // Respaldo si createImageBitmap no está disponible
+    const url = URL.createObjectURL(file);
+    const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    return im;
+  });
+
+  const votesVerified = new Map();
+  const seenRaw = new Map();
+  let bestOverall = "";
+
+  // Probamos a dos escalas (por si el texto es pequeño en la foto).
+  for (const targetW of [1600, 2200]) {
+    const canvas = scaleToCanvas(bitmap, targetW);
+    const { gray, bin, adapt } = processCanvas(canvas);
+    for (const [name, url] of [["gris", gray], ["adapt", adapt], ["bin", bin]]) {
+      onProgress && onProgress("Leyendo el VIN de la foto…");
+      let text = "";
+      try {
+        const rec = worker.recognize(url);
+        const res = await Promise.race([rec, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 15000))]);
+        text = res?.data?.text || "";
+      } catch (e) { onCandidate && onCandidate("(recognize " + (e.message || e) + ")"); continue; }
+
+      const rawSeen = String(text).replace(/\s+/g, " ").trim();
+      const clean = cleanText(text);
+      const { vin, best } = bestVinCandidate(clean);
+      if (best.length > bestOverall.length) bestOverall = best;
+      let mark = "";
+      if (vin) {
+        const fixed = fixCommonOcr(vin);
+        let verified = (computeCheckDigit(fixed) === fixed[8]) ? fixed : resolveByCheckDigit(fixed);
+        if (verified) { votesVerified.set(verified, (votesVerified.get(verified) || 0) + 1); mark = " ✓"; }
+        else seenRaw.set(fixed, (seenRaw.get(fixed) || 0) + 1);
+      }
+      onCandidate && onCandidate(`[${targetW}/${name}] "${rawSeen}"${mark}`);
+      // Si ya hay un verificado, no seguimos gastando tiempo.
+      if (votesVerified.size) break;
+    }
+    if (votesVerified.size) break;
+  }
+
+  const vSorted = [...votesVerified.entries()].sort((a, b) => b[1] - a[1]);
+  if (vSorted.length) return { vin: vSorted[0][0], verified: true, raw: bestOverall };
+  const rSorted = [...seenRaw.entries()].sort((a, b) => b[1] - a[1]);
+  return { vin: rSorted.length ? rSorted[0][0] : null, verified: false, raw: bestOverall };
+}

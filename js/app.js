@@ -2,7 +2,7 @@
 // eventos, respaldo de datos e instalación PWA.
 import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
-import { readVinFromVideo, startLiveVinOcr } from "./ocr.js";
+import { readVinFromVideo, startLiveVinOcr, readVinFromImageFile } from "./ocr.js";
 import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
@@ -556,6 +556,62 @@ function setupScanner() {
       stopLiveOcr();
       setStatus("No se pudo iniciar el escaneo: " + (e.message || e) + ". Usa la captura manual.", "error");
       ocrBtn.textContent = OCR_LABEL;
+    }
+  });
+
+  // ---- OCR por FOTO ÚNICA (cámara nativa del celular): lo más fiable en móvil ----
+  const photoBtn = document.getElementById("scan-photo");
+  const photoInput = document.getElementById("vin-photo-input");
+  const photoStatus = document.getElementById("ocr-photo-status");
+  const photoPreview = document.getElementById("ocr-photo-preview");
+  const setPhotoStatus = (m, kind) => {
+    photoStatus.textContent = m;
+    photoStatus.style.color = kind === "error" ? "var(--danger)" : (kind === "ok" ? "var(--primary)" : "var(--muted)");
+  };
+
+  if (photoBtn) photoBtn.addEventListener("click", () => {
+    // Detener cualquier cámara/OCR en vivo para no competir.
+    stopLiveOcr();
+    if (scanner.running) stopCamera();
+    photoInput.value = ""; // permite volver a tomar la misma
+    photoInput.click();    // abre la cámara nativa del teléfono
+  });
+
+  if (photoInput) photoInput.addEventListener("change", async () => {
+    const file = photoInput.files && photoInput.files[0];
+    if (!file) return;
+    // Limpiar lectura previa
+    currentDecode = null;
+    document.getElementById("vin-input").value = "";
+    document.getElementById("event-form").hidden = true;
+    // Vista previa de la foto tomada
+    const prevUrl = URL.createObjectURL(file);
+    photoPreview.src = prevUrl; photoPreview.style.display = "block";
+
+    photoBtn.disabled = true;
+    const original = photoBtn.textContent;
+    photoBtn.textContent = "Leyendo foto…";
+    try {
+      const { vin, verified, raw } = await readVinFromImageFile(file, {
+        onProgress: (m) => setPhotoStatus(m, "muted"),
+        onCandidate: (c) => diagLog(c),
+      });
+      if (verified && vin) {
+        handleScannedText(vin);
+        setPhotoStatus("✓ VIN leído y verificado: " + vin, "ok");
+      } else {
+        const guess = (raw || "").slice(0, 17);
+        if (guess) document.getElementById("vin-input").value = guess;
+        showVinResult(decodeVin(guess));
+        setPhotoStatus("⚠️ No se pudo verificar el VIN. Se leyó “" + (raw || "—") +
+          "”. Revisa/corrige en la captura manual y pulsa “Leer VIN”, o toma otra foto más cercana y nítida.", "error");
+        notify("Revisa el VIN antes de registrar.", { type: "warn", title: "Verifica el VIN", timeout: 5000 });
+      }
+    } catch (e) {
+      setPhotoStatus("Error al leer la foto: " + (e.message || e) + ". Usa la captura manual.", "error");
+    } finally {
+      photoBtn.disabled = false;
+      photoBtn.textContent = original;
     }
   });
 
