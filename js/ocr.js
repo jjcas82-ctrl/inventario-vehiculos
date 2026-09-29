@@ -297,9 +297,9 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
   // Versión que funcionaba: 3 franjas (centro-alto, centro, ancha) × 3 procesamientos
   // (gris, binaria Otsu, adaptativa). Elige el que pasa el dígito de control.
   const passes = [
-    { h: 0.30, cy: 0.42 },
-    { h: 0.30, cy: 0.55 },
-    { h: 0.55, cy: 0.50 },
+    { h: 0.18, cy: 0.50 },  // franja estrecha centrada (como al inicio: menos fondo, lee mejor)
+    { h: 0.22, cy: 0.44 },
+    { h: 0.22, cy: 0.56 },
   ];
   let bestOverall = "", vinFound = null, lowInk = true, bestValid = null;
 
