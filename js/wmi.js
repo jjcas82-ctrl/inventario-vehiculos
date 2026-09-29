@@ -11,7 +11,7 @@ export const WMI3 = {
   "3G1":"Chevrolet","3GC":"Chevrolet","3GN":"Chevrolet","3GB":"Chevrolet",
   "KL1":"Chevrolet","KL7":"Chevrolet","KL8":"Chevrolet",
   "9BG":"Chevrolet","8AG":"Chevrolet","93C":"Chevrolet",
-  "1GT":"GMC","2GK":"GMC","3GK":"GMC","1GK":"GMC","1GKS":"GMC",
+  "1GT":"GMC","2GK":"GMC","3GK":"GMC","1GK":"GMC",
   "1G4":"Buick","LSG":"Buick","1G6":"Cadillac","1GY":"Cadillac","1G3":"Oldsmobile",
   "1G8":"Saturn","1GM":"Pontiac","2G2":"Pontiac",
   // ---- Ford / Lincoln / Mercury ----
@@ -21,7 +21,7 @@ export const WMI3 = {
   // ---- Chrysler / Dodge / Jeep / RAM / Fiat ----
   "1C3":"Chrysler","2C3":"Chrysler","3C3":"Chrysler","1C4":"Jeep","1C6":"RAM",
   "1B3":"Dodge","2B3":"Dodge","1D4":"Dodge","1D7":"Dodge","3D7":"Dodge",
-  "1J4":"Jeep","1J8":"Jeep","ZFA":"Fiat","3FA9":"Fiat",
+  "1J4":"Jeep","1J8":"Jeep","ZFA":"Fiat",
   // ---- Honda / Acura ----
   "1HG":"Honda","2HG":"Honda","3HG":"Honda","5FN":"Honda","5J6":"Honda","19X":"Honda",
   "JHM":"Honda","JHL":"Honda","19U":"Acura","19V":"Acura","JH4":"Acura","2HN":"Acura",
@@ -67,7 +67,7 @@ export const WMI3 = {
   "LSF":"SAIC Motor (Chevrolet/MG)","LSJ":"SAIC (MG/Roewe)","LSV":"SAIC-Volkswagen",
   "LGB":"Dongfeng","LGH":"Dongfeng","LVH":"Dongfeng-Honda","LGX":"BYD","LC0":"BYD","LC6":"BYD",
   "LZW":"Chevrolet (SAIC-GM-Wuling)","L6T":"Geely","LB2":"Geely","LZG":"Geely",
-  "LGW":"Great Wall","LVV":"Chery","LVS9":"Ford","LFP":"FAW","LFM":"FAW-Toyota","LJ1":"JAC","LZM":"CAMC",
+  "LGW":"Great Wall","LVV":"Chery","LFP":"FAW","LFM":"FAW-Toyota","LJ1":"JAC","LZM":"CAMC",
   "LJD":"JMC","LSD":"SAIC","LDC":"Dongfeng-Peugeot","LNB":"BAIC","LMG":"GAC","L5Y":"Yadea",
   // ---- India ----
   "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet (GM)","MBH":"Suzuki","MEE":"Renault India",
@@ -84,11 +84,11 @@ export const WMI2 = {
   "JM":"Mazda","3M":"Mazda","JF":"Subaru","4S":"Subaru","JA":"Mitsubishi","4A":"Mitsubishi",
   "JS":"Suzuki","WV":"Volkswagen","1V":"Volkswagen","3V":"Volkswagen","WA":"Audi","TR":"Audi","WP":"Porsche",
   "WB":"BMW","5U":"BMW","4U":"BMW","WM":"MINI/smart","WD":"Mercedes-Benz","4J":"Mercedes-Benz","W1":"Mercedes-Benz",
-  "KM":"Hyundai","5N ":"Hyundai","KN":"Kia","5X":"Kia","3K":"Kia",
+  "KM":"Hyundai","KN":"Kia","5X":"Kia","3K":"Kia",
   "VF":"Francia (Renault/Peugeot/Citroën)","W0":"Opel","YV":"Volvo","SA":"Reino Unido (Jaguar/Land Rover)",
   "5Y":"Tesla","7S":"Tesla","LR":"Tesla China",
   "LS":"China (SAIC)","LG":"China (Dongfeng/BYD)","LV":"China (Chery/Volvo)","LF":"China (FAW)","L6":"China (Geely)",
-  "MA":"India","MB":"India","ME":"India","MAT":"Tata",
+  "MA":"India","MB":"India","ME":"India",
 };
 
 // País por el/los primeros caracteres del WMI (ISO 3780) — resumido.
@@ -115,11 +115,20 @@ export function countryFromChar(c, two) {
   return "Desconocido";
 }
 
-// Devuelve la marca (o fabricante genérico) a partir del VIN.
-export function makeFromVin(vin) {
+// Devuelve info de marca a partir del VIN, distinguiendo confiabilidad:
+//   { make, confident }
+//   - confident=true  → coincidencia EXACTA de 3 caracteres (fiable).
+//   - confident=false → solo coincidencia de 2 caracteres (fabricante/región
+//                        aproximada, AMBIGUA: el usuario debe verificar).
+export function makeInfo(vin) {
   const w3 = vin.slice(0, 3);
-  if (WMI3[w3]) return WMI3[w3];
+  if (WMI3[w3]) return { make: WMI3[w3], confident: true };
   const w2 = vin.slice(0, 2);
-  if (WMI2[w2]) return WMI2[w2];
-  return null; // desconocido: el usuario completará la marca manualmente
+  if (WMI2[w2]) return { make: WMI2[w2], confident: false };
+  return { make: null, confident: false };
+}
+
+// Compatibilidad: devuelve solo la marca (o null).
+export function makeFromVin(vin) {
+  return makeInfo(vin).make;
 }

@@ -221,7 +221,9 @@ function showVinResult(dec) {
     <div class="vin-colored">${vinColored}</div>
     <dl>
       <dt>Marca</dt><dd>${dec.make && dec.make !== "Desconocido"
-        ? escapeHtml(dec.make) + ' <span class="muted" style="font-weight:400">(sugerida — verifica en la ficha)</span>'
+        ? escapeHtml(dec.make) + (dec.makeConfident
+            ? ' <span class="muted" style="font-weight:400">(sugerida — verifica en la ficha)</span>'
+            : ' <span class="chk-bad" style="font-weight:400">(aproximada — confirma la marca en la ficha)</span>')
         : '<span class="muted">Se completa manualmente</span>'}</dd>
       <dt>Año del modelo</dt><dd>${escapeHtml(dec.year || "—")}</dd>
       <dt>País de origen</dt><dd>${escapeHtml(dec.country || "—")}</dd>

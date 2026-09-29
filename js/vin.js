@@ -9,7 +9,7 @@
 //   11    planta de ensamblaje
 //   12-17 número de serie de producción
 
-import { makeFromVin, countryFromChar } from "./wmi.js";
+import { makeInfo, countryFromChar } from "./wmi.js";
 
 const INVALID_CHARS = /[IOQ]/;               // Letras no permitidas en un VIN
 const VIN_REGEX = /^[A-HJ-NPR-Z0-9]{17}$/;
@@ -35,8 +35,10 @@ function countryFromWMI(vin) {
 }
 
 // Marca/fabricante por WMI (base de datos amplia en wmi.js).
+// Devuelve { make, confident } — confident=false si es solo aproximación por 2 caracteres.
 function makeFromWMI(vin) {
-  return makeFromVin(vin) || "Desconocido";
+  const info = makeInfo(vin);
+  return { make: info.make || "Desconocido", confident: info.confident };
 }
 
 export function computeCheckDigit(vin) {
@@ -108,7 +110,9 @@ export function decodeVin(raw) {
   result.wmi = vin.slice(0, 3);
   result.vds = vin.slice(3, 8);   // posiciones 4-8 (5 caracteres)
   result.vis = vin.slice(8, 17);  // posiciones 9-17
-  result.make = makeFromWMI(vin);
+  const mk = makeFromWMI(vin);
+  result.make = mk.make;
+  result.makeConfident = mk.confident;
   result.manufacturer = vin[1];   // 2.º carácter identifica al fabricante dentro del país
   result.country = countryFromWMI(vin);
   result.year = estimateYear(vin);
