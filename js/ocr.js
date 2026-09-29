@@ -159,6 +159,42 @@ function fixCommonOcr(s) {
   return arr.join("");
 }
 
+// Grupos de caracteres que el OCR confunde entre sí. Para cada carácter leído,
+// candidatos plausibles (incluyéndolo). Se usa para corregir por dígito de control.
+const CONFUSABLE = {
+  "8": ["8", "B"], "B": ["B", "8"],
+  "0": ["0", "D", "O", "Q"], "D": ["D", "0"], "O": ["0"], "Q": ["0"],
+  "1": ["1", "I", "L", "T"], "I": ["1"], "L": ["L", "1"], "T": ["T", "1"],
+  "5": ["5", "S"], "S": ["S", "5"],
+  "6": ["6", "G"], "G": ["G", "6"],
+  "2": ["2", "Z"], "Z": ["Z", "2"],
+  "4": ["4", "A"], "A": ["A", "4"],
+  "9": ["9", "P"], "P": ["P", "9"],
+  "7": ["7"], "3": ["3"],
+};
+
+// NOTA DE SEGURIDAD: NO corregimos "hasta que valide" por fuerza bruta, porque
+// ~1 de cada 11 VIN cualquiera pasa el dígito de control. Adivinar produciría
+// VIN incorrectos que igual validan (retrabajo). En su lugar solo aceptamos una
+// corrección si es ÚNICA y MÍNIMA: cambiar UN solo carácter, por su confundible,
+// y que el resultado sea la ÚNICA combinación válida. Si hay ambigüedad, no se corrige.
+function resolveByCheckDigit(s) {
+  if (!s || s.length !== 17) return null;
+  if (computeCheckDigit(s) === s[8]) return s; // ya válido
+
+  const solutions = new Set();
+  // Probar cambiar UN solo carácter (índice i) por cada uno de sus confundibles.
+  for (let i = 0; i < 17; i++) {
+    const alts = (CONFUSABLE[s[i]] || []).filter(c => c !== s[i] && /[A-HJ-NPR-Z0-9]/.test(c));
+    for (const c of alts) {
+      const cand = s.slice(0, i) + c + s.slice(i + 1);
+      if (computeCheckDigit(cand) === cand[8]) solutions.add(cand);
+    }
+  }
+  // Solo devolvemos si hay EXACTAMENTE una solución (sin ambigüedad).
+  return solutions.size === 1 ? [...solutions][0] : null;
+}
+
 function cleanText(t) {
   return String(t || "").toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
 }
@@ -182,56 +218,78 @@ function bestVinCandidate(clean) {
   return { vin: null, best };
 }
 
-// Ejecuta OCR probando varias franjas (arriba/centro/abajo) y, en cada una,
-// dos variantes (gris y binarizada). Elige el mejor candidato a VIN.
-export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) {
+// Lee el VIN con estrategia CONFIABLE por CONSENSO (votación):
+//  - Toma varias fotos y, en cada una, prueba 3 franjas × 3 procesamientos.
+//  - Recolecta todos los candidatos de 17 caracteres.
+//  - Un candidato es "verificado" si pasa el dígito de control (directo o con
+//    corrección ÚNICA y mínima de un carácter confundible).
+//  - Gana el VIN verificado que MÁS VECES aparezca (consenso). Así un error
+//    aleatorio del OCR no se impone sobre la lectura correcta repetida.
+export async function readVinFromVideo(video, { onProgress, onCandidate, shots = 3 } = {}) {
   const worker = await getWorker(onProgress);
-  // Franjas: centro alto, centro, y una franja ancha que cubre casi todo.
   const passes = [
     { h: 0.30, cy: 0.42 },
     { h: 0.30, cy: 0.55 },
     { h: 0.55, cy: 0.50 },
   ];
-  let bestOverall = "", vinFound = null, lowInk = true;
-  let bestValid = null; // candidato de 17 que además pasa el dígito de control
 
-  for (let k = 0; k < passes.length && !bestValid; k++) {
-    onProgress && onProgress(`Analizando imagen (${k + 1}/${passes.length})…`);
-    const { gray, bin, adapt, inkRatio } = cropVariants(video, passes[k].h, passes[k].cy);
-    if (inkRatio > 0.005) lowInk = false;
+  const votesVerified = new Map(); // VIN verificado -> nº de apariciones
+  const seenRaw = new Map();       // VIN de 17 sin verificar -> apariciones
+  let bestOverall = "", lowInk = true;
 
-    // Tres variantes: gris (brillos), binaria global (Otsu), adaptativa (sombras/reflejos).
-    for (const [name, url] of [["gris", gray], ["bin", bin], ["adapt", adapt]]) {
-      let text = "";
-      try {
-        const { data } = await worker.recognize(url);
-        text = data && data.text ? data.text : "";
-      } catch (e) {
-        onCandidate && onCandidate("(error worker: " + (e.message || e) + ")");
-        continue;
+  for (let shot = 0; shot < shots; shot++) {
+    if (shots > 1) onProgress && onProgress(`Capturando y analizando… (toma ${shot + 1}/${shots})`);
+    for (let k = 0; k < passes.length; k++) {
+      const { gray, bin, adapt, inkRatio } = cropVariants(video, passes[k].h, passes[k].cy);
+      if (inkRatio > 0.005) lowInk = false;
+
+      for (const [name, url] of [["gris", gray], ["bin", bin], ["adapt", adapt]]) {
+        let text = "";
+        try {
+          const { data } = await worker.recognize(url);
+          text = data && data.text ? data.text : "";
+        } catch (e) {
+          onCandidate && onCandidate("(error worker: " + (e.message || e) + ")");
+          continue;
+        }
+        const rawSeen = String(text).replace(/\s+/g, " ").trim();
+        const clean = cleanText(text);
+        const { vin, best } = bestVinCandidate(clean);
+        if (best.length > bestOverall.length) bestOverall = best;
+
+        let mark = "";
+        if (vin) {
+          const fixed = fixCommonOcr(vin);
+          let verified = null;
+          if (computeCheckDigit(fixed) === fixed[8]) { verified = fixed; mark = " ✓"; }
+          else {
+            const resolved = resolveByCheckDigit(fixed); // corrección única y mínima
+            if (resolved) { verified = resolved; mark = " ✓(corr.)"; }
+          }
+          if (verified) votesVerified.set(verified, (votesVerified.get(verified) || 0) + 1);
+          else seenRaw.set(fixed, (seenRaw.get(fixed) || 0) + 1);
+        }
+        onCandidate && onCandidate(`[${name}] "${rawSeen}" → ${clean}${mark}`);
       }
-      const rawSeen = String(text).replace(/\s+/g, " ").trim();
-      const clean = cleanText(text);
-      const { vin, best } = bestVinCandidate(clean);
-      let mark = "";
-      if (vin) {
-        const fixed = fixCommonOcr(vin);
-        // Si el dígito de control cuadra, es casi seguro correcto → lo tomamos.
-        if (computeCheckDigit(fixed) === fixed[8]) { bestValid = fixed; mark = " ✓"; }
-        else if (!vinFound) { vinFound = fixed; }
-      }
-      onCandidate && onCandidate(`[${name}] "${rawSeen}" → ${clean}${mark}`);
-      if (best.length > bestOverall.length) bestOverall = best;
-      if (bestValid) break;
     }
+    // Si ya hay un claro ganador verificado (aparece 2+ veces), no seguimos.
+    const top = [...votesVerified.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (top && top[1] >= 2) break;
+    // Pequeña pausa entre tomas para que cambie ligeramente el cuadro.
+    if (shot < shots - 1) await new Promise(r => setTimeout(r, 250));
   }
-  // Distinguimos claramente:
-  //  - verified: VIN de 17 que ADEMÁS pasa el dígito de control ISO 3779 (confiable).
-  //  - vin: mejor candidato de 17 SIN verificar (requiere confirmación del usuario).
-  //  - raw: lo mejor leído (para precargar y corregir).
+
+  // Elegimos por consenso: el VIN verificado más votado.
+  const verifiedSorted = [...votesVerified.entries()].sort((a, b) => b[1] - a[1]);
+  if (verifiedSorted.length) {
+    return { vin: verifiedSorted[0][0], verified: true, raw: bestOverall, lowInk,
+             votes: verifiedSorted[0][1] };
+  }
+  // Sin ninguno verificado: devolvemos el mejor de 17 sin verificar (para confirmar).
+  const rawSorted = [...seenRaw.entries()].sort((a, b) => b[1] - a[1]);
   return {
-    vin: bestValid || vinFound || null,
-    verified: !!bestValid,
+    vin: rawSorted.length ? rawSorted[0][0] : null,
+    verified: false,
     raw: bestOverall,
     lowInk,
   };

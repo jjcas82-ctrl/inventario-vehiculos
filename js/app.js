@@ -519,17 +519,18 @@ function setupScanner() {
     ocrBtn.disabled = true;
     ocrBtn.textContent = "Leyendo…";
     try {
-      setStatus("Tomando foto y leyendo el texto del VIN…", "muted");
-      const { vin, verified, raw, lowInk } = await readVinFromVideo(video, {
+      setStatus("Tomando fotos y leyendo el texto del VIN…", "muted");
+      const { vin, verified, raw, lowInk, votes } = await readVinFromVideo(video, {
         onProgress: (m) => setStatus(m, "muted"),
         onCandidate: (c) => diagLog("OCR leyó: " + JSON.stringify(c)),
+        shots: 3,
       });
 
       if (verified && vin) {
-        // Solo se acepta AUTOMÁTICAMENTE si el dígito de control ISO 3779 es válido.
+        // Solo se acepta AUTOMÁTICAMENTE si pasa el dígito de control ISO 3779.
         handleScannedText(vin);
         stopCamera();
-        setStatus("✓ VIN leído y verificado: " + vin, "ok");
+        setStatus(`✓ VIN leído y verificado${votes >= 2 ? " (confirmado " + votes + " veces)" : ""}: ` + vin, "ok");
       } else if (lowInk) {
         setStatus("No se ve texto legible en el recuadro. Apunta al VIN, llénalo en el recuadro, enfoca y evita reflejos. Luego toca 📸 otra vez.", "error");
       } else {
