@@ -223,6 +223,58 @@ function bestVinCandidate(clean) {
 //    corrección ÚNICA y mínima de un carácter confundible).
 //  - Gana el VIN verificado que MÁS VECES aparezca (consenso). Así un error
 //    aleatorio del OCR no se impone sobre la lectura correcta repetida.
+// OCR CONTINUO en vivo: analiza cuadros repetidamente y, en cuanto obtiene un VIN
+// VERIFICADO (dígito de control válido) que aparece 2 veces (consenso), lo entrega.
+// Así el usuario solo apunta al VIN de texto unos segundos, sin tomar foto.
+// Devuelve un objeto con stop() para detenerlo.
+export function startLiveVinOcr(video, { onFound, onTick, onStatus } = {}) {
+  let running = true;
+  const votes = new Map();   // VIN verificado -> nº de apariciones
+  let worker = null;
+
+  (async () => {
+    try {
+      worker = await getWorker(onStatus);
+    } catch (e) {
+      onStatus && onStatus("No se pudo cargar el lector de texto: " + (e.message || e), "error");
+      return;
+    }
+    onStatus && onStatus("Apunta al número de VIN y mantén firme…", "ok");
+
+    while (running) {
+      if (!video.videoWidth) { await sleep(150); continue; }
+      // Una franja amplia central-alta (el VIN suele ir en la parte superior).
+      const { gray, bin, adapt } = cropVariants(video, 0.55, 0.45);
+      let hitThisFrame = null;
+
+      for (const url of [gray, adapt, bin]) {
+        if (!running) break;
+        let text = "";
+        try { const { data } = await worker.recognize(url); text = data?.text || ""; }
+        catch (e) { continue; }
+        const { vin } = bestVinCandidate(cleanText(text));
+        if (!vin) continue;
+        const fixed = fixCommonOcr(vin);
+        let verified = (computeCheckDigit(fixed) === fixed[8]) ? fixed : resolveByCheckDigit(fixed);
+        if (verified) { hitThisFrame = verified; break; }
+      }
+
+      if (hitThisFrame) {
+        const n = (votes.get(hitThisFrame) || 0) + 1;
+        votes.set(hitThisFrame, n);
+        onTick && onTick(hitThisFrame, n);
+        // Con 2 lecturas verificadas iguales, lo damos por bueno.
+        if (n >= 2) { running = false; onFound && onFound(hitThisFrame); return; }
+      }
+      await sleep(120);
+    }
+  })();
+
+  return { stop() { running = false; } };
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) {
   const worker = await getWorker(onProgress);
   // UNA sola toma, rápida: analizamos casi TODO el recuadro (alto 0.72) centrado,
