@@ -35,7 +35,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v53</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v54</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -67,14 +67,11 @@
             <button id="scan-start" class="btn btn-primary">📷 Escanear código de barras / QR</button>
             <button id="scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
           </div>
-          <p class="hint">✅ <b>Método recomendado (rápido y exacto):</b> escanea el <b>código de barras</b> del VIN — está en la etiqueta de la puerta del conductor o junto al VIN del parabrisas. Se lee al instante, sin quedarte inmóvil.</p>
+          <p class="hint">✅ <b>Método principal (rápido y exacto):</b> escanea el <b>código de barras / QR</b> del VIN — está en la etiqueta de la puerta del conductor o junto al VIN del parabrisas. Se lee al instante.</p>
           <div class="row gap wrap" style="margin-top:6px">
-            <button id="scan-ocr" class="btn">🔤 Leer VIN de texto (foto)</button>
-            <button id="scan-photo" class="btn btn-ghost">📸 Foto del VIN (cámara nativa)</button>
+            <button id="scan-ocr" class="btn btn-ghost">🔤 Leer VIN de texto (opcional)</button>
           </div>
-          <!-- Input de cámara NATIVA del celular: respaldo alternativo -->
-          <input id="vin-photo-input" type="file" accept="image/*" capture="environment" hidden />
-          <p class="hint"><b>🔤 Leer VIN de texto:</b> toca para abrir la cámara, encuadra el número de VIN llenando el recuadro (enfocado, sin reflejos) y toca “📸 Tomar foto y leer VIN”. Si no lo lee, usa la captura manual.</p>
+          <p class="hint"><b>Opción secundaria — Leer VIN de texto:</b> toca para abrir la cámara, encuadra el número de VIN en el recuadro (enfocado y <b>sin reflejos del sol</b>) y toca “📸 Tomar foto y leer VIN”. Si no lo lee, usa la captura manual.</p>
           <p id="ocr-photo-status" class="hint"></p>
           <img id="ocr-photo-preview" style="display:none;max-width:100%;border-radius:8px;margin-top:6px" alt="Foto del VIN" />
           <p id="scan-status" class="hint"></p>
