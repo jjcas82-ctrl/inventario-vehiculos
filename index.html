@@ -64,11 +64,13 @@
 
           <div class="row gap wrap">
             <button id="scan-start" class="btn btn-primary">📷 Escanear código de barras / QR</button>
-            <button id="scan-ocr" class="btn">🔤 Leer VIN de texto (foto)</button>
             <button id="scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
           </div>
-          <p class="hint">Usa <b>código de barras/QR</b> si la etiqueta lo tiene. Usa <b>Leer VIN de texto</b> para el VIN grabado en el parabrisas: encuadra el VIN llenando el recuadro y toma la foto.<br>
-          <b>Consejos en el vehículo:</b> evita el reflejo del sol/luz en el vidrio (muévete de ángulo), acércate hasta que el VIN llene el ancho, mantén firme unos segundos y limpia el vidrio si está sucio. Siempre puedes corregir el VIN en la captura manual.</p>
+          <p class="hint">✅ <b>Método recomendado (rápido y exacto):</b> escanea el <b>código de barras</b> del VIN — está en la etiqueta de la puerta del conductor o junto al VIN del parabrisas. Se lee al instante, sin quedarte inmóvil.</p>
+          <div class="row gap wrap" style="margin-top:6px">
+            <button id="scan-ocr" class="btn">🔤 Leer VIN de texto por foto (respaldo)</button>
+          </div>
+          <p class="hint">Usa <b>Leer VIN de texto</b> solo si no hay código de barras legible. Encuadra el VIN llenando el recuadro, enfoca y toma la foto. Evita reflejos del vidrio. Si falla, escríbelo en la captura manual.</p>
           <p id="scan-status" class="hint"></p>
           <div id="scan-diag" class="diag" hidden></div>
 
