@@ -229,8 +229,8 @@ function bestVinCandidate(clean) {
 // Devuelve un objeto con stop() para detenerlo.
 export function startLiveVinOcr(video, { onFound, onTick, onStatus } = {}) {
   let running = true;
-  const votes = new Map();   // VIN verificado -> nº de apariciones
   let worker = null;
+  let frames = 0;
 
   (async () => {
     try {
@@ -242,31 +242,29 @@ export function startLiveVinOcr(video, { onFound, onTick, onStatus } = {}) {
     onStatus && onStatus("Apunta al número de VIN y mantén firme…", "ok");
 
     while (running) {
-      if (!video.videoWidth) { await sleep(150); continue; }
-      // Área AMPLIA: casi todo el cuadro (alto 0.88, centrado), para no recortar el VIN.
-      const { gray, bin, adapt } = cropVariants(video, 0.88, 0.50);
-      let hitThisFrame = null;
+      if (!video.videoWidth) { await sleep(120); continue; }
+      frames++;
+      // Área amplia, pero probamos SOLO una variante por ciclo (rota entre las tres)
+      // para que cada ciclo sea rápido y no se sienta trabado.
+      const variants = cropVariants(video, 0.88, 0.50);
+      const which = frames % 3;
+      const url = which === 0 ? variants.gray : (which === 1 ? variants.adapt : variants.bin);
 
-      for (const url of [gray, adapt, bin]) {
-        if (!running) break;
-        let text = "";
-        try { const { data } = await worker.recognize(url); text = data?.text || ""; }
-        catch (e) { continue; }
-        const { vin } = bestVinCandidate(cleanText(text));
-        if (!vin) continue;
+      let text = "";
+      try { const { data } = await worker.recognize(url); text = data?.text || ""; }
+      catch (e) { await sleep(80); continue; }
+
+      const { vin } = bestVinCandidate(cleanText(text));
+      onTick && onTick(vin ? vin : (text || "").trim().slice(0, 20), 0);
+
+      if (vin) {
         const fixed = fixCommonOcr(vin);
+        // Un VIN que pasa el dígito de control es matemáticamente correcto:
+        // basta UNA lectura verificada para aceptarlo (rápido y confiable).
         let verified = (computeCheckDigit(fixed) === fixed[8]) ? fixed : resolveByCheckDigit(fixed);
-        if (verified) { hitThisFrame = verified; break; }
+        if (verified) { running = false; onFound && onFound(verified); return; }
       }
-
-      if (hitThisFrame) {
-        const n = (votes.get(hitThisFrame) || 0) + 1;
-        votes.set(hitThisFrame, n);
-        onTick && onTick(hitThisFrame, n);
-        // Con 2 lecturas verificadas iguales, lo damos por bueno.
-        if (n >= 2) { running = false; onFound && onFound(hitThisFrame); return; }
-      }
-      await sleep(120);
+      await sleep(90);
     }
   })();
 
