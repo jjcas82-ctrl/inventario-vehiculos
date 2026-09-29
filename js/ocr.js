@@ -243,8 +243,8 @@ export function startLiveVinOcr(video, { onFound, onTick, onStatus } = {}) {
 
     while (running) {
       if (!video.videoWidth) { await sleep(150); continue; }
-      // Una franja amplia central-alta (el VIN suele ir en la parte superior).
-      const { gray, bin, adapt } = cropVariants(video, 0.55, 0.45);
+      // Área AMPLIA: casi todo el cuadro (alto 0.88, centrado), para no recortar el VIN.
+      const { gray, bin, adapt } = cropVariants(video, 0.88, 0.50);
       let hitThisFrame = null;
 
       for (const url of [gray, adapt, bin]) {
@@ -284,7 +284,7 @@ export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) 
   let bestOverall = "", lowInk = true;
 
   onProgress && onProgress("Analizando la foto…");
-  const { gray, bin, adapt, inkRatio } = cropVariants(video, 0.72, 0.50);
+  const { gray, bin, adapt, inkRatio } = cropVariants(video, 0.88, 0.50);
   if (inkRatio > 0.004) lowInk = false;
 
   for (const [name, url] of [["gris", gray], ["bin", bin], ["adapt", adapt]]) {
