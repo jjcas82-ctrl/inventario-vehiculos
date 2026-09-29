@@ -30,8 +30,10 @@ async function getWorker(onProgress) {
     20000, "El motor de OCR no terminó de cargar (conexión lenta o no compatible)."
   );
   await worker.setParameters({
-    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-    tessedit_pageseg_mode: "6",
+    // Incluir el asterisco: los VIN grabados vienen entre asteriscos (*VIN*).
+    // Si el OCR reconoce el "*" como carácter, no lo confunde con letras y lee rápido.
+    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789*",
+    tessedit_pageseg_mode: "7", // una sola línea de texto (el VIN es una línea)
   });
   _worker = worker;
   return _worker;

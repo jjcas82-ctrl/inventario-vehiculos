@@ -126,10 +126,11 @@
             <!-- MOVIMIENTO INTERNO: solo visible si la unidad ya está dentro -->
             <div class="loc-card" id="move-card" style="margin-top:12px;display:none">
               <b>Movimiento interno — actualizar ubicación</b>
-              <p class="hint" style="margin-top:2px">El capturista elige la nueva ubicación dentro de la agencia (el GPS no distingue áreas cercanas).</p>
+              <p class="hint" style="margin-top:2px">Cambia el área <b>dentro de la misma agencia</b>. La agencia solo cambia por GPS al registrar entrada o salida.</p>
               <div class="field">
-                <label for="ev-agency">Agencia</label>
-                <select id="ev-agency"></select>
+                <label>Agencia (fija)</label>
+                <div id="ev-agency-fixed" style="padding:10px 12px;background:#f1f5f9;border-radius:8px;font-weight:600">—</div>
+                <input type="hidden" id="ev-agency" />
               </div>
               <div class="field">
                 <label for="ev-area">Área</label>

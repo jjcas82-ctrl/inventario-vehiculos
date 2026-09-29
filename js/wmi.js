@@ -64,13 +64,13 @@ export const WMI3 = {
   // ---- Tesla ----
   "5YJ":"Tesla","7SA":"Tesla","LRW":"Tesla","XP7":"Tesla",
   // ---- China (seminuevos y nuevos) ----
-  "LSF":"SAIC Motor (Chevrolet/MG)","LSJ":"SAIC (MG/Roewe)","LSV":"SAIC-Volkswagen",
+  "LSF":"Chevrolet","LSJ":"MG","LSV":"Volkswagen",
   "LGB":"Dongfeng","LGH":"Dongfeng","LVH":"Dongfeng-Honda","LGX":"BYD","LC0":"BYD","LC6":"BYD",
-  "LZW":"Chevrolet (SAIC-GM-Wuling)","L6T":"Geely","LB2":"Geely","LZG":"Geely",
+  "LZW":"Chevrolet","L6T":"Geely","LB2":"Geely","LZG":"Geely",
   "LGW":"Great Wall","LVV":"Chery","LFP":"FAW","LFM":"FAW-Toyota","LJ1":"JAC","LZM":"CAMC",
   "LJD":"JMC","LSD":"SAIC","LDC":"Dongfeng-Peugeot","LNB":"BAIC","LMG":"GAC","L5Y":"Yadea",
   // ---- India ----
-  "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet (GM)","MBH":"Suzuki","MEE":"Renault India",
+  "MAT":"Tata","MA1":"Mahindra","MA3":"Suzuki","MA6":"Chevrolet","MBH":"Suzuki","MEE":"Renault",
 };
 
 // Coincidencias por los 2 primeros caracteres (más generales).

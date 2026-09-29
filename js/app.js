@@ -144,19 +144,21 @@ function setupTabs() {
 
 // ---------- Selectores de agencia/ubicación en el formulario de evento ----------
 function fillEventSelectors() {
-  const agSel = document.getElementById("ev-agency");
+  const agHidden = document.getElementById("ev-agency");
+  const agFixed = document.getElementById("ev-agency-fixed");
   const areaSel = document.getElementById("ev-area");
   const locSel = document.getElementById("ev-location");
   const subField = document.getElementById("ev-sub-field");
   const agencies = store.listAgencies();
 
-  const curAg = agSel.value;
-  agSel.innerHTML = agencies.map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join("");
-  if (curAg) agSel.value = curAg;
+  // El movimiento interno es dentro de la agencia ACTUAL de la unidad (fija).
+  const vehicle = currentDecode ? store.getVehicle(currentDecode.vin) : null;
+  const agencyName = vehicle?.currentAgency || (agencies[0] && agencies[0].name) || "";
+  if (agHidden) agHidden.value = agencyName;
+  if (agFixed) agFixed.textContent = agencyName || "—";
 
-  const currentAgency = () => agencies.find(x => x.name === agSel.value) || agencies[0];
+  const currentAgency = () => agencies.find(x => x.name === agencyName) || agencies[0];
 
-  // Rellena el selector de Área según la agencia.
   const fillAreas = () => {
     const a = currentAgency();
     const areas = a?.areas || [];
@@ -164,8 +166,6 @@ function fillEventSelectors() {
     fillSubs();
   };
 
-  // Rellena las sububicaciones según el área elegida. Si el área no tiene
-  // sububicaciones (ej. "Área de Entrega"), oculta el 2.º selector.
   const fillSubs = () => {
     const a = currentAgency();
     const area = (a?.areas || []).find(ar => ar.name === areaSel.value);
@@ -174,13 +174,11 @@ function fillEventSelectors() {
       subField.style.display = "";
       locSel.innerHTML = subs.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
     } else {
-      // Sin sububicaciones: la ubicación es la propia área.
       subField.style.display = "none";
       locSel.innerHTML = `<option value="">${escapeHtml(areaSel.value || "")}</option>`;
     }
   };
 
-  agSel.onchange = fillAreas;
   areaSel.onchange = fillSubs;
   fillAreas();
 }
@@ -668,11 +666,14 @@ function setupEventButtons() {
 
     // ============ MOVIMIENTO INTERNO: agencia/área elegidas por el capturista ============
     if (type === "move") {
-      const agency = document.getElementById("ev-agency").value;
-      const { area, location } = getSelectedLocation();
       if (status !== "dentro") {
-        notify("Nota: la unidad no figuraba dentro. Se registró el movimiento.", { type: "warn", title: "Aviso" });
+        notify("Solo se puede mover internamente una unidad que está DENTRO. Registra primero su entrada.", { type: "warn", title: "Aviso" });
+        return;
       }
+      // La agencia NO cambia en un movimiento interno: se conserva la agencia actual
+      // de la unidad (el cambio de agencia solo ocurre por GPS en entrada/salida).
+      const agency = existing.currentAgency;
+      const { area, location } = getSelectedLocation();
       return finalizeEvent(vin, "move", agency, area, location, condition, existing);
     }
 
