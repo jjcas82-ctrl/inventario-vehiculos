@@ -528,11 +528,23 @@ function setupScanner() {
       ocrBtn.textContent = "⏹️ Detener escaneo de VIN";
       setStatus("Apunta al número de VIN (texto). Se leerá solo cuando lo reconozca…", "ok");
 
+      // Aviso si tras 15 s el OCR no logró leer (guía al usuario a QR/manual).
+      let ocrStart = Date.now();
+      const ocrHint = setInterval(() => {
+        if (!liveOcr) { clearInterval(ocrHint); return; }
+        if (Date.now() - ocrStart > 15000) {
+          clearInterval(ocrHint);
+          notify("El lector de texto está tardando. Consejo: escanea el código de barras/QR (más rápido) o escribe el VIN en la captura manual.",
+            { type: "warn", title: "Sugerencia", timeout: 7000 });
+        }
+      }, 3000);
+
       // Lectura continua: en cuanto obtiene un VIN verificado, lo captura.
       liveOcr = startLiveVinOcr(video, {
         onStatus: (m, k) => setStatus(m, k || "muted"),
         onTick: (leido) => { if (leido) diagLog(leido); },
         onFound: (vin) => {
+          clearInterval(ocrHint);
           stopLiveOcr();
           handleScannedText(vin);
           stopCamera();

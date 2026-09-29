@@ -13,19 +13,25 @@ let _worker = null;
 async function getWorker(onProgress) {
   if (_worker) return _worker;
   onProgress && onProgress("Cargando lector de texto (OCR)… (1ª vez tarda unos segundos)");
-  const mod = await import(/* @vite-ignore */ TESSERACT_ESM);
+  // createWorker puede colgarse indefinidamente si el CDN/red falla (bug conocido
+  // #1075). Le ponemos un tiempo límite para no dejar el escaneo muerto.
+  const withTimeout = (p, ms, msg) => Promise.race([
+    p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms)),
+  ]);
+  const mod = await withTimeout(
+    import(/* @vite-ignore */ TESSERACT_ESM), 12000, "No se pudo cargar el OCR (red lenta)."
+  );
   const Tesseract = mod.default || mod;
-  // Rutas explícitas: en PWA/HTTPS evitan que el worker interno falle en silencio.
-  const worker = await Tesseract.createWorker("eng", 1, {
-    workerPath: WORKER_PATH,
-    corePath: CORE_PATH,
-    langPath: LANG_PATH,
-    logger: () => {},
-    errorHandler: (err) => { throw err; },
-  });
+  const worker = await withTimeout(
+    Tesseract.createWorker("eng", 1, {
+      workerPath: WORKER_PATH, corePath: CORE_PATH, langPath: LANG_PATH,
+      logger: () => {},
+    }),
+    20000, "El motor de OCR no terminó de cargar (conexión lenta o no compatible)."
+  );
   await worker.setParameters({
     tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-    tessedit_pageseg_mode: "6", // bloque uniforme de texto (más tolerante que 1 línea)
+    tessedit_pageseg_mode: "6",
   });
   _worker = worker;
   return _worker;
