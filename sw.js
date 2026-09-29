@@ -1,5 +1,5 @@
 // sw.js — Service worker: cache básico para funcionar sin conexión (app shell).
-const CACHE = "inv-vehiculos-v32";
+const CACHE = "inv-vehiculos-v33";
 const ASSETS = [
   "./",
   "./index.html",
@@ -45,19 +45,19 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
-  // Solo GET del mismo origen se cachea; el resto (CDN, tiles) pasa a la red.
+  // Solo GET del mismo origen; el resto (CDN, tiles) pasa a la red directamente.
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
 
+  // Estrategia NETWORK-FIRST: siempre intentamos la versión más reciente de la red
+  // y solo usamos la caché como respaldo si no hay conexión. Así el HTML/JS/CSS se
+  // actualizan solos (evita servir versiones viejas mezcladas) y sigue funcionando offline.
   e.respondWith(
-    caches.match(req).then((cached) => {
-      const fetched = fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => cached);
-      return cached || fetched;
-    })
+    fetch(req)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(req))
   );
 });

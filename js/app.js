@@ -846,11 +846,24 @@ function setupConnectivity() {
 
 // ---------- Service Worker ----------
 function setupServiceWorker() {
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
-    });
-  }
+  if (!("serviceWorker" in navigator)) return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").then((reg) => {
+      // Cuando se detecta una versión nueva, recargar una vez para tomarla.
+      reg.addEventListener("updatefound", () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", () => {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            notify("Nueva versión disponible, actualizando…", { type: "info", timeout: 2000 });
+            setTimeout(() => location.reload(), 800);
+          }
+        });
+      });
+    }).catch(() => {});
+    // Busca actualizaciones al abrir.
+    navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+  });
 }
 
 // ---------- Refrescos globales ----------
