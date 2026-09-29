@@ -292,51 +292,48 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 export async function readVinFromVideo(video, { onProgress, onCandidate } = {}) {
   const worker = await getWorker(onProgress);
-  // UNA sola toma, rápida: analizamos casi TODO el recuadro (alto 0.72) centrado,
-  // así no se pierde el texto esté arriba o abajo. 3 procesamientos de imagen.
-  const votesVerified = new Map();
-  const seenRaw = new Map();
-  let bestOverall = "", lowInk = true;
+  // Versión que funcionaba: 3 franjas (centro-alto, centro, ancha) × 3 procesamientos
+  // (gris, binaria Otsu, adaptativa). Elige el que pasa el dígito de control.
+  const passes = [
+    { h: 0.30, cy: 0.42 },
+    { h: 0.30, cy: 0.55 },
+    { h: 0.55, cy: 0.50 },
+  ];
+  let bestOverall = "", vinFound = null, lowInk = true, bestValid = null;
 
-  onProgress && onProgress("Analizando la foto…");
-  const { gray, bin, adapt, inkRatio } = cropVariants(video, 0.88, 0.50);
-  if (inkRatio > 0.004) lowInk = false;
+  for (let k = 0; k < passes.length && !bestValid; k++) {
+    onProgress && onProgress(`Analizando imagen (${k + 1}/${passes.length})…`);
+    const { gray, bin, adapt, inkRatio } = cropVariants(video, passes[k].h, passes[k].cy);
+    if (inkRatio > 0.005) lowInk = false;
 
-  for (const [name, url] of [["gris", gray], ["bin", bin], ["adapt", adapt]]) {
-    let text = "";
-    try {
-      const { data } = await worker.recognize(url);
-      text = data && data.text ? data.text : "";
-    } catch (e) {
-      onCandidate && onCandidate("(error worker: " + (e.message || e) + ")");
-      continue;
-    }
-    const rawSeen = String(text).replace(/\s+/g, " ").trim();
-    const clean = cleanText(text);
-    const { vin, best } = bestVinCandidate(clean);
-    if (best.length > bestOverall.length) bestOverall = best;
-
-    let mark = "";
-    if (vin) {
-      const fixed = fixCommonOcr(vin);
-      let verified = null;
-      if (computeCheckDigit(fixed) === fixed[8]) { verified = fixed; mark = " ✓"; }
-      else {
-        const resolved = resolveByCheckDigit(fixed);
-        if (resolved) { verified = resolved; mark = " ✓(corr.)"; }
+    for (const [name, url] of [["gris", gray], ["bin", bin], ["adapt", adapt]]) {
+      let text = "";
+      try {
+        const { data } = await worker.recognize(url);
+        text = data && data.text ? data.text : "";
+      } catch (e) {
+        onCandidate && onCandidate("(error worker: " + (e.message || e) + ")");
+        continue;
       }
-      if (verified) votesVerified.set(verified, (votesVerified.get(verified) || 0) + 1);
-      else seenRaw.set(fixed, (seenRaw.get(fixed) || 0) + 1);
+      const rawSeen = String(text).replace(/\s+/g, " ").trim();
+      const clean = cleanText(text);
+      const { vin, best } = bestVinCandidate(clean);
+      let mark = "";
+      if (vin) {
+        const fixed = fixCommonOcr(vin);
+        if (computeCheckDigit(fixed) === fixed[8]) { bestValid = fixed; mark = " ✓"; }
+        else {
+          const resolved = resolveByCheckDigit(fixed);
+          if (resolved) { bestValid = resolved; mark = " ✓(corr.)"; }
+          else if (!vinFound) { vinFound = fixed; }
+        }
+      }
+      onCandidate && onCandidate(`[${name}] "${rawSeen}" → ${clean}${mark}`);
+      if (best.length > bestOverall.length) bestOverall = best;
+      if (bestValid) break;
     }
-    onCandidate && onCandidate(`[${name}] "${rawSeen}" → ${clean}${mark}`);
   }
-
-  const verifiedSorted = [...votesVerified.entries()].sort((a, b) => b[1] - a[1]);
-  if (verifiedSorted.length) {
-    return { vin: verifiedSorted[0][0], verified: true, raw: bestOverall, lowInk, votes: verifiedSorted[0][1] };
-  }
-  const rawSorted = [...seenRaw.entries()].sort((a, b) => b[1] - a[1]);
-  return { vin: rawSorted.length ? rawSorted[0][0] : null, verified: false, raw: bestOverall, lowInk };
+  return { vin: bestValid || vinFound, verified: !!bestValid, raw: bestOverall, lowInk };
 }
 
 

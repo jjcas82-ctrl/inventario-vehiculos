@@ -68,12 +68,12 @@
           </div>
           <p class="hint">✅ <b>Método recomendado (rápido y exacto):</b> escanea el <b>código de barras</b> del VIN — está en la etiqueta de la puerta del conductor o junto al VIN del parabrisas. Se lee al instante, sin quedarte inmóvil.</p>
           <div class="row gap wrap" style="margin-top:6px">
-            <button id="scan-photo" class="btn">📸 Foto del VIN (recomendado en el vehículo)</button>
-            <button id="scan-ocr" class="btn btn-ghost">🔤 Escanear VIN en vivo</button>
+            <button id="scan-ocr" class="btn">🔤 Leer VIN de texto (foto)</button>
+            <button id="scan-photo" class="btn btn-ghost">📸 Foto del VIN (cámara nativa)</button>
           </div>
-          <!-- Input de cámara NATIVA del celular: foto de alta resolución, una sola lectura -->
+          <!-- Input de cámara NATIVA del celular: respaldo alternativo -->
           <input id="vin-photo-input" type="file" accept="image/*" capture="environment" hidden />
-          <p class="hint"><b>📸 Foto del VIN:</b> toma UNA foto clara del número de VIN (se abre la cámara del teléfono). Es lo más fiable en el vehículo: la foto es nítida y se lee una sola vez. Acércate hasta que el VIN llene la foto, con buena luz y sin reflejos.</p>
+          <p class="hint"><b>🔤 Leer VIN de texto:</b> toca para abrir la cámara, encuadra el número de VIN llenando el recuadro (enfocado, sin reflejos) y toca “📸 Tomar foto y leer VIN”. Si no lo lee, usa la captura manual.</p>
           <p id="ocr-photo-status" class="hint"></p>
           <img id="ocr-photo-preview" style="display:none;max-width:100%;border-radius:8px;margin-top:6px" alt="Foto del VIN" />
           <p id="scan-status" class="hint"></p>

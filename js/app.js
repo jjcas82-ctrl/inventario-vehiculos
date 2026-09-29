@@ -2,7 +2,7 @@
 // eventos, respaldo de datos e instalación PWA.
 import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
-import { readVinFromVideo, startLiveVinOcr, readVinFromImageFile } from "./ocr.js";
+import { readVinFromVideo, readVinFromImageFile } from "./ocr.js";
 import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
@@ -498,68 +498,59 @@ function setupScanner() {
     setStatus("Cámara detenida.", "muted");
   });
 
-  // ---- OCR EN VIVO: leer el número de VIN (texto) en tiempo real ----
+  // ---- OCR de TEXTO por FOTO (versión que funcionaba: abrir cámara → tomar foto) ----
   const ocrBtn = document.getElementById("scan-ocr");
-  const OCR_LABEL = "🔤 Escanear número de VIN (texto)";
-  let liveOcr = null;
-
-  const stopLiveOcr = () => {
-    if (liveOcr) { liveOcr.stop(); liveOcr = null; }
-  };
-  window.__stopLiveOcr = stopLiveOcr; // para que stopCamera pueda detenerlo
+  const OCR_LABEL = "🔤 Leer VIN de texto (foto)";
+  const OCR_SHOOT = "📸 Tomar foto y leer VIN";
+  const stopLiveOcr = () => {}; // compat (ya no hay OCR en vivo)
+  window.__stopLiveOcr = stopLiveOcr;
 
   ocrBtn.addEventListener("click", async () => {
-    // Si ya está escaneando en vivo, este botón lo detiene.
-    if (liveOcr) {
-      stopLiveOcr();
-      stopCamera();
-      setStatus("Escaneo de VIN detenido.", "muted");
-      ocrBtn.textContent = OCR_LABEL;
-      return;
+    // 1er toque: abrir la cámara (sin detector de barras) y esperar a encuadrar.
+    if (!scanner.running) {
+      try {
+        currentDecode = null;
+        document.getElementById("vin-input").value = "";
+        document.getElementById("vin-result").innerHTML =
+          '<p class="muted">Escanea o escribe un VIN para ver sus datos.</p>';
+        document.getElementById("event-form").hidden = true;
+        await scanner.start({ detect: false });
+        startBtn.hidden = true;
+        stopBtn.hidden = false;
+        ocrBtn.textContent = OCR_SHOOT;
+        setStatus("Encuadra el VIN dentro del recuadro, bien enfocado, y toca “📸 Tomar foto y leer VIN”.", "ok");
+        return;
+      } catch (e) { return; }
     }
+    // 2º toque: tomar la foto y leer.
+    ocrBtn.disabled = true;
+    ocrBtn.textContent = "Leyendo…";
     try {
-      // Limpiar lectura previa.
-      currentDecode = null;
-      document.getElementById("vin-input").value = "";
-      document.getElementById("vin-result").innerHTML =
-        '<p class="muted">Escanea o escribe un VIN para ver sus datos.</p>';
-      document.getElementById("event-form").hidden = true;
-
-      // Solo cámara, SIN el detector de código de barras (para no competir con el OCR).
-      await scanner.start({ detect: false });
-      startBtn.hidden = true;
-      stopBtn.hidden = false;
-      ocrBtn.textContent = "⏹️ Detener escaneo de VIN";
-      setStatus("Apunta al número de VIN (texto). Se leerá solo cuando lo reconozca…", "ok");
-
-      // Aviso si tras 15 s el OCR no logró leer (guía al usuario a QR/manual).
-      let ocrStart = Date.now();
-      const ocrHint = setInterval(() => {
-        if (!liveOcr) { clearInterval(ocrHint); return; }
-        if (Date.now() - ocrStart > 15000) {
-          clearInterval(ocrHint);
-          notify("El lector de texto está tardando. Consejo: escanea el código de barras/QR (más rápido) o escribe el VIN en la captura manual.",
-            { type: "warn", title: "Sugerencia", timeout: 7000 });
-        }
-      }, 3000);
-
-      // Lectura continua: en cuanto obtiene un VIN verificado, lo captura.
-      liveOcr = startLiveVinOcr(video, {
-        onStatus: (m, k) => setStatus(m, k || "muted"),
-        onTick: (leido) => { if (leido) diagLog(leido); },
-        onFound: (vin) => {
-          clearInterval(ocrHint);
-          stopLiveOcr();
-          handleScannedText(vin);
-          stopCamera();
-          ocrBtn.textContent = OCR_LABEL;
-          setStatus("✓ VIN leído y verificado: " + vin, "ok");
-        },
+      setStatus("Leyendo el texto del VIN…", "muted");
+      const { vin, verified, raw, lowInk } = await readVinFromVideo(video, {
+        onProgress: (m) => setStatus(m, "muted"),
+        onCandidate: (c) => diagLog("OCR: " + c),
       });
+      if (verified && vin) {
+        handleScannedText(vin);
+        stopCamera();
+        ocrBtn.textContent = OCR_LABEL;
+        setStatus("✓ VIN leído y verificado: " + vin, "ok");
+      } else if (lowInk) {
+        setStatus("No se ve texto legible. Acerca más el VIN llenando el recuadro, enfoca y evita reflejos. Toca 📸 otra vez.", "error");
+      } else {
+        const guess = (raw || "").slice(0, 17);
+        if (guess) document.getElementById("vin-input").value = guess;
+        showVinResult(decodeVin(guess));
+        setStatus("⚠️ Lectura no confiable. Se leyó “" + (raw || "—") +
+          "”. Revisa/corrige en la captura manual, o toma otra foto más cercana y nítida.", "error");
+        notify("Revisa el VIN antes de registrar.", { type: "warn", title: "Verifica el VIN", timeout: 5000 });
+      }
     } catch (e) {
-      stopLiveOcr();
-      setStatus("No se pudo iniciar el escaneo: " + (e.message || e) + ". Usa la captura manual.", "error");
-      ocrBtn.textContent = OCR_LABEL;
+      setStatus("Error de OCR: " + (e.message || e) + ". Usa la captura manual.", "error");
+    } finally {
+      ocrBtn.disabled = false;
+      ocrBtn.textContent = scanner.running ? OCR_SHOOT : OCR_LABEL;
     }
   });
 
