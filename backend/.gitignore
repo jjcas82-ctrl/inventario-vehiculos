@@ -1,0 +1,5 @@
+# Configuración con credenciales reales — NUNCA subir al repo
+api/config.php
+
+# Base de datos de prueba local
+test/*.db

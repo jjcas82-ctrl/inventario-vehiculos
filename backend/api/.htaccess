@@ -1,0 +1,11 @@
+# Reescritura de rutas para la API. Convierte /api/vehicles/XXX en index.php?r=vehicles/XXX
+# Funciona en Apache (Web Station de Synology usa Apache).
+RewriteEngine On
+
+# Si el archivo o carpeta existe, servirlo tal cual (no aplica a la API pura, pero por seguridad).
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Todo lo demás va a index.php, pasando la ruta en ?r=
+RewriteRule ^(.*)$ index.php?r=$1 [QSA,L]
