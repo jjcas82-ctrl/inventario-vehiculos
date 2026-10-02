@@ -13,6 +13,7 @@ import { initReports, renderReports, refreshReportAgencies } from "./reports.js"
 import { notify, confirmDialog, promptDialog } from "./ui.js";
 import * as auth from "./auth.js";
 import { initUsers, renderUsers } from "./users.js";
+import { initLabels, renderLabels } from "./labels.js";
 import { getPosition } from "./events.js";
 import { nearestAgency } from "./geo.js";
 import "./audit.js";
@@ -137,6 +138,7 @@ function setupTabs() {
       if (name === "reports") { refreshReportAgencies(); renderReports(); }
       if (name === "inventory") renderInventory();
       if (name === "users") renderUsers();
+      if (name === "labels") renderLabels();
       if (name === "audit") window.__initAudit && window.__initAudit();
     })
   );
@@ -1012,6 +1014,7 @@ function main() {
   setupUser();
   setupTabs();
   initUsers();
+  initLabels();
   setupScanner();
   setupEventButtons();
   setupDataButtons();
