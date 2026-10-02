@@ -2,7 +2,7 @@
 // eventos, respaldo de datos e instalación PWA.
 import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
-import { readVinFromVideo } from "./ocr.js";
+import { readVinFromVideo, readVinCloud, getCloudOcrKey, setCloudOcrKey, hasCloudOcr } from "./ocr.js";
 import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
@@ -455,7 +455,9 @@ function setupScanner() {
     startBtn.hidden = false;
     stopBtn.hidden = true;
     const ob = document.getElementById("scan-ocr");
-    if (ob) ob.textContent = "🔤 Escanear número de VIN (texto)";
+    if (ob) ob.textContent = "🔤 Leer VIN de texto (opcional)";
+    const cb = document.getElementById("scan-cloud");
+    if (cb) cb.textContent = "☁️ Leer VIN en la nube";
   };
 
   scanner = new Scanner(video, {
@@ -553,6 +555,65 @@ function setupScanner() {
   });
 
 
+  // ---- OCR EN LA NUBE (OCR.space): abrir cámara → enviar foto a la nube ----
+  const cloudBtn = document.getElementById("scan-cloud");
+  const CLOUD_LABEL = "☁️ Leer VIN en la nube";
+  const CLOUD_SHOOT = "☁️ Enviar a la nube";
+
+  function refreshCloudButton() {
+    if (!cloudBtn) return;
+    const show = hasCloudOcr();
+    cloudBtn.hidden = !show;
+    const hint = document.getElementById("cloud-ocr-hint");
+    if (hint) hint.hidden = !show;
+  }
+  refreshCloudButton();
+  window.__refreshCloudButton = refreshCloudButton;
+
+  if (cloudBtn) cloudBtn.addEventListener("click", async () => {
+    // 1er toque: abrir cámara (solo cámara, sin detector de barras).
+    if (!scanner.running) {
+      try {
+        currentDecode = null;
+        document.getElementById("vin-input").value = "";
+        document.getElementById("event-form").hidden = true;
+        await scanner.start({ detect: false });
+        startBtn.hidden = true;
+        stopBtn.hidden = false;
+        cloudBtn.textContent = CLOUD_SHOOT;
+        setStatus("Encuadra el VIN en el recuadro y toca “☁️ Enviar a la nube”.", "ok");
+        return;
+      } catch (e) { return; }
+    }
+    // 2º toque: enviar a la nube.
+    cloudBtn.disabled = true;
+    cloudBtn.textContent = "Enviando…";
+    try {
+      const { vin, verified, raw, error } = await readVinCloud(video, {
+        onProgress: (m) => setStatus(m, "muted"),
+      });
+      if (error) {
+        setStatus("OCR en la nube: " + error + " Usa el lector local o la captura manual.", "error");
+      } else if (verified && vin) {
+        handleScannedText(vin);
+        stopCamera();
+        cloudBtn.textContent = CLOUD_LABEL;
+        setStatus("✓ VIN leído en la nube: " + vin, "ok");
+      } else {
+        const guess = (raw || vin || "").slice(0, 17);
+        if (guess) document.getElementById("vin-input").value = guess;
+        showVinResult(decodeVin(guess));
+        setStatus("⚠️ Lectura no confiable (nube). Se leyó “" + (raw || vin || "—") +
+          "”. Revisa/corrige en la captura manual, o reintenta.", "error");
+      }
+    } catch (e) {
+      setStatus("Error del OCR en la nube: " + (e.message || e), "error");
+    } finally {
+      cloudBtn.disabled = false;
+      cloudBtn.textContent = scanner.running ? CLOUD_SHOOT : CLOUD_LABEL;
+    }
+  });
+
   // Captura manual con validación ISO 3779 explícita
   const manualDecode = () => {
     const val = document.getElementById("vin-input").value;
@@ -562,6 +623,32 @@ function setupScanner() {
   document.getElementById("vin-decode").addEventListener("click", manualDecode);
   document.getElementById("vin-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); manualDecode(); }
+  });
+
+  // ---- Configuración de la API key del OCR en la nube (pestaña Datos) ----
+  const keyInput = document.getElementById("cloud-ocr-key");
+  const keyStatus = document.getElementById("cloud-ocr-status");
+  const refreshKeyStatus = () => {
+    if (!keyStatus) return;
+    keyStatus.textContent = hasCloudOcr() ? "✓ OCR en la nube configurado y activo." : "No configurado (se usa el lector local).";
+    keyStatus.style.color = hasCloudOcr() ? "var(--primary)" : "var(--muted)";
+  };
+  if (keyInput) keyInput.value = getCloudOcrKey();
+  refreshKeyStatus();
+  const saveKeyBtn = document.getElementById("save-cloud-ocr");
+  if (saveKeyBtn) saveKeyBtn.addEventListener("click", () => {
+    setCloudOcrKey(keyInput.value);
+    refreshKeyStatus();
+    refreshCloudButton();
+    notify("Configuración de OCR en la nube guardada.", { type: "success" });
+  });
+  const clearKeyBtn = document.getElementById("clear-cloud-ocr");
+  if (clearKeyBtn) clearKeyBtn.addEventListener("click", () => {
+    setCloudOcrKey("");
+    keyInput.value = "";
+    refreshKeyStatus();
+    refreshCloudButton();
+    notify("OCR en la nube desactivado.", { type: "info" });
   });
 }
 

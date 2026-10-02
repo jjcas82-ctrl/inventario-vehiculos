@@ -470,3 +470,87 @@ export async function readVinFromImageFile(file, { onProgress, onCandidate } = {
   const rSorted = [...seenRaw.entries()].sort((a, b) => b[1] - a[1]);
   return { vin: rSorted.length ? rSorted[0][0] : null, verified: false, raw: bestOverall };
 }
+
+
+
+// ============================================================================
+//  OCR EN LA NUBE (OCR.space) — más preciso, requiere internet y una API key.
+//  Plan gratuito: https://ocr.space/ocrapi  (regístrate y obtén una API key gratis)
+//  La API key se guarda en localStorage ("inv_ocrspace_key").
+// ============================================================================
+
+const OCRSPACE_URL = "https://api.ocr.space/parse/image";
+
+export function getCloudOcrKey() {
+  try { return localStorage.getItem("inv_ocrspace_key") || ""; } catch (e) { return ""; }
+}
+export function setCloudOcrKey(k) {
+  try { localStorage.setItem("inv_ocrspace_key", (k || "").trim()); } catch (e) {}
+}
+export function hasCloudOcr() { return !!getCloudOcrKey(); }
+
+// Captura la franja central del video y devuelve un Blob JPEG (para enviar a la nube).
+function grabStripBlob(video, heightFactor = 0.22, cy = 0.50) {
+  return new Promise((resolve) => {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const cropW = Math.round(vw * 0.96);
+    const cropH = Math.round(vh * heightFactor);
+    const sx = Math.round((vw - cropW) / 2);
+    const sy = Math.round(Math.min(Math.max(vh * cy - cropH / 2, 0), vh - cropH));
+    const canvas = document.createElement("canvas");
+    canvas.width = cropW; canvas.height = cropH;
+    canvas.getContext("2d").drawImage(video, sx, sy, cropW, cropH, 0, 0, cropW, cropH);
+    canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85);
+  });
+}
+
+// Lee el VIN enviando la franja a OCR.space. Devuelve { vin, verified, raw }.
+export async function readVinCloud(video, { onProgress } = {}) {
+  const key = getCloudOcrKey();
+  if (!key) return { vin: null, verified: false, raw: "", error: "Falta la API key de OCR en la nube." };
+  if (!navigator.onLine) return { vin: null, verified: false, raw: "", error: "Sin conexión a internet." };
+
+  onProgress && onProgress("Enviando imagen al OCR en la nube…");
+  const blob = await grabStripBlob(video, 0.26, 0.50);
+  if (!blob) return { vin: null, verified: false, raw: "", error: "No se pudo capturar la imagen." };
+
+  const form = new FormData();
+  form.append("file", blob, "vin.jpg");
+  form.append("OCREngine", "2");         // motor 2: mejor con texto corto
+  form.append("scale", "true");
+  form.append("isOverlayRequired", "false");
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
+  let json;
+  try {
+    const res = await fetch(OCRSPACE_URL, {
+      method: "POST",
+      headers: { "apikey": key },
+      body: form,
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    json = await res.json();
+  } catch (e) {
+    clearTimeout(t);
+    return { vin: null, verified: false, raw: "", error: e.name === "AbortError" ? "Tiempo agotado." : (e.message || "Error de red.") };
+  }
+
+  if (json.IsErroredOnProcessing) {
+    const msg = Array.isArray(json.ErrorMessage) ? json.ErrorMessage.join(" ") : (json.ErrorMessage || "Error del OCR en la nube.");
+    return { vin: null, verified: false, raw: "", error: msg };
+  }
+  const text = json?.ParsedResults?.[0]?.ParsedText || "";
+  const clean = cleanText(text);
+  const { vin, best } = bestVinCandidate(clean);
+  onProgress && onProgress("Lectura recibida.");
+
+  if (vin) {
+    const fixed = fixCommonOcr(vin);
+    let verified = (computeCheckDigit(fixed) === fixed[8]) ? fixed : resolveByCheckDigit(fixed);
+    if (verified) return { vin: verified, verified: true, raw: best };
+    return { vin: fixed, verified: false, raw: best };
+  }
+  return { vin: null, verified: false, raw: best || clean };
+}

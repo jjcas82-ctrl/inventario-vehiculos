@@ -35,7 +35,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v54</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v55</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -70,8 +70,10 @@
           <p class="hint">✅ <b>Método principal (rápido y exacto):</b> escanea el <b>código de barras / QR</b> del VIN — está en la etiqueta de la puerta del conductor o junto al VIN del parabrisas. Se lee al instante.</p>
           <div class="row gap wrap" style="margin-top:6px">
             <button id="scan-ocr" class="btn btn-ghost">🔤 Leer VIN de texto (opcional)</button>
+            <button id="scan-cloud" class="btn btn-ghost" hidden>☁️ Leer VIN en la nube</button>
           </div>
-          <p class="hint"><b>Opción secundaria — Leer VIN de texto:</b> toca para abrir la cámara, encuadra el número de VIN en el recuadro (enfocado y <b>sin reflejos del sol</b>) y toca “📸 Tomar foto y leer VIN”. Si no lo lee, usa la captura manual.</p>
+          <p class="hint"><b>Opción secundaria — Leer VIN de texto:</b> toca para abrir la cámara, encuadra el número de VIN en el recuadro (enfocado y <b>sin reflejos del sol</b>) y toca “📸 Tomar foto y leer VIN”. Si no lo lee, usa la captura manual.<br>
+          <span id="cloud-ocr-hint" hidden>☁️ <b>Leer VIN en la nube:</b> abre la cámara, encuadra el VIN y toca “☁️ Enviar a la nube”. Usa un servicio de reconocimiento más preciso (requiere internet).</span></p>
           <p id="ocr-photo-status" class="hint"></p>
           <img id="ocr-photo-preview" style="display:none;max-width:100%;border-radius:8px;margin-top:6px" alt="Foto del VIN" />
           <p id="scan-status" class="hint"></p>
@@ -249,6 +251,17 @@
           <input id="import-file" type="file" accept="application/json" hidden />
           <button id="wipe-data" class="btn btn-danger">Borrar todo</button>
         </div>
+      </div>
+
+      <div class="card">
+        <h2>OCR en la nube (lectura de VIN por foto)</h2>
+        <p class="hint">Servicio de reconocimiento de texto más preciso para leer el VIN del parabrisas. Es <b>gratuito</b>: regístrate en <b>ocr.space/ocrapi</b>, obtén tu <b>API key</b> gratis y pégala aquí. Requiere internet. Si lo dejas vacío, se usa el lector local del navegador.</p>
+        <div class="row gap wrap">
+          <input id="cloud-ocr-key" type="text" placeholder="API key de OCR.space" style="flex:1;min-width:200px" />
+          <button id="save-cloud-ocr" class="btn btn-primary">Guardar</button>
+          <button id="clear-cloud-ocr" class="btn">Quitar</button>
+        </div>
+        <p id="cloud-ocr-status" class="hint"></p>
       </div>
     </section>
 
