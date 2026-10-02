@@ -457,9 +457,9 @@ function setupScanner() {
     startBtn.hidden = false;
     stopBtn.hidden = true;
     const ob = document.getElementById("scan-ocr");
-    if (ob) ob.textContent = "🔤 Leer VIN de texto (opcional)";
+    if (ob) ob.textContent = "3️⃣ 🔤 Leer VIN de texto (local)";
     const cb = document.getElementById("scan-cloud");
-    if (cb) cb.textContent = "☁️ Leer VIN en la nube";
+    if (cb) cb.textContent = "2️⃣ 🔤 Leer VIN de texto (en la nube)";
   };
 
   scanner = new Scanner(video, {
@@ -502,7 +502,7 @@ function setupScanner() {
 
   // ---- OCR de TEXTO por FOTO (versión que funcionaba: abrir cámara → tomar foto) ----
   const ocrBtn = document.getElementById("scan-ocr");
-  const OCR_LABEL = "🔤 Leer VIN de texto (foto)";
+  const OCR_LABEL = "3️⃣ 🔤 Leer VIN de texto (local)";
   const OCR_SHOOT = "📸 Tomar foto y leer VIN";
   const stopLiveOcr = () => {}; // compat (ya no hay OCR en vivo)
   window.__stopLiveOcr = stopLiveOcr;
@@ -559,7 +559,7 @@ function setupScanner() {
 
   // ---- OCR EN LA NUBE (OCR.space): abrir cámara → enviar foto a la nube ----
   const cloudBtn = document.getElementById("scan-cloud");
-  const CLOUD_LABEL = "☁️ Leer VIN en la nube";
+  const CLOUD_LABEL = "2️⃣ 🔤 Leer VIN de texto (en la nube)";
   const CLOUD_SHOOT = "☁️ Enviar a la nube";
 
   function refreshCloudButton() {

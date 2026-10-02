@@ -36,7 +36,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v62</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v63</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -72,14 +72,14 @@
           </div>
           <p class="hint">1️⃣ <b>Método principal (rápido y exacto):</b> escanea el <b>código de barras / QR</b> del VIN. Se lee al instante.</p>
 
-          <!-- 2) y 3): OCR en la nube (con internet) y OCR de texto (sin internet) -->
+          <!-- 2) OCR en la nube (con internet) y 3) OCR de texto local (sin internet) -->
           <div class="row gap wrap" style="margin-top:8px">
-            <button id="scan-cloud" class="btn" hidden>☁️ Leer VIN (nube)</button>
-            <button id="scan-ocr" class="btn btn-ghost">🔤 Leer VIN de texto</button>
+            <button id="scan-cloud" class="btn" hidden>2️⃣ 🔤 Leer VIN de texto (en la nube)</button>
+            <button id="scan-ocr" class="btn btn-ghost">3️⃣ 🔤 Leer VIN de texto (local)</button>
           </div>
           <p class="hint">
-            <span id="cloud-ocr-hint" hidden>2️⃣ <b>☁️ Leer VIN (nube):</b> lectura precisa del VIN por foto (requiere internet). Encuadra el VIN y envíalo.<br></span>
-            3️⃣ <b>🔤 Leer VIN de texto:</b> lector local (úsalo si no hay internet). Encuadra el VIN sin reflejos y toma la foto.<br>
+            <span id="cloud-ocr-hint" hidden>2️⃣ <b>Leer VIN de texto (en la nube):</b> lectura precisa del VIN por foto (requiere internet). Encuadra el VIN y envíalo.<br></span>
+            3️⃣ <b>Leer VIN de texto (local):</b> lector del dispositivo (úsalo si no hay internet). Encuadra el VIN sin reflejos y toma la foto.<br>
             4️⃣ <b>Ingreso manual:</b> escribe el VIN abajo si los demás fallan.
           </p>
           <p id="ocr-photo-status" class="hint"></p>
