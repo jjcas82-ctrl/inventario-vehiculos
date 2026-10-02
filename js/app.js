@@ -565,16 +565,28 @@ function setupScanner() {
   function refreshCloudButton() {
     if (!cloudBtn) return;
     const show = hasCloudOcr();
-    cloudBtn.hidden = !show;
+    // El botón 2 (nube) SIEMPRE se muestra para que la numeración 1-2-3-4 sea
+    // consistente. Si no hay API key, al pulsarlo se ofrece configurarla.
+    cloudBtn.hidden = false;
     // Si la nube está configurada, es la opción preferida (botón primario).
     if (show) { cloudBtn.classList.add("btn-primary"); cloudBtn.classList.remove("btn-ghost"); }
+    else { cloudBtn.classList.remove("btn-primary"); cloudBtn.classList.add("btn-ghost"); }
     const hint = document.getElementById("cloud-ocr-hint");
-    if (hint) hint.hidden = !show;
+    if (hint) hint.hidden = false;
   }
   refreshCloudButton();
   window.__refreshCloudButton = refreshCloudButton;
 
   if (cloudBtn) cloudBtn.addEventListener("click", async () => {
+    // Sin API key configurada: ofrecer configurarla (lleva a la pestaña Datos).
+    if (!hasCloudOcr()) {
+      notify("El OCR en la nube necesita una API key gratuita de OCR.space. Configúrala en la pestaña “Agencias” → “OCR en la nube”.", { type: "warn" });
+      const tab = document.querySelector('[data-tab="settings"]');
+      if (tab) tab.click();
+      const ki = document.getElementById("cloud-ocr-key");
+      if (ki) { ki.focus(); ki.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      return;
+    }
     // 1er toque: abrir cámara (solo cámara, sin detector de barras).
     if (!scanner.running) {
       try {

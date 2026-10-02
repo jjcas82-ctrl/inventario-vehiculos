@@ -1,46 +1,22 @@
 // label.js — Genera el QR del VIN e imprime/descarga una etiqueta para pegar en la unidad.
 // El QR se lee al instante con el escáner, evitando el OCR lento en cada movimiento.
-
-const QR_CDN = "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js";
-const BARCODE_CDN = "https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js";
-
-function loadScript(src, globalName) {
-  return new Promise((resolve, reject) => {
-    if (window[globalName]) return resolve();
-    const s = document.createElement("script");
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error("No se pudo cargar un recurso (¿sin internet?)."));
-    document.head.appendChild(s);
-  });
-}
-
-async function loadQR() {
-  await loadScript(QR_CDN, "QRCode");
-  return window.QRCode;
-}
+//
+// IMPORTANTE: el QR y el código de barras se generan LOCALMENTE (js/qrgen.js y
+// js/barcode39.js), sin librerías de CDN. Así la impresión funciona 100% offline y
+// sin que un firewall corporativo (p. ej. la red de la agencia) bloquee el recurso.
+import { qrDataUrl } from "./qrgen.js";
+import { barcode39DataUrl } from "./barcode39.js";
 
 // Genera un dataURL PNG de un código de barras Code 39 con el VIN (estándar VIN).
 async function makeVinBarcodeDataUrl(vin) {
-  await loadScript(BARCODE_CDN, "JsBarcode");
-  const canvas = document.createElement("canvas");
   try {
-    window.JsBarcode(canvas, vin, {
-      format: "CODE39", displayValue: false, height: 90, width: 2, margin: 6,
-    });
-    return canvas.toDataURL("image/png");
+    return barcode39DataUrl(vin, { barWidth: 2, height: 90, margin: 10 });
   } catch (e) { return null; }
 }
 
 // Genera un dataURL PNG del QR que contiene el VIN.
 export async function makeVinQrDataUrl(vin, size = 240) {
-  const QR = await loadQR();
-  return await QR.toDataURL(vin, {
-    errorCorrectionLevel: "M",
-    margin: 2,
-    width: size,
-    color: { dark: "#000000", light: "#ffffff" },
-  });
+  return qrDataUrl(vin, { size, margin: 2, dark: "#000000", light: "#ffffff" });
 }
 
 function esc(s) {
