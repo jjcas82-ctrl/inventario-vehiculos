@@ -1,5 +1,5 @@
 // sw.js — Service worker: cache básico para funcionar sin conexión (app shell).
-const CACHE = "inv-vehiculos-v58";
+const CACHE = "inv-vehiculos-v59";
 const ASSETS = [
   "./",
   "./index.html",
@@ -26,11 +26,16 @@ const ASSETS = [
   "./js/label.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/logo.png",
 ];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(ASSETS)).catch(() => {})
+    caches.open(CACHE).then((c) =>
+      // Cacheamos cada asset por separado: si uno falta (p. ej. logo.png aún no subido),
+      // no impide cachear el resto.
+      Promise.all(ASSETS.map((a) => c.add(a).catch(() => null)))
+    ).catch(() => {})
   );
   self.skipWaiting();
 });

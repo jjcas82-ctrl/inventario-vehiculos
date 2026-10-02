@@ -768,18 +768,20 @@ function setupEventButtons() {
       }
       const near = nearestAgency(pos.lat, pos.lng, agencies);
       if (!near || !near.withinRadius) {
+        // Fuera de rango: NO se permite registrar. Solo se informa y se cancela.
         const d = near ? Math.round(near.distance) : "—";
         const cercana = near ? near.agency.name : "—";
-        const choice = await confirmDialog({
+        await confirmDialog({
           icon: "📍", title: "Fuera de agencias conocidas",
           message: `Tu ubicación no coincide con ninguna agencia registrada.\n\n` +
-            `La más cercana es "${cercana}" a ${d} m (fuera del radio).\n\n¿Registrar de todos modos en "${cercana}"?`,
+            `La más cercana es "${cercana}" a ${d} m (fuera del radio).\n\n` +
+            `No se puede registrar aquí. Acércate a una agencia o punto de venta registrado.`,
           buttons: [
-            { label: "Cancelar", value: null, variant: "ghost" },
-            { label: `Usar "${cercana}"`, value: "force", variant: "primary" },
+            { label: "Aceptar", value: "ok", variant: "primary" },
           ],
         });
-        if (choice !== "force" || !near) { onGps("Registro cancelado (fuera de rango).", "warn"); return; }
+        onGps("Registro cancelado: fuera de rango de las agencias.", "warn");
+        return;
       }
       agency = near.agency.name;
       location = agency;
