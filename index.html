@@ -35,7 +35,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v55</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v56</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -63,19 +63,24 @@
             <div class="scanner-overlay"><div class="scanner-frame"></div></div>
           </div>
 
+          <!-- 1) MÉTODO PRINCIPAL: código de barras / QR -->
           <div class="row gap wrap">
             <button id="scan-start" class="btn btn-primary">📷 Escanear código de barras / QR</button>
             <button id="scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
           </div>
-          <p class="hint">✅ <b>Método principal (rápido y exacto):</b> escanea el <b>código de barras / QR</b> del VIN — está en la etiqueta de la puerta del conductor o junto al VIN del parabrisas. Se lee al instante.</p>
-          <div class="row gap wrap" style="margin-top:6px">
-            <button id="scan-ocr" class="btn btn-ghost">🔤 Leer VIN de texto (opcional)</button>
-            <button id="scan-cloud" class="btn btn-ghost" hidden>☁️ Leer VIN en la nube</button>
+          <p class="hint">1️⃣ <b>Método principal (rápido y exacto):</b> escanea el <b>código de barras / QR</b> del VIN. Se lee al instante.</p>
+
+          <!-- 2) y 3): OCR en la nube (con internet) y OCR de texto (sin internet) -->
+          <div class="row gap wrap" style="margin-top:8px">
+            <button id="scan-cloud" class="btn" hidden>☁️ Leer VIN (nube)</button>
+            <button id="scan-ocr" class="btn btn-ghost">🔤 Leer VIN de texto</button>
           </div>
-          <p class="hint"><b>Opción secundaria — Leer VIN de texto:</b> toca para abrir la cámara, encuadra el número de VIN en el recuadro (enfocado y <b>sin reflejos del sol</b>) y toca “📸 Tomar foto y leer VIN”. Si no lo lee, usa la captura manual.<br>
-          <span id="cloud-ocr-hint" hidden>☁️ <b>Leer VIN en la nube:</b> abre la cámara, encuadra el VIN y toca “☁️ Enviar a la nube”. Usa un servicio de reconocimiento más preciso (requiere internet).</span></p>
+          <p class="hint">
+            <span id="cloud-ocr-hint" hidden>2️⃣ <b>☁️ Leer VIN (nube):</b> lectura precisa del VIN por foto (requiere internet). Encuadra el VIN y envíalo.<br></span>
+            3️⃣ <b>🔤 Leer VIN de texto:</b> lector local (úsalo si no hay internet). Encuadra el VIN sin reflejos y toma la foto.<br>
+            4️⃣ <b>Ingreso manual:</b> escribe el VIN abajo si los demás fallan.
+          </p>
           <p id="ocr-photo-status" class="hint"></p>
-          <img id="ocr-photo-preview" style="display:none;max-width:100%;border-radius:8px;margin-top:6px" alt="Foto del VIN" />
           <p id="scan-status" class="hint"></p>
           <div id="scan-diag" class="diag" hidden></div>
 

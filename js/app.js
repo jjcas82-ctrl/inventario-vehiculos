@@ -564,6 +564,8 @@ function setupScanner() {
     if (!cloudBtn) return;
     const show = hasCloudOcr();
     cloudBtn.hidden = !show;
+    // Si la nube está configurada, es la opción preferida (botón primario).
+    if (show) { cloudBtn.classList.add("btn-primary"); cloudBtn.classList.remove("btn-ghost"); }
     const hint = document.getElementById("cloud-ocr-hint");
     if (hint) hint.hidden = !show;
   }
