@@ -50,10 +50,10 @@ const SEED_SITES = [
     lat: 20.173122, lng: -98.070828, radius: 200, areas: AEROPLASA_AUTO_AREAS,
   },
   {
-    // Bodega como SITIO independiente (cambio de ubicación). Falta su dirección/GPS:
-    // el administrador la fija en la pestaña Agencias (dirección o "Usar mi ubicación actual").
+    // Bodega como SITIO independiente (cambio de ubicación).
     name: "Bodega Aeroplasa Auto",
-    address: "", lat: null, lng: null, radius: 150, areas: [
+    address: "Calle Rafael Cravioto #146, Santa Cruz, C.P. 73175, Huauchinango, Puebla",
+    lat: 20.169589, lng: -98.068696, radius: 150, areas: [
       { name: "Recepción", subs: [] }, { name: "Almacén", subs: [] },
     ],
   },

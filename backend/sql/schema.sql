@@ -187,9 +187,11 @@ SELECT 'Agencia Aeroplasa Auto',
        '[{"name":"Sala de Exhibición de Ventas","subs":[]},{"name":"Servicio","subs":["Taller","Preparación","Lavado"]},{"name":"Patio","subs":[]},{"name":"Estacionamiento Seminuevos","subs":[]},{"name":"Área de Entregas","subs":[]}]'
 WHERE NOT EXISTS (SELECT 1 FROM agencias WHERE nombre = 'Agencia Aeroplasa Auto');
 
--- Bodega Aeroplasa Auto (sitio independiente; falta su dirección/GPS, se fija desde la app)
+-- Bodega Aeroplasa Auto (sitio independiente con GPS propio)
 INSERT INTO agencias (nombre, direccion, lat, lng, radio_m, areas)
-SELECT 'Bodega Aeroplasa Auto', '', NULL, NULL, 150,
+SELECT 'Bodega Aeroplasa Auto',
+       'Calle Rafael Cravioto #146, Santa Cruz, C.P. 73175, Huauchinango, Puebla',
+       20.1695890, -98.0686960, 150,
        '[{"name":"Recepción","subs":[]},{"name":"Almacén","subs":[]}]'
 WHERE NOT EXISTS (SELECT 1 FROM agencias WHERE nombre = 'Bodega Aeroplasa Auto');
 
