@@ -59,14 +59,14 @@ export async function printVinLabel(vehicle) {
       * { box-sizing: border-box; }
       body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; text-align: center; }
       .label { border: 2px solid #0f172a; border-radius: 12px; padding: 18px; display: inline-block; max-width: 460px; }
-      .brand { font-size: 14px; color: #0f766e; font-weight: 700; margin-bottom: 10px; }
+      .brand { font-size: 14px; color: #0f204a; font-weight: 700; margin-bottom: 10px; }
       .qr { width: 340px; height: 340px; max-width: 90vw; }
       .bar { width: 100%; max-width: 420px; margin-top: 10px; }
       .vin { font-family: ui-monospace, monospace; font-size: 24px; letter-spacing: 2px; font-weight: 700; margin-top: 10px; }
       .meta { font-size: 14px; color: #334155; margin-top: 6px; }
       @media print { .no-print { display: none; } }
-      button { margin-top: 16px; padding: 12px 18px; font-size: 16px; border: 1px solid #0f766e;
-               background: #0f766e; color: #fff; border-radius: 8px; cursor: pointer; }
+      button { margin-top: 16px; padding: 12px 18px; font-size: 16px; border: 1px solid #0f204a;
+               background: #0f204a; color: #fff; border-radius: 8px; cursor: pointer; }
     </style></head>
     <body>
       <div class="label">

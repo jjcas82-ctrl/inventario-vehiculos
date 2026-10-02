@@ -70,7 +70,7 @@ export async function drawMap() {
   const pts = [];
   events.forEach(e => {
     const label = `${EVENT_LABELS[e.type] || e.type} · ${e.vin}<br>${e.location || ""} (${e.agency || ""})<br>${new Date(e.at).toLocaleString()}`;
-    const color = e.type === "exit" ? "#dc2626" : (e.type === "entry" ? "#0f766e" : "#2563eb");
+    const color = e.type === "exit" ? "#dc2626" : (e.type === "entry" ? "#0f204a" : "#2563eb");
     L.circleMarker([e.lat, e.lng], { radius: 7, color, fillColor: color, fillOpacity: .8 })
       .bindPopup(label).addTo(layer);
     pts.push([e.lat, e.lng]);
