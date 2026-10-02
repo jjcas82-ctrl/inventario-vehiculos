@@ -36,7 +36,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v64</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v65</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -65,29 +65,39 @@
             <div class="scanner-overlay"><div class="scanner-frame"></div></div>
           </div>
 
-          <!-- 1) MÉTODO PRINCIPAL: código de barras / QR -->
-          <div class="row gap wrap">
-            <button id="scan-start" class="btn btn-primary">📷 Escanear código de barras / QR</button>
-            <button id="scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
-          </div>
-          <p class="hint">1️⃣ <b>Método principal (rápido y exacto):</b> escanea el <b>código de barras / QR</b> del VIN. Se lee al instante.</p>
+          <!-- MÉTODOS DE LECTURA DEL VIN: lista única, uniforme y numerada 1-2-3-4.
+               Un botón por fila (ocupan todo el ancho) para que se vea igual en
+               celular y PC. -->
+          <div class="scan-methods">
+            <!-- 1) QR / código de barras (principal) -->
+            <button id="scan-start" class="btn btn-primary scan-method">1️⃣ QR / Código de barras</button>
+            <button id="scan-stop" class="btn btn-ghost scan-method" hidden>Detener cámara</button>
 
-          <!-- 2) OCR en la nube (con internet) y 3) OCR de texto local (sin internet) -->
-          <div class="row gap wrap" style="margin-top:8px">
-            <button id="scan-cloud" class="btn" hidden>2️⃣ 🔤 Leer VIN de texto (en la nube)</button>
-            <button id="scan-ocr" class="btn btn-ghost">3️⃣ 🔤 Leer VIN de texto (local)</button>
+            <!-- 2) OCR en la nube -->
+            <button id="scan-cloud" class="btn scan-method">2️⃣ Leer VIN (en la nube)</button>
+
+            <!-- 3) OCR local del dispositivo -->
+            <button id="scan-ocr" class="btn scan-method">3️⃣ Leer VIN</button>
+
+            <!-- 4) Ingreso manual -->
+            <button id="scan-manual" class="btn scan-method">4️⃣ Ingresa el VIN manualmente</button>
           </div>
-          <p class="hint">
-            <span id="cloud-ocr-hint" hidden>2️⃣ <b>Leer VIN de texto (en la nube):</b> lectura precisa del VIN por foto (requiere internet). Encuadra el VIN y envíalo.<br></span>
-            3️⃣ <b>Leer VIN de texto (local):</b> lector del dispositivo (úsalo si no hay internet). Encuadra el VIN sin reflejos y toma la foto.<br>
-            4️⃣ <b>Ingreso manual:</b> escribe el VIN abajo si los demás fallan.
+
+          <p class="hint" style="margin-top:10px">
+            <b>1️⃣ QR / Código de barras</b> (recomendado): rápido y exacto, se lee al instante.<br>
+            <span id="cloud-ocr-hint">
+              <b>2️⃣ Leer VIN (en la nube):</b> lectura precisa del VIN por foto (requiere internet).<br>
+            </span>
+            <b>3️⃣ Leer VIN:</b> lector del propio dispositivo (úsalo si no hay internet).<br>
+            <b>4️⃣ Ingresa el VIN manualmente:</b> escríbelo abajo si los demás fallan.
           </p>
           <p id="ocr-photo-status" class="hint"></p>
           <p id="scan-status" class="hint"></p>
           <div id="scan-diag" class="diag" hidden></div>
 
-          <div class="field">
-            <label for="vin-input">VIN (17 caracteres) — captura manual</label>
+          <!-- Campo de captura manual (lo abre el botón 4) -->
+          <div class="field" id="manual-vin-field">
+            <label for="vin-input">4️⃣ Ingresa el VIN manualmente (17 caracteres)</label>
             <div class="row gap">
               <input id="vin-input" type="text" maxlength="17" autocapitalize="characters"
                      spellcheck="false" placeholder="Ej. 1G1ZD5STXJF123456" />

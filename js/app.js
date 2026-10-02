@@ -457,9 +457,9 @@ function setupScanner() {
     startBtn.hidden = false;
     stopBtn.hidden = true;
     const ob = document.getElementById("scan-ocr");
-    if (ob) ob.textContent = "3️⃣ 🔤 Leer VIN de texto (local)";
+    if (ob) ob.textContent = "3️⃣ Leer VIN";
     const cb = document.getElementById("scan-cloud");
-    if (cb) cb.textContent = "2️⃣ 🔤 Leer VIN de texto (en la nube)";
+    if (cb) cb.textContent = "2️⃣ Leer VIN (en la nube)";
   };
 
   scanner = new Scanner(video, {
@@ -502,7 +502,7 @@ function setupScanner() {
 
   // ---- OCR de TEXTO por FOTO (versión que funcionaba: abrir cámara → tomar foto) ----
   const ocrBtn = document.getElementById("scan-ocr");
-  const OCR_LABEL = "3️⃣ 🔤 Leer VIN de texto (local)";
+  const OCR_LABEL = "3️⃣ Leer VIN";
   const OCR_SHOOT = "📸 Tomar foto y leer VIN";
   const stopLiveOcr = () => {}; // compat (ya no hay OCR en vivo)
   window.__stopLiveOcr = stopLiveOcr;
@@ -559,20 +559,15 @@ function setupScanner() {
 
   // ---- OCR EN LA NUBE (OCR.space): abrir cámara → enviar foto a la nube ----
   const cloudBtn = document.getElementById("scan-cloud");
-  const CLOUD_LABEL = "2️⃣ 🔤 Leer VIN de texto (en la nube)";
+  const CLOUD_LABEL = "2️⃣ Leer VIN (en la nube)";
   const CLOUD_SHOOT = "☁️ Enviar a la nube";
 
   function refreshCloudButton() {
     if (!cloudBtn) return;
-    const show = hasCloudOcr();
-    // El botón 2 (nube) SIEMPRE se muestra para que la numeración 1-2-3-4 sea
-    // consistente. Si no hay API key, al pulsarlo se ofrece configurarla.
+    // El botón 2 (nube) SIEMPRE está visible para que la lista 1-2-3-4 sea
+    // consistente. El estilo lo da la clase .scan-method en el CSS. Si no hay
+    // API key, al pulsarlo se ofrece configurarla (ver handler más abajo).
     cloudBtn.hidden = false;
-    // Si la nube está configurada, es la opción preferida (botón primario).
-    if (show) { cloudBtn.classList.add("btn-primary"); cloudBtn.classList.remove("btn-ghost"); }
-    else { cloudBtn.classList.remove("btn-primary"); cloudBtn.classList.add("btn-ghost"); }
-    const hint = document.getElementById("cloud-ocr-hint");
-    if (hint) hint.hidden = false;
   }
   refreshCloudButton();
   window.__refreshCloudButton = refreshCloudButton;
@@ -639,6 +634,16 @@ function setupScanner() {
   document.getElementById("vin-decode").addEventListener("click", manualDecode);
   document.getElementById("vin-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); manualDecode(); }
+  });
+
+  // ---- 4) Ingreso manual: el botón lleva el foco al campo de captura ----
+  const manualBtn = document.getElementById("scan-manual");
+  if (manualBtn) manualBtn.addEventListener("click", () => {
+    const input = document.getElementById("vin-input");
+    const field = document.getElementById("manual-vin-field");
+    if (field) field.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (input) { input.focus(); input.select(); }
+    setStatus("Escribe el VIN de 17 caracteres y pulsa “Leer VIN”.", "muted");
   });
 
   // ---- Configuración de la API key del OCR en la nube (pestaña Datos) ----

@@ -109,6 +109,22 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 .btn-ghost { background: transparent; border-color: transparent; color: inherit; }
 
+/* Lista de métodos de lectura del VIN: botones apilados, mismo ancho,
+   para que se vean uniformes y ordenados en celular y PC. */
+.scan-methods { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.scan-method {
+  width: 100%; text-align: left; white-space: normal;
+  padding: 12px 14px; font-size: 15px; font-weight: 600;
+  border: 1px solid var(--border); border-radius: 10px;
+}
+/* Los métodos 2, 3 y 4 (secundarios) en estilo claro con borde; el 1 queda primario. */
+#scan-cloud.scan-method, #scan-ocr.scan-method, #scan-manual.scan-method {
+  background: #fff; color: var(--primary); border-color: var(--primary);
+}
+#scan-cloud.scan-method:hover, #scan-ocr.scan-method:hover, #scan-manual.scan-method:hover {
+  background: #f1f5f9;
+}
+
 .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
 .diag { font-size: 12px; font-family: ui-monospace, monospace; background: #0f172a; color: #a7f3d0; padding: 8px 10px; border-radius: 8px; margin-top: 8px; white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
 .muted { color: var(--muted); }
