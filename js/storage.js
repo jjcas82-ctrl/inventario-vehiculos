@@ -21,13 +21,14 @@ const DEFAULT_AREAS = [
   { name: "Área de Entrega",    subs: [] },
 ];
 
-// Estructura de la Agencia Aeroplasa Auto.
+// Estructura de la Agencia Aeroplasa Auto (ubicaciones DENTRO del sitio).
+// La Bodega y los Puntos de venta son SITIOS APARTE (con su propio GPS), no áreas internas.
 const AEROPLASA_AUTO_AREAS = [
-  { name: "Sala de Exhibición",         subs: [] },
-  { name: "Servicio",                   subs: ["Taller", "Preparación", "Lavado"] },
-  { name: "Bodega",                     subs: [] },
-  { name: "Estacionamiento Seminuevos", subs: [] },
-  { name: "Área de Entrega",            subs: [] },
+  { name: "Sala de Exhibición de Ventas", subs: [] },
+  { name: "Servicio",                     subs: ["Taller", "Preparación", "Lavado"] },
+  { name: "Patio",                        subs: [] },
+  { name: "Estacionamiento Seminuevos",   subs: [] },
+  { name: "Área de Entregas",             subs: [] },
 ];
 
 // Los puntos de venta son sitios remotos (con GPS propio) → áreas simples.
@@ -47,6 +48,14 @@ const SEED_SITES = [
     name: "Agencia Aeroplasa Auto",
     address: "Carretera Federal México-Tuxpan Km 190 S/N, Col. El Potro, C.P. 73176, Huauchinango, Puebla",
     lat: 20.173122, lng: -98.070828, radius: 200, areas: AEROPLASA_AUTO_AREAS,
+  },
+  {
+    // Bodega como SITIO independiente (cambio de ubicación). Falta su dirección/GPS:
+    // el administrador la fija en la pestaña Agencias (dirección o "Usar mi ubicación actual").
+    name: "Bodega Aeroplasa Auto",
+    address: "", lat: null, lng: null, radius: 150, areas: [
+      { name: "Recepción", subs: [] }, { name: "Almacén", subs: [] },
+    ],
   },
   {
     name: "Punto de Venta Zacatlán",
@@ -112,27 +121,32 @@ function read() {
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
-  // No pisa coordenadas que el admin ya haya ajustado manualmente.
+  // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
+  // "Bodega Aeroplasa Auto" con "Agencia Aeroplasa Auto").
   SEED_SITES.forEach(site => {
     let a = _cache.agencies.find(x => x.name.toLowerCase() === site.name.toLowerCase());
-    // Reconciliar nombres antiguos
-    if (!a && /aeroplasa auto/i.test(site.name)) a = _cache.agencies.find(x => /aeroplasa auto/i.test(x.name));
-    if (!a && /aeropuerto/i.test(site.name)) a = _cache.agencies.find(x => /aeropuerto/i.test(x.name));
+    // Caso especial: instalaciones antiguas donde la agencia se llamaba distinto.
+    if (!a && site.name === "Agencia Aeroplasa Auto") {
+      a = _cache.agencies.find(x => /^agencia aeroplasa auto$/i.test(x.name) || /^aeroplasa auto$/i.test(x.name));
+    }
+    if (!a && site.name === "Agencia Aeropuerto") {
+      a = _cache.agencies.find(x => /aeropuerto/i.test(x.name));
+    }
     if (!a) {
-      // Sitio nuevo (p. ej. puntos de venta): crearlo con sus datos.
+      // Sitio nuevo (ej. Bodega, puntos de venta): crearlo.
       _cache.agencies.push({
         id: cryptoId(), name: site.name, address: site.address,
         lat: site.lat, lng: site.lng, radius: site.radius, areas: cloneAreas(site.areas),
       });
     } else {
-      // Normaliza el nombre y completa datos que falten (sin pisar coords manuales).
       a.name = site.name;
-      if (!a.address) a.address = site.address;
-      if (a.lat == null || a.lng == null) { a.lat = site.lat; a.lng = site.lng; }
+      if (!a.address && site.address) a.address = site.address;
+      if ((a.lat == null || a.lng == null) && site.lat != null) { a.lat = site.lat; a.lng = site.lng; }
       if (!a.radius) a.radius = site.radius;
-      // Si Aeroplasa Auto tenía la vieja área "Puntos de venta" o "Patio", actualizar estructura.
-      if (/aeroplasa auto/i.test(a.name) &&
-          a.areas && a.areas.some(ar => ar.name === "Patio" || ar.name === "Puntos de venta")) {
+      // Actualizar la estructura interna de Aeroplasa Auto a la versión vigente
+      // si todavía tiene áreas antiguas ("Bodega"/"Puntos de venta" como área interna).
+      if (site.name === "Agencia Aeroplasa Auto" && a.areas &&
+          a.areas.some(ar => ["Bodega", "Puntos de venta", "Sala de Exhibición", "Área de Entrega"].includes(ar.name))) {
         a.areas = cloneAreas(AEROPLASA_AUTO_AREAS);
       }
     }

@@ -184,8 +184,14 @@ INSERT INTO agencias (nombre, direccion, lat, lng, radio_m, areas)
 SELECT 'Agencia Aeroplasa Auto',
        'Carretera Federal México-Tuxpan Km 190 S/N, Col. El Potro, 73176 Huauchinango, Puebla',
        20.1731220, -98.0708280, 200,
-       '[{"name":"Sala de Exhibición","subs":[]},{"name":"Servicio","subs":["Taller","Preparación","Lavado"]},{"name":"Bodega","subs":[]},{"name":"Estacionamiento Seminuevos","subs":[]},{"name":"Área de Entrega","subs":[]}]'
+       '[{"name":"Sala de Exhibición de Ventas","subs":[]},{"name":"Servicio","subs":["Taller","Preparación","Lavado"]},{"name":"Patio","subs":[]},{"name":"Estacionamiento Seminuevos","subs":[]},{"name":"Área de Entregas","subs":[]}]'
 WHERE NOT EXISTS (SELECT 1 FROM agencias WHERE nombre = 'Agencia Aeroplasa Auto');
+
+-- Bodega Aeroplasa Auto (sitio independiente; falta su dirección/GPS, se fija desde la app)
+INSERT INTO agencias (nombre, direccion, lat, lng, radio_m, areas)
+SELECT 'Bodega Aeroplasa Auto', '', NULL, NULL, 150,
+       '[{"name":"Recepción","subs":[]},{"name":"Almacén","subs":[]}]'
+WHERE NOT EXISTS (SELECT 1 FROM agencias WHERE nombre = 'Bodega Aeroplasa Auto');
 
 INSERT INTO agencias (nombre, direccion, lat, lng, radio_m, areas)
 SELECT 'Punto de Venta Zacatlán',
