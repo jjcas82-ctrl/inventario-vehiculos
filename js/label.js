@@ -26,7 +26,7 @@ function esc(s) {
 
 // Genera el HTML de UNA etiqueta (para una o varias en la misma hoja).
 async function labelHtml(vehicle) {
-  const qrUrl = await makeVinQrDataUrl(vehicle.vin, 420);
+  const qrUrl = await makeVinQrDataUrl(vehicle.vin, 300);
   const barUrl = await makeVinBarcodeDataUrl(vehicle.vin);
   const meta = [vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(" · ");
   const extra = [vehicle.color, vehicle.plate].filter(Boolean).join(" · ");
@@ -41,33 +41,44 @@ async function labelHtml(vehicle) {
     </div>`;
 }
 
+// Estilo de impresión: 4 etiquetas por hoja CARTA (rejilla 2 columnas × 2 filas).
+// Cada etiqueta es más compacta para que 4 quepan en una página Letter.
 const LABEL_STYLE = `
   * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; text-align: center; }
-  .label { border: 2px solid #0f204a; border-radius: 12px; padding: 18px; display: inline-block;
-           max-width: 460px; margin: 0 auto 16px; page-break-inside: avoid; }
-  .brand { font-size: 13px; color: #0f204a; font-weight: 700; margin-bottom: 10px; }
-  .qr { width: 320px; height: 320px; max-width: 90vw; }
-  .bar { width: 100%; max-width: 400px; margin-top: 8px; }
-  .vin { font-family: ui-monospace, monospace; font-size: 22px; letter-spacing: 2px; font-weight: 700; margin-top: 8px; }
-  .meta { font-size: 13px; color: #334155; margin-top: 4px; }
-  @media print { .no-print { display: none; } .label { page-break-after: always; } }
+  @page { size: letter; margin: 10mm; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 10mm; }
+  /* Rejilla 2 columnas: entran 2 por fila y 2 filas = 4 por hoja carta. */
+  .sheet { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+  .label { border: 1.5px solid #0f204a; border-radius: 10px; padding: 8px 10px; text-align: center;
+           page-break-inside: avoid; break-inside: avoid; height: 125mm; display: flex;
+           flex-direction: column; align-items: center; justify-content: center; }
+  .brand { font-size: 10px; color: #0f204a; font-weight: 700; margin-bottom: 6px; line-height: 1.2; }
+  .qr { width: 150px; height: 150px; max-width: 90%; }
+  .bar { width: 100%; max-width: 220px; margin-top: 6px; }
+  .vin { font-family: ui-monospace, monospace; font-size: 15px; letter-spacing: 1px; font-weight: 700; margin-top: 6px; word-break: break-all; }
+  .meta { font-size: 11px; color: #334155; margin-top: 2px; }
+  @media print {
+    .no-print { display: none; }
+    .sheet { gap: 6mm; }
+    /* Cada 4 etiquetas, salto de página. */
+    .label:nth-child(4n) { page-break-after: always; }
+  }
   button { margin: 10px 6px 0; padding: 12px 18px; font-size: 16px; border: 1px solid #0f204a;
            background: #0f204a; color: #fff; border-radius: 8px; cursor: pointer; }
 `;
 
-// Imprime la etiqueta de UN vehículo.
+// Imprime la etiqueta de UN vehículo (en rejilla, queda compacta: 4 caben por hoja).
 export async function printVinLabel(vehicle) {
   const html = await labelHtml(vehicle);
-  openPrintWindow(`Etiqueta ${esc(vehicle.vin)}`, html);
+  openPrintWindow(`Etiqueta ${esc(vehicle.vin)}`, `<div class="sheet">${html}</div>`);
 }
 
-// Imprime VARIAS etiquetas (una por hoja).
+// Imprime VARIAS etiquetas: 4 por hoja CARTA (rejilla 2×2).
 export async function printVinLabels(vehicles) {
   if (!vehicles || !vehicles.length) throw new Error("No hay unidades seleccionadas.");
   const parts = [];
   for (const v of vehicles) parts.push(await labelHtml(v));
-  openPrintWindow(`Etiquetas (${vehicles.length})`, parts.join(""));
+  openPrintWindow(`Etiquetas (${vehicles.length})`, `<div class="sheet">${parts.join("")}</div>`);
 }
 
 function openPrintWindow(title, bodyHtml) {

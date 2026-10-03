@@ -7,6 +7,7 @@ import { notify, confirmDialog } from "./ui.js";
 import { decodeVin } from "./vin.js";
 import { stagesFor } from "./stages.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
+import * as photos from "./photos.js";
 
 let onChange = () => {};
 
@@ -161,6 +162,33 @@ export function openVehicle(vin) {
     <p class="hint">Pega esta etiqueta en la unidad (parabrisas/tablero). Escaneando este QR el registro de entradas, salidas y movimientos es instantáneo y exacto.</p>
     <div id="qr-box" style="text-align:center;margin:8px 0"><span class="muted">Generando QR…</span></div>
     <hr />
+    <div class="row between wrap">
+      <h3 style="margin:0">Fotos / Estado de la unidad</h3>
+      <span class="muted" id="photos-count"></span>
+    </div>
+    <p class="hint">Documenta el estado de la unidad: golpes, rayones, detalles o papeles. Sirve como evidencia al recibir y entregar el vehículo.</p>
+    ${canEdit ? `
+      <div class="photo-add">
+        <div class="field">
+          <label>Tipo de foto</label>
+          <select id="photo-kind">
+            ${Object.entries(photos.PHOTO_KINDS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label>Nota / descripción (opcional)</label>
+          <input id="photo-note" type="text" maxlength="120" placeholder="Ej. Rayón en puerta trasera derecha" />
+        </div>
+        <div class="row gap wrap">
+          <label class="btn btn-primary" style="cursor:pointer;margin:0">
+            📷 Tomar / subir foto
+            <input id="photo-file" type="file" accept="image/*" capture="environment" hidden />
+          </label>
+          <span id="photo-add-status" class="hint" style="align-self:center"></span>
+        </div>
+      </div>` : ""}
+    <div id="photos-grid" class="photos-grid"><span class="muted">Cargando fotos…</span></div>
+    <hr />
     <h3>Historial de movimientos</h3>
     <ul>${timeline || '<li class="muted">Sin eventos.</li>'}</ul>
     ${(v.stageHistory && v.stageHistory.length) ? `
@@ -244,8 +272,110 @@ export function openVehicle(vin) {
     catch (e) { notify(e.message || "No se pudo imprimir la etiqueta.", { type: "error" }); }
   });
 
+  // ---- Fotos / Estado de la unidad (IndexedDB) ----
+  setupPhotos(vin, body, canEdit);
+
   modal.hidden = false;
   modal.style.display = "flex";
+}
+
+// Monta la galería de fotos del vehículo dentro del modal y conecta agregar/eliminar.
+function setupPhotos(vin, body, canEdit) {
+  const grid = body.querySelector("#photos-grid");
+  const count = body.querySelector("#photos-count");
+  if (!grid) return;
+
+  async function render() {
+    let list = [];
+    try { list = await photos.listPhotos(vin); }
+    catch (e) {
+      grid.innerHTML = `<span class="muted">No se pudieron cargar las fotos: ${escapeHtml(e.message || "")}</span>`;
+      return;
+    }
+    if (count) count.textContent = list.length ? `${list.length} foto${list.length === 1 ? "" : "s"}` : "";
+    if (!list.length) {
+      grid.innerHTML = '<span class="muted">Aún no hay fotos de esta unidad.</span>';
+      return;
+    }
+    grid.innerHTML = list.map(f => {
+      const fecha = f.at ? new Date(f.at).toLocaleString() : "";
+      const kindLabel = photos.PHOTO_KINDS[f.kind] || photos.PHOTO_KINDS.otro;
+      return `
+      <figure class="photo-item" data-id="${escapeHtml(f.id)}">
+        <img src="${f.dataUrl}" alt="${escapeHtml(f.note || kindLabel)}" class="photo-thumb" />
+        <figcaption>
+          <span class="tag photo-kind">${escapeHtml(kindLabel)}</span>
+          ${f.note ? `<div class="photo-note">${escapeHtml(f.note)}</div>` : ""}
+          <div class="muted photo-meta">${escapeHtml(fecha)}${f.by ? " · 👤 " + escapeHtml(f.by) : ""}</div>
+          ${canEdit ? `<button class="btn btn-danger photo-del" data-id="${escapeHtml(f.id)}" style="margin-top:6px">🗑️ Eliminar</button>` : ""}
+        </figcaption>
+      </figure>`;
+    }).join("");
+
+    // Ver en grande al tocar la miniatura
+    grid.querySelectorAll(".photo-thumb").forEach((img) =>
+      img.addEventListener("click", () => openPhotoViewer(img.src))
+    );
+    // Eliminar
+    grid.querySelectorAll(".photo-del").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        const choice = await confirmDialog({
+          icon: "🗑️", title: "Eliminar foto",
+          message: "¿Eliminar esta foto de la unidad? No se puede deshacer.",
+          buttons: [
+            { label: "Cancelar", value: null, variant: "ghost" },
+            { label: "Sí, eliminar", value: "ok", variant: "danger" },
+          ],
+        });
+        if (choice !== "ok") return;
+        try { await photos.deletePhoto(btn.dataset.id); render(); notify("Foto eliminada.", { type: "info" }); }
+        catch (e) { notify(e.message || "No se pudo eliminar la foto.", { type: "error" }); }
+      })
+    );
+  }
+
+  if (canEdit) {
+    const fileInput = body.querySelector("#photo-file");
+    const addStatus = body.querySelector("#photo-add-status");
+    if (fileInput) fileInput.addEventListener("change", async () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        notify("Selecciona un archivo de imagen.", { type: "warn" });
+        fileInput.value = ""; return;
+      }
+      const note = (body.querySelector("#photo-note")?.value || "").trim();
+      const kind = body.querySelector("#photo-kind")?.value || "dano";
+      const by = auth.currentUser()?.name || "—";
+      if (addStatus) addStatus.textContent = "Procesando y guardando foto…";
+      try {
+        await photos.addPhoto(vin, file, { note, kind, by });
+        if (addStatus) addStatus.textContent = "";
+        const noteInput = body.querySelector("#photo-note");
+        if (noteInput) noteInput.value = "";
+        fileInput.value = "";
+        notify("Foto agregada.", { type: "success" });
+        render();
+      } catch (e) {
+        if (addStatus) addStatus.textContent = "";
+        notify(e.message || "No se pudo agregar la foto.", { type: "error" });
+      }
+    });
+  }
+
+  render();
+}
+
+// Visor de foto a pantalla completa (clic en miniatura).
+function openPhotoViewer(src) {
+  const existing = document.getElementById("photo-viewer");
+  if (existing) existing.remove();
+  const div = document.createElement("div");
+  div.id = "photo-viewer";
+  div.className = "photo-viewer";
+  div.innerHTML = `<img src="${src}" alt="Foto de la unidad" /><button class="photo-viewer-close" aria-label="Cerrar">✕</button>`;
+  div.addEventListener("click", () => div.remove());
+  document.body.appendChild(div);
 }
 
 function closeModal() {
