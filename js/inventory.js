@@ -82,11 +82,18 @@ export function openVehicle(vin) {
 
   const timeline = events.map(e => {
     const gps = (e.lat != null) ? ` · 📍 ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
-    const who = e.by ? ` · 👤 ${escapeHtml(e.by)}` : "";
+    const who = e.by ? ` · 👤 Capturó: ${escapeHtml(e.by)}` : "";
     const cont = e.sinGps ? ' <span class="tag" style="background:#fef3c7;color:#92400e">⚠️ sin GPS</span>' : "";
+    // Persona que entregó/recibió/movió la unidad (si se registró).
+    let person = "";
+    if (e.person && e.person.name) {
+      const verbo = e.type === "exit" ? "Recibió/retiró" : (e.type === "entry" ? "Entregó" : "Movió");
+      const extra = [e.person.type, e.person.contact].filter(Boolean).join(" · ");
+      person = `<br><span class="muted">🤝 ${verbo}: <b>${escapeHtml(e.person.name)}</b>${extra ? " (" + escapeHtml(extra) + ")" : ""}</span>`;
+    }
     return `<li><b>${EVENT_LABELS[e.type] || e.type}</b> — ${escapeHtml(e.location || "")}
       <span class="muted">(${escapeHtml(e.agency || "")})</span>${cont}<br>
-      <span class="muted">${new Date(e.at).toLocaleString()}${who}${gps}</span></li>`;
+      <span class="muted">${new Date(e.at).toLocaleString()}${who}${gps}</span>${person}</li>`;
   }).join("");
 
   const incomplete = !v.model || !v.color;

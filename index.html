@@ -36,7 +36,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v67</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v68</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -133,6 +133,35 @@
             <div class="loc-card" id="entry-exit-card">
               <b>Entrada / Salida</b>
               <p class="hint" style="margin-top:2px">📍 La agencia se detecta <b>automáticamente por GPS</b>. No se selecciona manualmente.</p>
+
+              <!-- Persona que entrega (entrada) o recibe (salida) la unidad. OBLIGATORIO. -->
+              <div class="person-box" id="person-box">
+                <b id="person-title">👤 Persona que entrega / recibe la unidad</b>
+                <p class="hint" style="margin-top:2px">Obligatorio para registrar entradas y salidas.</p>
+                <div class="field">
+                  <label for="person-name">Nombre completo <span class="req">*</span></label>
+                  <input id="person-name" type="text" maxlength="80" placeholder="Nombre de quien entrega o recibe" />
+                </div>
+                <div class="grid grid-2">
+                  <div class="field">
+                    <label for="person-type">Tipo <span class="req">*</span></label>
+                    <select id="person-type">
+                      <option value="">— Selecciona —</option>
+                      <option value="Cliente">Cliente</option>
+                      <option value="Vendedor">Vendedor</option>
+                      <option value="Transportista/Grúa">Transportista / Grúa</option>
+                      <option value="Proveedor">Proveedor</option>
+                      <option value="Traslado interno">Traslado interno</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="person-contact">Teléfono o documento (opcional)</label>
+                    <input id="person-contact" type="text" maxlength="60" placeholder="Tel., INE, licencia…" />
+                  </div>
+                </div>
+              </div>
+
               <p id="gps-status" class="hint"></p>
               <div class="row gap wrap">
                 <button id="ev-entry" class="btn btn-primary">Registrar entrada</button>
@@ -156,6 +185,11 @@
               <div class="field" id="ev-sub-field">
                 <label for="ev-location">Ubicación</label>
                 <select id="ev-location"></select>
+              </div>
+              <!-- Responsable del movimiento interno: OPCIONAL (para historial detallado). -->
+              <div class="field">
+                <label for="move-person">Responsable del movimiento (opcional)</label>
+                <input id="move-person" type="text" maxlength="80" placeholder="Quién movió la unidad (para historial de daños)" />
               </div>
               <button id="ev-move" class="btn btn-primary">Actualizar ubicación</button>
             </div>

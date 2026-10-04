@@ -29,7 +29,7 @@ export function getPosition(options = {}) {
 
 // Registra un evento (type: 'entry' | 'move' | 'exit'). Intenta capturar GPS,
 // pero no bloquea el registro si el GPS falla.
-export async function registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps }, onGps) {
+export async function registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person }, onGps) {
   const isRemote = /puntos de venta/i.test(area || "");
   let gps = { lat: null, lng: null, accuracy: null };
   if (presetPos && presetPos.lat != null) {
@@ -52,6 +52,13 @@ export async function registerEvent({ vin, type, agency, area, location, conditi
     vin, type, agency, area, location, condition, by,
     lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy,
     sinGps: !!sinGps,
+    // Persona que entrega (entrada) o recibe (salida) la unidad. En movimientos
+    // internos es opcional (responsable del movimiento).
+    person: person && person.name ? {
+      name: person.name,
+      type: person.type || "",
+      contact: person.contact || "",
+    } : null,
   });
   return rec;
 }

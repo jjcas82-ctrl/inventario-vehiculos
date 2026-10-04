@@ -681,6 +681,27 @@ function setupEventButtons() {
     gpsStatus.style.color = kind === "error" || kind === "warn" ? "var(--danger)" : "var(--muted)";
   };
 
+  // Lee los datos de la persona que entrega/recibe. En entrada/salida son
+  // OBLIGATORIOS (nombre y tipo); en movimiento interno son opcionales.
+  const readPerson = (type) => {
+    if (type === "move") {
+      const name = (document.getElementById("move-person")?.value || "").trim();
+      return { person: name ? { name, type: "Traslado interno", contact: "" } : null, ok: true };
+    }
+    const name = (document.getElementById("person-name")?.value || "").trim();
+    const ptype = document.getElementById("person-type")?.value || "";
+    const contact = (document.getElementById("person-contact")?.value || "").trim();
+    if (!name || !ptype) {
+      const quien = type === "entry" ? "entrega" : "recibe";
+      notify(`Indica el nombre y el tipo de la persona que ${quien} la unidad (son obligatorios).`,
+        { type: "warn", title: "Falta la persona responsable" });
+      const el = !name ? document.getElementById("person-name") : document.getElementById("person-type");
+      if (el) { el.focus(); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      return { person: null, ok: false };
+    }
+    return { person: { name, type: ptype, contact }, ok: true };
+  };
+
   const doEvent = async (type) => {
     if (!currentDecode || currentDecode.vin.length !== 17) {
       notify("Primero escanea o captura un VIN válido.", { type: "warn" });
@@ -689,6 +710,10 @@ function setupEventButtons() {
     const vin = currentDecode.vin;
     const existing = store.getVehicle(vin);
     const condition = document.getElementById("ev-condition").value;
+
+    // Validar/leer la persona responsable ANTES de continuar.
+    const { person, ok: personOk } = readPerson(type);
+    if (!personOk) return;
 
     const status = existing?.status; // "dentro" | "fuera" | undefined
     const curLocation = existing?.currentLocation;
@@ -727,7 +752,7 @@ function setupEventButtons() {
       // de la unidad (el cambio de agencia solo ocurre por GPS en entrada/salida).
       const agency = existing.currentAgency;
       const { area, location } = getSelectedLocation();
-      return finalizeEvent(vin, "move", agency, area, location, condition, existing);
+      return finalizeEvent(vin, "move", agency, area, location, condition, existing, null, false, person);
     }
 
     // Si intentan ENTRADA y la unidad YA está dentro: ofrecer movimiento interno
@@ -842,11 +867,11 @@ function setupEventButtons() {
     }
 
     // Pasamos la posición ya capturada para no volver a pedir GPS.
-    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos, sinGps);
+    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos, sinGps, person);
   };
 
   // Guarda datos básicos del VIN (1ª vez) y registra el evento.
-  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos, sinGps = false) => {
+  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos, sinGps = false, person = null) => {
     if (!existing) {
       store.upsertVehicle({
         vin,
@@ -861,9 +886,12 @@ function setupEventButtons() {
       return;
     }
     const by = auth.currentUser()?.name || store.getUser() || "—";
-    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps }, onGps);
+    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
-    notify(`${labels[type]} registrada por ${by || "—"}${sinGps ? " (contingencia sin GPS)" : ""}.`,
+    const quienFrase = person && person.name
+      ? ` · ${type === "exit" ? "recibió" : (type === "entry" ? "entregó" : "movió")}: ${person.name}`
+      : "";
+    notify(`${labels[type]} registrada por ${by || "—"}${quienFrase}${sinGps ? " (contingencia sin GPS)" : ""}.`,
       { type: sinGps ? "warn" : "success", title: vin });
     refreshAll();
     // Actualiza los botones según el nuevo estado de la unidad.
@@ -910,6 +938,11 @@ function nuevoRegistro() {
   if (st) st.textContent = "";
   const gps = document.getElementById("gps-status");
   if (gps) gps.textContent = "";
+  // Limpiar los campos de persona (entrega/recibe y responsable de movimiento).
+  ["person-name", "person-contact", "move-person"].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = "";
+  });
+  const ptype = document.getElementById("person-type"); if (ptype) ptype.value = "";
   document.getElementById("vin-input").focus();
   notify("Listo para un nuevo registro.", { type: "info", timeout: 1500 });
 }

@@ -110,16 +110,18 @@ function buildData() {
     }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
   }
   else if (type === "flow") {
-    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Registró", "GPS"];
+    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Entregó/Recibió", "Tipo persona", "Contacto", "Registró", "GPS"];
     rows = store.listEvents().filter(e => {
       const d = new Date(e.at);
       if (from && d < from) return false;
       if (to && d > to) return false;
       if (agency && e.agency !== agency) return false;
-      if (q && ![e.vin, e.location, e.agency, e.by].filter(Boolean).some(f => String(f).toLowerCase().includes(q))) return false;
+      const pname = e.person && e.person.name ? e.person.name : "";
+      if (q && ![e.vin, e.location, e.agency, e.by, pname].filter(Boolean).some(f => String(f).toLowerCase().includes(q))) return false;
       return true;
     }).sort((a, b) => b.at.localeCompare(a.at)).map(e => [
-      new Date(e.at).toLocaleString(), EVENT_LABELS[e.type] || e.type, e.vin, e.agency || "", e.location || "", e.by || "—",
+      new Date(e.at).toLocaleString(), EVENT_LABELS[e.type] || e.type, e.vin, e.agency || "", e.location || "",
+      e.person?.name || "", e.person?.type || "", e.person?.contact || "", e.by || "—",
       e.sinGps ? "⚠️ Sin GPS" : "OK",
     ]);
   }
