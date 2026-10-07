@@ -38,8 +38,8 @@ export const WMI3 = {
   "JF1":"Subaru","JF2":"Subaru","4S3":"Subaru","4S4":"Subaru",
   // ---- Mitsubishi ----
   "JA3":"Mitsubishi","JA4":"Mitsubishi","4A3":"Mitsubishi","6MM":"Mitsubishi","ML0":"Mitsubishi",
-  // ---- Suzuki ----
-  "JS1":"Suzuki","JS2":"Suzuki","JS3":"Suzuki","MA3":"Suzuki","KL5":"Suzuki",
+  // ---- Suzuki ---- (TSM = Magyar Suzuki, planta de Hungría: Vitara/S-Cross/Swace europeos)
+  "JS1":"Suzuki","JS2":"Suzuki","JS3":"Suzuki","MA3":"Suzuki","KL5":"Suzuki","TSM":"Suzuki",
   // ---- Volkswagen Group ----
   "WVW":"Volkswagen","WVG":"Volkswagen","WV1":"Volkswagen","WV2":"Volkswagen","WV3":"Volkswagen",
   "1VW":"Volkswagen","3VW":"Volkswagen","3VV":"Volkswagen","9BW":"Volkswagen","LFV":"Volkswagen",
@@ -82,7 +82,7 @@ export const WMI2 = {
   "JT":"Toyota","4T":"Toyota","5T":"Toyota","2T":"Toyota","3T":"Toyota",
   "1N":"Nissan","3N":"Nissan","5N":"Nissan","JN":"Nissan/Infiniti",
   "JM":"Mazda","3M":"Mazda","JF":"Subaru","4S":"Subaru","JA":"Mitsubishi","4A":"Mitsubishi",
-  "JS":"Suzuki","WV":"Volkswagen","1V":"Volkswagen","3V":"Volkswagen","WA":"Audi","TR":"Audi","WP":"Porsche",
+  "JS":"Suzuki","TS":"Suzuki (Hungría)","WV":"Volkswagen","1V":"Volkswagen","3V":"Volkswagen","WA":"Audi","TR":"Audi","WP":"Porsche",
   "WB":"BMW","5U":"BMW","4U":"BMW","WM":"MINI/smart","WD":"Mercedes-Benz","4J":"Mercedes-Benz","W1":"Mercedes-Benz",
   "KM":"Hyundai","KN":"Kia","5X":"Kia","3K":"Kia",
   "VF":"Francia (Renault/Peugeot/Citroën)","W0":"Opel","YV":"Volvo","SA":"Reino Unido (Jaguar/Land Rover)",
