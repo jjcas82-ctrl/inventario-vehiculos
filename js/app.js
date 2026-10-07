@@ -356,12 +356,20 @@ async function tryEnrich(dec) {
   if (!online) { note.textContent = "Sin conexión: se muestran los datos calculados del VIN (marca, país, año, planta)."; return; }
   if (!data || error) { note.textContent = "No se obtuvieron datos oficiales adicionales" + (error ? " (" + error + ")" : "") + "."; return; }
 
-  // NHTSA solo cubre vehículos del mercado EE.UU. Si no trae marca ni modelo,
-  // significa que ese VIN no está en su base (p. ej. vehículos hechos en China/Asia).
+  // NHTSA cubre bien el mercado EE.UU. y parcialmente otros. Si no trae marca ni
+  // modelo, ese VIN no está en su base (p. ej. vehículos de Europa/Asia).
   if (!data.make && !data.model && !data.bodyClass) {
-    note.textContent = "Este VIN no está en la base oficial de NHTSA (cubre vehículos del mercado EE.UU.). " +
-      "Se muestran los datos calculados del VIN; completa el modelo manualmente en la ficha.";
-    note.style.color = "var(--muted)";
+    if (dec.make && dec.make !== "Desconocido") {
+      // La tabla local SÍ reconoció la marca → mensaje tranquilizador, no alarmante.
+      note.textContent = `Marca identificada localmente: ${dec.make}. ` +
+        "NHTSA no tiene detalles extra de este VIN (suele pasar con vehículos de Europa/Asia). " +
+        "Puedes ajustar marca y modelo en la ficha si hace falta.";
+      note.style.color = "var(--muted)";
+    } else {
+      note.textContent = "No se pudo identificar la marca automáticamente para este VIN " +
+        "(ni en la base local ni en NHTSA). Captura la marca y el modelo manualmente en la ficha.";
+      note.style.color = "var(--danger)";
+    }
     return;
   }
 
@@ -379,11 +387,51 @@ async function tryEnrich(dec) {
   dec.plantCity = [data.plantCity, data.plantCountry].filter(Boolean).join(", ");
   dec.series = data.series;
   dec.trim = data.trim;
-  if (data.make && (!dec.make || dec.make === "Desconocido")) dec.make = data.make;
+
+  // MARCA: NHTSA (dato oficial) tiene prioridad para seminuevos de cualquier marca.
+  // Se usa su marca cuando: la local falta, es "Desconocido", o es solo aproximada
+  // (coincidencia de 2 caracteres). Si la local es confiable (3 chars) y coincide,
+  // se conserva. En todos los casos NHTSA se marca como VERIFICADA en línea.
+  if (data.make) {
+    const localAproxOFalta = !dec.make || dec.make === "Desconocido" || dec.makeConfident === false;
+    if (localAproxOFalta) {
+      dec.make = toTitle(data.make);
+    }
+    dec.makeVerifiedOnline = true;           // bandera para la vista
+    dec.makeConfident = true;                 // ya hay confirmación oficial
+  }
 
   currentDecode = dec;
+  updateMakeField(dec);       // reescribe el campo "Marca" principal de la vista
   renderApiExtras(dec);       // añade los campos extra a la vista
   saveVinBasics(dec);         // actualiza los datos guardados del vehículo
+}
+
+// Normaliza "SUZUKI" / "suzuki" → "Suzuki" (NHTSA suele devolver en mayúsculas).
+function toTitle(s) {
+  return String(s || "").toLowerCase().replace(/\b([a-záéíóúñ])/g, (m, c) => c.toUpperCase());
+}
+
+// Reescribe el valor del campo "Marca" en la vista de datos del VIN, usando la
+// marca ya fusionada (local + NHTSA). Marca con etiqueta clara el origen.
+function updateMakeField(dec) {
+  const box = document.getElementById("vin-result");
+  if (!box) return;
+  const dds = box.querySelectorAll("dl > dd");
+  // El primer <dd> del primer <dl> es la Marca (según el orden de showVinResult).
+  const makeDd = box.querySelector("dl dd");
+  if (!makeDd) return;
+  const nombre = dec.make && dec.make !== "Desconocido" ? escapeHtml(dec.make) : null;
+  if (!nombre) {
+    makeDd.innerHTML = '<span class="muted">Se completa manualmente</span>';
+    return;
+  }
+  const etiqueta = dec.makeVerifiedOnline
+    ? ' <span class="chk-ok" style="font-weight:400">✓ confirmada en línea (NHTSA)</span>'
+    : (dec.makeConfident
+        ? ' <span class="muted" style="font-weight:400">(sugerida — verifica en la ficha)</span>'
+        : ' <span class="chk-bad" style="font-weight:400">(aproximada — confirma la marca en la ficha)</span>');
+  makeDd.innerHTML = nombre + etiqueta;
 }
 
 // Guarda/actualiza en el almacén los datos básicos derivados del VIN + API.

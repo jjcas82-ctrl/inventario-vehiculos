@@ -25,13 +25,17 @@ export const WMI3 = {
   // ---- Honda / Acura ----
   "1HG":"Honda","2HG":"Honda","3HG":"Honda","5FN":"Honda","5J6":"Honda","19X":"Honda",
   "JHM":"Honda","JHL":"Honda","19U":"Acura","19V":"Acura","JH4":"Acura","2HN":"Acura",
+  "SHH":"Honda","SHS":"Honda","MRH":"Honda","93H":"Honda",  // Honda UK/Tailandia/Brasil
   // ---- Toyota / Lexus / Scion ----
   "JTD":"Toyota","JTE":"Toyota","JTM":"Toyota","JTN":"Toyota","JTK":"Toyota","JTL":"Toyota",
   "4T1":"Toyota","4T3":"Toyota","5TD":"Toyota","5TF":"Toyota","2T1":"Toyota","2T3":"Toyota","3TM":"Toyota",
   "JTH":"Lexus","JTJ":"Lexus","2T2":"Lexus","58A":"Lexus",
+  // Toyota fabricado fuera de Japón/EE.UU. (comunes como seminuevos):
+  "SB1":"Toyota","NMT":"Toyota","VNK":"Toyota","MR0":"Toyota","MR2":"Toyota","AHT":"Toyota",
   // ---- Nissan / Infiniti ----
   "1N4":"Nissan","1N6":"Nissan","3N1":"Nissan","3N6":"Nissan","5N1":"Nissan",
   "JN1":"Nissan","JN6":"Nissan","JN8":"Nissan","JNK":"Infiniti","JNR":"Infiniti","5N3":"Infiniti",
+  "SJN":"Nissan","VSK":"Nissan","VWA":"Nissan","MDH":"Nissan",  // Nissan UK/España/India
   // ---- Mazda ----
   "JM1":"Mazda","JM3":"Mazda","JM6":"Mazda","JM7":"Mazda","3MZ":"Mazda","4F2":"Mazda","4F4":"Mazda",
   // ---- Subaru ----
@@ -55,6 +59,8 @@ export const WMI3 = {
   "KMH":"Hyundai","KM8":"Hyundai","5NP":"Hyundai","5NM":"Hyundai","KMF":"Hyundai",
   "KNA":"Kia","KND":"Kia","KNM":"Kia","3KP":"Kia","5XX":"Kia","5XY":"Kia",
   "KMT":"Genesis","KMU":"Genesis",
+  "TMA":"Hyundai","TMH":"Hyundai","NLH":"Hyundai","9BH":"Hyundai",  // Hyundai Chequia/Turquía/Brasil
+  "U5Y":"Kia","U6Y":"Kia","KNE":"Kia",                              // Kia Eslovaquia
   // ---- Renault / Nissan / Dacia ----
   "VF1":"Renault","VF2":"Renault","93Y":"Renault","8A1":"Renault","UU1":"Dacia",
   // ---- PSA (Peugeot / Citroën / DS / Opel) ----
