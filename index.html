@@ -36,7 +36,7 @@
     </div>
     <div class="topbar-right">
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v70</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v71</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -203,18 +203,16 @@
       <div class="card">
         <div class="row between wrap">
           <h2>Inventario</h2>
-          <input id="inv-search" class="grow" type="search" placeholder="Buscar por VIN, marca, modelo, color..." />
+          <input id="inv-search" class="grow" type="search" placeholder="Buscar en todo el inventario..." />
+        </div>
+        <div class="row gap wrap" style="margin:8px 0">
+          <button id="inv-clear-filters" class="btn btn-ghost">Limpiar filtros</button>
+          <button id="inv-report" class="btn btn-primary">📊 Generar reporte (CSV de lo filtrado)</button>
+          <span id="inv-count" class="muted" style="align-self:center"></span>
         </div>
         <div class="table-wrap">
           <table id="inv-table" class="table">
-            <thead>
-              <tr>
-                <th>VIN</th><th>Marca</th><th>Modelo</th><th>Año modelo</th>
-                <th>Color</th><th>No. de motor</th><th>Kilometraje</th><th>Tipo</th>
-                <th>Ubicación</th><th>Etapa</th><th>Condición</th><th>Agencia</th>
-                <th>Ingreso</th><th>Registró</th><th>Estado</th><th></th>
-              </tr>
-            </thead>
+            <thead></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -313,6 +311,12 @@
           <button id="clear-cloud-ocr" class="btn">Quitar</button>
         </div>
         <p id="cloud-ocr-status" class="hint"></p>
+      </div>
+
+      <div class="card" id="catalog-card">
+        <h2>Catálogos (listas para autocompletar)</h2>
+        <p class="hint">Define las listas que el personal elige al registrar una unidad (color, tipo, versión, transmisión). Mantienen la base <b>limpia y sin errores de captura</b>. Si alguien escribe un valor nuevo, se agrega aquí automáticamente.</p>
+        <div id="catalog-admin"></div>
       </div>
     </section>
 

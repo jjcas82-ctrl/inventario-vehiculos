@@ -14,6 +14,7 @@ import { notify, confirmDialog, promptDialog } from "./ui.js";
 import * as auth from "./auth.js";
 import { initUsers, renderUsers } from "./users.js";
 import { initLabels, renderLabels } from "./labels.js";
+import { initCatalogAdmin } from "./catalogadmin.js";
 import { getPosition } from "./events.js";
 import { nearestAgency } from "./geo.js";
 import "./audit.js";
@@ -1124,6 +1125,7 @@ function main() {
   initInventory(refreshAll);
   initMap();
   initReports();
+  initCatalogAdmin();
   fillEventSelectors();
 }
 

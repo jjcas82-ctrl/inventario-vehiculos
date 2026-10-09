@@ -8,8 +8,40 @@ import { decodeVin } from "./vin.js";
 import { stagesFor } from "./stages.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
 import * as photos from "./photos.js";
+import { getCatalog, learnValue } from "./catalog.js";
 
 let onChange = () => {};
+
+// Genera un <datalist> con opciones para el autocompletar de un campo.
+function dlOptions(id, values) {
+  return `<datalist id="${id}">${(values || []).map(v => `<option value="${escapeHtml(v)}"></option>`).join("")}</datalist>`;
+}
+
+// Definición de columnas del inventario. `value(v)` extrae el texto mostrado/exportado.
+// `filter` indica el tipo de filtro por columna: "text" (contiene) o "select" (lista).
+const INV_COLUMNS = [
+  { key: "vin",      label: "VIN",         filter: "text",   value: v => v.vin || "" },
+  { key: "make",     label: "Marca",       filter: "text",   value: v => v.make || "" },
+  { key: "model",    label: "Modelo",      filter: "text",   value: v => v.model || "" },
+  { key: "year",     label: "Año modelo",  filter: "text",   value: v => v.year || "" },
+  { key: "color",    label: "Color",       filter: "select", value: v => v.color || "" },
+  { key: "engineNo", label: "No. de motor",filter: "text",   value: v => v.engineNo || "" },
+  { key: "mileage",  label: "Kilometraje", filter: "text",   value: v => (v.mileage != null && v.mileage !== "" ? v.mileage : ""),
+                     display: v => (v.mileage != null && v.mileage !== "" ? Number(v.mileage).toLocaleString() + " km" : "") },
+  { key: "vehType",  label: "Tipo",        filter: "select", value: v => v.vehType || v.bodyClass || "" },
+  { key: "powertrain",label:"Versión/tren",filter: "select", value: v => v.powertrain || "" },
+  { key: "transmission",label:"Transmisión",filter:"select", value: v => v.transmission || "" },
+  { key: "currentLocation", label: "Ubicación", filter: "text", value: v => v.currentLocation || "" },
+  { key: "stage",    label: "Etapa",       filter: "select", value: v => v.stage || "" },
+  { key: "condition",label: "Condición",   filter: "select", value: v => v.condition || "" },
+  { key: "currentAgency", label: "Agencia",filter: "select", value: v => v.currentAgency || "" },
+  { key: "entryAt",  label: "Ingreso",     filter: "text",   value: v => v.entryAt ? new Date(v.entryAt).toLocaleString() : "" },
+  { key: "entryBy",  label: "Registró",    filter: "text",   value: v => v.entryBy || v.lastBy || "" },
+  { key: "status",   label: "Estado",      filter: "select", value: v => v.status || "" },
+];
+
+// Estado de los filtros por columna: { [key]: "texto" }
+let colFilters = {};
 
 export function initInventory(refreshCallback) {
   onChange = refreshCallback || (() => {});
@@ -18,13 +50,20 @@ export function initInventory(refreshCallback) {
   document.getElementById("modal").addEventListener("click", (e) => {
     if (e.target.id === "modal") closeModal();
   });
+  const clearBtn = document.getElementById("inv-clear-filters");
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    colFilters = {};
+    const s = document.getElementById("inv-search"); if (s) s.value = "";
+    renderInventory();
+  });
+  const repBtn = document.getElementById("inv-report");
+  if (repBtn) repBtn.addEventListener("click", exportInventoryCsv);
   renderInventory();
 }
 
-export function renderInventory() {
-  const q = (document.getElementById("inv-search").value || "").toLowerCase().trim();
-  const tbody = document.querySelector("#inv-table tbody");
-  const empty = document.getElementById("inv-empty");
+// Devuelve la lista de vehículos ya filtrada (búsqueda global + filtros por columna).
+function filteredVehicles() {
+  const q = (document.getElementById("inv-search")?.value || "").toLowerCase().trim();
   let list = store.listVehicles();
 
   if (q) {
@@ -33,39 +72,93 @@ export function renderInventory() {
         .some(f => String(f).toLowerCase().includes(q))
     );
   }
+  // Filtros por columna (estilo Excel).
+  for (const col of INV_COLUMNS) {
+    const f = (colFilters[col.key] || "").toLowerCase().trim();
+    if (!f) continue;
+    list = list.filter(v => String(col.value(v)).toLowerCase().includes(f));
+  }
   list.sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+  return list;
+}
 
-  tbody.innerHTML = "";
+// Valores únicos de una columna (para poblar los filtros tipo "select").
+function uniqueValues(col) {
+  const set = new Set();
+  store.listVehicles().forEach(v => { const val = String(col.value(v)).trim(); if (val) set.add(val); });
+  return [...set].sort((a, b) => a.localeCompare(b, "es"));
+}
+
+export function renderInventory() {
+  const thead = document.querySelector("#inv-table thead");
+  const tbody = document.querySelector("#inv-table tbody");
+  const empty = document.getElementById("inv-empty");
+  const list = filteredVehicles();
+
+  // --- Encabezado + fila de filtros por columna (estilo Excel) ---
+  if (thead) {
+    const ths = INV_COLUMNS.map(c => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
+    const filterCells = INV_COLUMNS.map(c => {
+      const cur = colFilters[c.key] || "";
+      if (c.filter === "select") {
+        const opts = uniqueValues(c).map(o =>
+          `<option value="${escapeHtml(o)}" ${cur === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("");
+        return `<th><select class="inv-filter" data-key="${c.key}">
+                  <option value="">(todos)</option>${opts}</select></th>`;
+      }
+      return `<th><input type="text" class="inv-filter" data-key="${c.key}" value="${escapeHtml(cur)}" placeholder="Filtrar…" /></th>`;
+    }).join("") + "<th></th>";
+    thead.innerHTML = `<tr>${ths}</tr><tr class="inv-filter-row">${filterCells}</tr>`;
+
+    thead.querySelectorAll(".inv-filter").forEach(el => {
+      const evt = el.tagName === "SELECT" ? "change" : "input";
+      el.addEventListener(evt, () => {
+        colFilters[el.dataset.key] = el.value;
+        renderInventory();
+      });
+    });
+  }
+
+  // --- Cuerpo ---
   empty.style.display = list.length ? "none" : "block";
-
-  for (const v of list) {
-    const tr = document.createElement("tr");
+  tbody.innerHTML = list.map(v => {
     const statusTag = v.status === "fuera"
       ? '<span class="tag tag-out">Fuera</span>'
       : (v.status === "dentro" ? '<span class="tag tag-in">Dentro</span>' : '<span class="tag">—</span>');
-    tr.innerHTML = `
-      <td><code>${escapeHtml(v.vin)}</code></td>
-      <td>${escapeHtml(v.make || "")}</td>
-      <td>${escapeHtml(v.model || "")}</td>
-      <td>${escapeHtml(v.year || "")}</td>
-      <td>${escapeHtml(v.color || "")}</td>
-      <td>${escapeHtml(v.engineNo || "")}</td>
-      <td>${escapeHtml(v.mileage != null && v.mileage !== "" ? Number(v.mileage).toLocaleString() + " km" : "")}</td>
-      <td>${escapeHtml(v.vehType || v.bodyClass || "")}</td>
-      <td>${escapeHtml(v.currentLocation || "")}</td>
-      <td>${v.stage ? `<span class="tag" style="background:#dbeafe;color:#1e40af">${escapeHtml(v.stage)}</span>` : ""}</td>
-      <td>${escapeHtml(v.condition || "")}</td>
-      <td>${escapeHtml(v.currentAgency || "")}</td>
-      <td>${escapeHtml(v.entryAt ? new Date(v.entryAt).toLocaleString() : "")}</td>
-      <td>${escapeHtml(v.entryBy || v.lastBy || "")}</td>
-      <td>${statusTag}</td>
-      <td><button class="btn open-veh" data-vin="${escapeHtml(v.vin)}">Ver / Editar</button></td>
-    `;
-    tbody.appendChild(tr);
-  }
+    const cells = INV_COLUMNS.map(c => {
+      if (c.key === "vin") return `<td><code>${escapeHtml(v.vin)}</code></td>`;
+      if (c.key === "stage") return `<td>${v.stage ? `<span class="tag" style="background:#dbeafe;color:#1e40af">${escapeHtml(v.stage)}</span>` : ""}</td>`;
+      if (c.key === "status") return `<td>${statusTag}</td>`;
+      const text = c.display ? c.display(v) : String(c.value(v));
+      return `<td>${escapeHtml(text)}</td>`;
+    }).join("");
+    return `<tr>${cells}<td><button class="btn open-veh" data-vin="${escapeHtml(v.vin)}">Ver / Editar</button></td></tr>`;
+  }).join("");
+
   tbody.querySelectorAll(".open-veh").forEach(btn =>
     btn.addEventListener("click", () => openVehicle(btn.dataset.vin))
   );
+
+  const count = document.getElementById("inv-count");
+  if (count) count.textContent = `${list.length} unidad${list.length === 1 ? "" : "es"} mostrada${list.length === 1 ? "" : "s"}`;
+}
+
+// Exporta a CSV exactamente lo que está filtrado en pantalla (sin la columna de acciones).
+function exportInventoryCsv() {
+  const list = filteredVehicles();
+  if (!list.length) { notify("No hay unidades que coincidan con los filtros.", { type: "warn" }); return; }
+  const esc = (s) => { const t = String(s ?? ""); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const header = INV_COLUMNS.map(c => esc(c.label)).join(",");
+  const rows = list.map(v => INV_COLUMNS.map(c => esc(c.display ? c.display(v) : c.value(v))).join(","));
+  const csv = "\uFEFF" + [header, ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "inventario-" + new Date().toISOString().slice(0, 10) + ".csv";
+  a.click();
+  URL.revokeObjectURL(url);
+  notify(`Reporte generado con ${list.length} unidad(es).`, { type: "success" });
 }
 
 export function openVehicle(vin) {
@@ -138,10 +231,24 @@ export function openVehicle(vin) {
         ${vinRow}
         <div class="field"><label>Marca</label><input id="f-make" type="text" value="${escapeHtml(v.make || "")}" ${dis} /></div>
         <div class="field"><label>Modelo</label><input id="f-model" type="text" value="${escapeHtml(v.model || "")}" ${dis} /></div>
-        <div class="field"><label>Color</label><input id="f-color" type="text" value="${escapeHtml(v.color || "")}" ${dis} /></div>
+        <div class="field"><label>Color</label>
+          <input id="f-color" type="text" list="dl-color" value="${escapeHtml(v.color || "")}" placeholder="Escribe o elige…" ${dis} />
+          ${dlOptions("dl-color", getCatalog("color"))}
+        </div>
         <div class="field"><label>No. de motor</label><input id="f-engineNo" type="text" value="${escapeHtml(v.engineNo || "")}" ${dis} /></div>
         <div class="field"><label>Kilometraje</label><input id="f-mileage" type="number" min="0" value="${escapeHtml(v.mileage ?? "")}" ${dis} /></div>
-        <div class="field"><label>Tipo (carrocería)</label><input id="f-vehType" type="text" value="${escapeHtml(v.vehType || v.bodyClass || "")}" placeholder="Sedán, SUV, Pickup…" ${dis} /></div>
+        <div class="field"><label>Tipo (carrocería)</label>
+          <input id="f-vehType" type="text" list="dl-vehType" value="${escapeHtml(v.vehType || v.bodyClass || "")}" placeholder="Sedán, SUV, Pickup…" ${dis} />
+          ${dlOptions("dl-vehType", getCatalog("vehType"))}
+        </div>
+        <div class="field"><label>Versión / tren motriz</label>
+          <input id="f-powertrain" type="text" list="dl-powertrain" value="${escapeHtml(v.powertrain || "")}" placeholder="Gasolina, Híbrido, Eléctrico…" ${dis} />
+          ${dlOptions("dl-powertrain", getCatalog("powertrain"))}
+        </div>
+        <div class="field"><label>Transmisión</label>
+          <input id="f-transmission" type="text" list="dl-transmission" value="${escapeHtml(v.transmission || "")}" placeholder="Manual, Automática, CVT…" ${dis} />
+          ${dlOptions("dl-transmission", getCatalog("transmission"))}
+        </div>
         <div class="field"><label>Placa / Matrícula</label><input id="f-plate" type="text" value="${escapeHtml(v.plate || "")}" ${dis} /></div>
         <div class="field"><label>Condición</label>
           <select id="f-condition" ${dis}>
@@ -217,14 +324,26 @@ export function openVehicle(vin) {
   const saveBtn = body.querySelector("#save-veh");
   if (saveBtn) saveBtn.addEventListener("click", () => {
     const mileageRaw = body.querySelector("#f-mileage").value.trim();
+    const color = body.querySelector("#f-color").value.trim();
+    const vehType = body.querySelector("#f-vehType").value.trim();
+    const powertrain = body.querySelector("#f-powertrain").value.trim();
+    const transmission = body.querySelector("#f-transmission").value.trim();
+    // Autoaprendizaje: si escribieron un valor nuevo, se agrega al catálogo
+    // para mantener la lista de autocompletar actualizada y la base consistente.
+    if (color) learnValue("color", color);
+    if (vehType) learnValue("vehType", vehType);
+    if (powertrain) learnValue("powertrain", powertrain);
+    if (transmission) learnValue("transmission", transmission);
     store.upsertVehicle({
       vin,
       make: body.querySelector("#f-make").value.trim(),
       model: body.querySelector("#f-model").value.trim(),
-      color: body.querySelector("#f-color").value.trim(),
+      color,
       engineNo: body.querySelector("#f-engineNo").value.trim(),
       mileage: mileageRaw === "" ? "" : Number(mileageRaw),
-      vehType: body.querySelector("#f-vehType").value.trim(),
+      vehType,
+      powertrain,
+      transmission,
       plate: body.querySelector("#f-plate").value.trim(),
       condition: body.querySelector("#f-condition").value,
       notes: body.querySelector("#f-notes").value.trim(),

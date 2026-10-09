@@ -135,27 +135,78 @@ function buildData() {
   return { type, cols, rows };
 }
 
+// El resumen DEBE reflejar la selección actual (agencia/condición/etapa), no todo
+// el inventario. Así, al cambiar de agencia, las cuentas cambian con el filtro.
 function renderSummary(type, rows) {
   const el = document.getElementById("rep-summary");
-  const vehicles = store.listVehicles();
-  const dentro = vehicles.filter(v => v.status === "dentro");
+  const agency = document.getElementById("rep-agency").value;
+  const condition = document.getElementById("rep-condition").value;
+  const stage = document.getElementById("rep-stage") ? document.getElementById("rep-stage").value : "";
+
+  // Base: vehículos DENTRO que cumplen el filtro seleccionado.
+  const dentro = store.listVehicles().filter(v => v.status === "dentro").filter(v => {
+    if (agency && v.currentAgency !== agency) return false;
+    if (condition && v.condition !== condition) return false;
+    if (stage && v.stage !== stage) return false;
+    return true;
+  });
   const nuevos = dentro.filter(v => v.condition === "nuevo").length;
   const usados = dentro.filter(v => v.condition === "usado").length;
 
   const byAgency = {};
   dentro.forEach(v => { byAgency[v.currentAgency || "—"] = (byAgency[v.currentAgency || "—"] || 0) + 1; });
 
+  // Etiqueta del alcance del resumen (qué selección se está mostrando).
+  const alcance = agency ? agency : "Todas las agencias";
+
   el.innerHTML = `
+    <div class="stat stat-wide"><b>${escapeHtml(alcance)}</b><span>Selección actual</span></div>
     <div class="stat"><b>${rows.length}</b><span>Filas en el reporte</span></div>
-    <div class="stat"><b>${dentro.length}</b><span>Vehículos dentro</span></div>
+    <div class="stat"><b>${dentro.length}</b><span>Vehículos dentro (filtro)</span></div>
     <div class="stat"><b>${nuevos}</b><span>Nuevos</span></div>
     <div class="stat"><b>${usados}</b><span>Usados</span></div>
-    ${Object.entries(byAgency).map(([a, n]) =>
+    ${agency ? "" : Object.entries(byAgency).map(([a, n]) =>
       `<div class="stat"><b>${n}</b><span>${escapeHtml(a)}</span></div>`).join("")}
   `;
 }
 
+// Muestra solo los filtros que aplican a cada tipo de reporte, para que no queden
+// campos irrelevantes "arrastrando" valores de una selección anterior.
+function applyFilterVisibility(type) {
+  // Qué filtros aplican por tipo de reporte.
+  const map = {
+    inventory:  { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 0, search: 1 },
+    stages:     { agency: 1, condition: 1, stage: 0, from: 0, to: 0, days: 0, search: 1 },
+    aging:      { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
+    idle:       { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
+    flow:       { agency: 1, condition: 0, stage: 0, from: 1, to: 1, days: 0, search: 1 },
+    incomplete: { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
+  };
+  const cfg = map[type] || map.inventory;
+  const fieldOf = (id) => {
+    const el = document.getElementById(id);
+    return el ? el.closest(".field") : null;
+  };
+  const toggle = (id, show) => {
+    const f = fieldOf(id);
+    if (!f) return;
+    f.style.display = show ? "" : "none";
+    // Si el filtro se oculta, limpiar su valor para que NO afecte al reporte.
+    // Solo si tenía valor, para no re-disparar eventos innecesariamente.
+    if (!show) { const el = document.getElementById(id); if (el && el.value) el.value = ""; }
+  };
+  toggle("rep-agency", cfg.agency);
+  toggle("rep-condition", cfg.condition);
+  toggle("rep-stage", cfg.stage);
+  toggle("rep-from", cfg.from);
+  toggle("rep-to", cfg.to);
+  toggle("rep-days", cfg.days);
+  toggle("rep-search", cfg.search);
+}
+
 function render() {
+  // Ajusta qué filtros se ven según el tipo de reporte y limpia los no aplicables.
+  applyFilterVisibility(document.getElementById("rep-type").value);
   const { type, cols, rows } = buildData();
   lastCols = cols; lastRows = rows;
 
