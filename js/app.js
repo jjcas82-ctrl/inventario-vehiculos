@@ -6,6 +6,7 @@ import { readVinFromVideo, readVinCloud, getCloudOcrKey, setCloudOcrKey, hasClou
 import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
+import { addPhoto } from "./photos.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
@@ -733,6 +734,41 @@ function setupEventButtons() {
     gpsStatus.style.color = kind === "error" || kind === "warn" ? "var(--danger)" : "var(--muted)";
   };
 
+  // ---- Foto de credencial / pase de salida (evidencia del evento) ----
+  // Se guarda el archivo en memoria hasta registrar el evento; luego se liga al VIN.
+  let personPhotoFile = null;
+  const photoInput = document.getElementById("person-photo");
+  const photoPreview = document.getElementById("person-photo-preview");
+  const photoStatus = document.getElementById("person-photo-status");
+  const photoClear = document.getElementById("person-photo-clear");
+
+  const clearPersonPhoto = () => {
+    personPhotoFile = null;
+    if (photoInput) photoInput.value = "";
+    if (photoPreview) { photoPreview.hidden = true; photoPreview.removeAttribute("src"); }
+    if (photoClear) photoClear.hidden = true;
+    if (photoStatus) { photoStatus.textContent = "Sin foto."; photoStatus.style.color = "var(--muted)"; }
+  };
+  window.__clearPersonPhoto = clearPersonPhoto;
+
+  if (photoInput) photoInput.addEventListener("change", () => {
+    const file = photoInput.files && photoInput.files[0];
+    if (!file) { clearPersonPhoto(); return; }
+    if (!/^image\//.test(file.type)) {
+      notify("Selecciona un archivo de imagen.", { type: "warn" });
+      clearPersonPhoto();
+      return;
+    }
+    personPhotoFile = file;
+    if (photoPreview) {
+      photoPreview.src = URL.createObjectURL(file);
+      photoPreview.hidden = false;
+    }
+    if (photoClear) photoClear.hidden = false;
+    if (photoStatus) { photoStatus.textContent = "✓ Foto lista."; photoStatus.style.color = "var(--primary)"; }
+  });
+  if (photoClear) photoClear.addEventListener("click", clearPersonPhoto);
+
   // Lee los datos de la persona que entrega/recibe. En entrada/salida son
   // OBLIGATORIOS (nombre y tipo); en movimiento interno son opcionales.
   const readPerson = (type) => {
@@ -751,7 +787,15 @@ function setupEventButtons() {
       if (el) { el.focus(); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
       return { person: null, ok: false };
     }
-    return { person: { name, type: ptype, contact }, ok: true };
+    // La foto de credencial / pase es OBLIGATORIA en entrada y salida (evidencia).
+    if (!personPhotoFile) {
+      notify("Toma la foto de la credencial o del pase de salida (es obligatoria).",
+        { type: "warn", title: "Falta la foto de evidencia" });
+      const el = document.getElementById("person-photo");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      return { person: null, ok: false };
+    }
+    return { person: { name, type: ptype, contact, photoFile: personPhotoFile }, ok: true };
   };
 
   const doEvent = async (type) => {
@@ -940,11 +984,26 @@ function setupEventButtons() {
     const by = auth.currentUser()?.name || store.getUser() || "—";
     await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
+
+    // Guardar la foto de credencial / pase como evidencia, ligada a la unidad.
+    // (En la Fase 2 estas fotos se enviarán al NAS; por ahora quedan locales.)
+    if (person && person.photoFile) {
+      try {
+        const nota = `${labels[type]} · ${person.name}${person.type ? " (" + person.type + ")" : ""} · ${new Date().toLocaleString()}`;
+        await addPhoto(vin, person.photoFile, { kind: "credencial", note: nota, by });
+      } catch (e) {
+        notify("El evento se registró, pero no se pudo guardar la foto de credencial: " + (e.message || e),
+          { type: "warn" });
+      }
+    }
+
     const quienFrase = person && person.name
       ? ` · ${type === "exit" ? "recibió" : (type === "entry" ? "entregó" : "movió")}: ${person.name}`
       : "";
     notify(`${labels[type]} registrada por ${by || "—"}${quienFrase}${sinGps ? " (contingencia sin GPS)" : ""}.`,
       { type: sinGps ? "warn" : "success", title: vin });
+    // Limpiar la foto de credencial para el siguiente registro.
+    if (window.__clearPersonPhoto) window.__clearPersonPhoto();
     refreshAll();
     // Actualiza los botones según el nuevo estado de la unidad.
     if (currentDecode && currentDecode.vin === vin) updateEventButtons(vin);
@@ -995,6 +1054,8 @@ function nuevoRegistro() {
     const el = document.getElementById(id); if (el) el.value = "";
   });
   const ptype = document.getElementById("person-type"); if (ptype) ptype.value = "";
+  // Limpiar la foto de credencial / pase.
+  if (window.__clearPersonPhoto) window.__clearPersonPhoto();
   document.getElementById("vin-input").focus();
   notify("Listo para un nuevo registro.", { type: "info", timeout: 1500 });
 }

@@ -157,5 +157,6 @@ export const PHOTO_KINDS = {
   dano: "⚠️ Daño / Imperfección",
   estado: "📋 Estado general",
   documento: "📄 Documento",
+  credencial: "🪪 Credencial / Pase de salida",
   otro: "🔖 Otro",
 };

@@ -296,3 +296,8 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 .alert-block.alert-info { border-left: 4px solid var(--primary); }
 .alert-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .alert-vin { text-align: left; white-space: normal; }
+
+
+/* Vista previa de la foto de credencial / pase en el bloque de persona */
+.person-photo-preview { margin-top: 8px; max-width: 220px; max-height: 160px; width: auto; height: auto;
+  border: 1px solid var(--border); border-radius: 8px; display: block; object-fit: contain; background: #f8fafc; }
