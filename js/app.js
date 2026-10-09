@@ -810,40 +810,51 @@ function setupEventButtons() {
     gpsStatus.style.color = kind === "error" || kind === "warn" ? "var(--danger)" : "var(--muted)";
   };
 
-  // ---- Foto de credencial / pase de salida (evidencia del evento) ----
-  // Se guarda el archivo en memoria hasta registrar el evento; luego se liga al VIN.
-  let personPhotoFile = null;
-  const photoInput = document.getElementById("person-photo");
-  const photoPreview = document.getElementById("person-photo-preview");
-  const photoStatus = document.getElementById("person-photo-status");
-  const photoClear = document.getElementById("person-photo-clear");
+  // ---- Fotos de evidencia (hasta 3): INE frente, INE reverso, pase/otra ----
+  // Se guardan los archivos en memoria por "slot" hasta registrar el evento.
+  const SLOT_LABELS = { ine_frente: "INE frente", ine_reverso: "INE reverso", pase: "Pase/otra" };
+  const personPhotos = { ine_frente: null, ine_reverso: null, pase: null };
 
+  const clearSlot = (slotEl) => {
+    const key = slotEl.dataset.slot;
+    personPhotos[key] = null;
+    const input = slotEl.querySelector('input[type="file"]');
+    const preview = slotEl.querySelector(".photo-slot-preview");
+    const status = slotEl.querySelector(".photo-slot-status");
+    const clearBtn = slotEl.querySelector(".photo-slot-clear");
+    if (input) input.value = "";
+    if (preview) { preview.hidden = true; preview.removeAttribute("src"); }
+    if (clearBtn) clearBtn.hidden = true;
+    if (status) { status.textContent = "Sin foto."; status.style.color = "var(--muted)"; }
+  };
+
+  // Limpia las 3 fotos (para el siguiente registro).
   const clearPersonPhoto = () => {
-    personPhotoFile = null;
-    if (photoInput) photoInput.value = "";
-    if (photoPreview) { photoPreview.hidden = true; photoPreview.removeAttribute("src"); }
-    if (photoClear) photoClear.hidden = true;
-    if (photoStatus) { photoStatus.textContent = "Sin foto."; photoStatus.style.color = "var(--muted)"; }
+    document.querySelectorAll(".photo-slot").forEach(clearSlot);
   };
   window.__clearPersonPhoto = clearPersonPhoto;
 
-  if (photoInput) photoInput.addEventListener("change", () => {
-    const file = photoInput.files && photoInput.files[0];
-    if (!file) { clearPersonPhoto(); return; }
-    if (!/^image\//.test(file.type)) {
-      notify("Selecciona un archivo de imagen.", { type: "warn" });
-      clearPersonPhoto();
-      return;
-    }
-    personPhotoFile = file;
-    if (photoPreview) {
-      photoPreview.src = URL.createObjectURL(file);
-      photoPreview.hidden = false;
-    }
-    if (photoClear) photoClear.hidden = false;
-    if (photoStatus) { photoStatus.textContent = "✓ Foto lista."; photoStatus.style.color = "var(--primary)"; }
+  document.querySelectorAll(".photo-slot").forEach(slotEl => {
+    const key = slotEl.dataset.slot;
+    const input = slotEl.querySelector('input[type="file"]');
+    const preview = slotEl.querySelector(".photo-slot-preview");
+    const status = slotEl.querySelector(".photo-slot-status");
+    const clearBtn = slotEl.querySelector(".photo-slot-clear");
+    if (input) input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (!file) { clearSlot(slotEl); return; }
+      if (!/^image\//.test(file.type)) {
+        notify("Selecciona un archivo de imagen.", { type: "warn" });
+        clearSlot(slotEl);
+        return;
+      }
+      personPhotos[key] = file;
+      if (preview) { preview.src = URL.createObjectURL(file); preview.hidden = false; }
+      if (clearBtn) clearBtn.hidden = false;
+      if (status) { status.textContent = "✓ Foto lista."; status.style.color = "var(--primary)"; }
+    });
+    if (clearBtn) clearBtn.addEventListener("click", () => clearSlot(slotEl));
   });
-  if (photoClear) photoClear.addEventListener("click", clearPersonPhoto);
 
   // Lee los datos de la persona que entrega/recibe. En entrada/salida son
   // OBLIGATORIOS (nombre y tipo); en movimiento interno son opcionales.
@@ -863,15 +874,21 @@ function setupEventButtons() {
       if (el) { el.focus(); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
       return { person: null, ok: false };
     }
-    // La foto de credencial / pase es OBLIGATORIA en entrada y salida (evidencia).
-    if (!personPhotoFile) {
-      notify("Toma la foto de la credencial o del pase de salida (es obligatoria).",
+    // Fotos de INE OBLIGATORIAS (frente y reverso) en entrada y salida. Pase opcional.
+    const faltante = !personPhotos.ine_frente ? "ine_frente" : (!personPhotos.ine_reverso ? "ine_reverso" : null);
+    if (faltante) {
+      notify("Toma la foto del INE por ambos lados (frente y reverso son obligatorias).",
         { type: "warn", title: "Falta la foto de evidencia" });
-      const el = document.getElementById("person-photo");
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      const slotEl = document.querySelector(`.photo-slot[data-slot="${faltante}"]`);
+      if (slotEl) slotEl.scrollIntoView({ behavior: "smooth", block: "center" });
       return { person: null, ok: false };
     }
-    return { person: { name, type: ptype, contact, photoFile: personPhotoFile }, ok: true };
+    // Lista de fotos a guardar: { file, label }
+    const photos = [];
+    if (personPhotos.ine_frente)  photos.push({ file: personPhotos.ine_frente,  label: "INE frente" });
+    if (personPhotos.ine_reverso) photos.push({ file: personPhotos.ine_reverso, label: "INE reverso" });
+    if (personPhotos.pase)        photos.push({ file: personPhotos.pase,         label: "Pase/otra" });
+    return { person: { name, type: ptype, contact, photos }, ok: true };
   };
 
   const doEvent = async (type) => {
@@ -1091,15 +1108,18 @@ function setupEventButtons() {
     await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
 
-    // Guardar la foto de credencial / pase como evidencia, ligada a la unidad.
+    // Guardar las fotos de evidencia (INE frente/reverso + pase) ligadas a la unidad.
     // (En la Fase 2 estas fotos se enviarán al NAS; por ahora quedan locales.)
-    if (person && person.photoFile) {
-      try {
-        const nota = `${labels[type]} · ${person.name}${person.type ? " (" + person.type + ")" : ""} · ${new Date().toLocaleString()}`;
-        await addPhoto(vin, person.photoFile, { kind: "credencial", note: nota, by });
-      } catch (e) {
-        notify("El evento se registró, pero no se pudo guardar la foto de credencial: " + (e.message || e),
-          { type: "warn" });
+    if (person && Array.isArray(person.photos) && person.photos.length) {
+      const fecha = new Date().toLocaleString();
+      for (const ph of person.photos) {
+        try {
+          const nota = `${labels[type]} · ${ph.label} · ${person.name}${person.type ? " (" + person.type + ")" : ""} · ${fecha}`;
+          await addPhoto(vin, ph.file, { kind: "credencial", note: nota, by });
+        } catch (e) {
+          notify(`El evento se registró, pero no se pudo guardar la foto (${ph.label}): ` + (e.message || e),
+            { type: "warn" });
+        }
       }
     }
 

@@ -37,7 +37,7 @@
     <div class="topbar-right">
       <button id="alert-bell" class="btn btn-ghost bell" title="Alertas y pendientes">🔔<span id="alert-bell-count" class="bell-badge" style="display:none">0</span></button>
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v75</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v76</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -207,20 +207,47 @@
                     <input id="person-contact" type="text" maxlength="60" placeholder="Tel., INE, licencia…" />
                   </div>
                 </div>
-                <!-- Evidencia: foto de credencial (INE) de quien recibe o del pase de salida.
-                     Obligatoria al registrar entrada/salida; se guarda ligada a la unidad. -->
+                <!-- Evidencia: hasta 3 fotos. INE frente y reverso (obligatorias) +
+                     una tercera (pase de salida u otra evidencia, opcional).
+                     Se guardan ligadas a la unidad al registrar entrada/salida. -->
                 <div class="field">
-                  <label>Foto de credencial / pase de salida <span class="req">*</span></label>
-                  <div class="row gap wrap" style="align-items:center">
-                    <label class="btn btn-primary" style="cursor:pointer;margin:0">
-                      📷 Tomar / subir foto
-                      <input id="person-photo" type="file" accept="image/*" capture="environment" hidden />
-                    </label>
-                    <button id="person-photo-clear" class="btn btn-ghost" type="button" hidden>Quitar foto</button>
-                    <span id="person-photo-status" class="hint" style="align-self:center">Sin foto.</span>
+                  <label>Fotos de evidencia</label>
+                  <div class="photo-slots">
+                    <div class="photo-slot" data-slot="ine_frente">
+                      <span class="photo-slot-title">🪪 INE — frente <span class="req">*</span></span>
+                      <img class="photo-slot-preview" hidden alt="INE frente" />
+                      <div class="row gap wrap">
+                        <label class="btn btn-primary photo-slot-btn">📷 Tomar / subir
+                          <input type="file" accept="image/*" capture="environment" hidden />
+                        </label>
+                        <button type="button" class="btn btn-ghost photo-slot-clear" hidden>Quitar</button>
+                      </div>
+                      <span class="hint photo-slot-status">Sin foto.</span>
+                    </div>
+                    <div class="photo-slot" data-slot="ine_reverso">
+                      <span class="photo-slot-title">🪪 INE — reverso <span class="req">*</span></span>
+                      <img class="photo-slot-preview" hidden alt="INE reverso" />
+                      <div class="row gap wrap">
+                        <label class="btn btn-primary photo-slot-btn">📷 Tomar / subir
+                          <input type="file" accept="image/*" capture="environment" hidden />
+                        </label>
+                        <button type="button" class="btn btn-ghost photo-slot-clear" hidden>Quitar</button>
+                      </div>
+                      <span class="hint photo-slot-status">Sin foto.</span>
+                    </div>
+                    <div class="photo-slot" data-slot="pase">
+                      <span class="photo-slot-title">📄 Pase de salida / otra (opcional)</span>
+                      <img class="photo-slot-preview" hidden alt="Pase de salida u otra evidencia" />
+                      <div class="row gap wrap">
+                        <label class="btn btn-primary photo-slot-btn">📷 Tomar / subir
+                          <input type="file" accept="image/*" capture="environment" hidden />
+                        </label>
+                        <button type="button" class="btn btn-ghost photo-slot-clear" hidden>Quitar</button>
+                      </div>
+                      <span class="hint photo-slot-status">Sin foto.</span>
+                    </div>
                   </div>
-                  <img id="person-photo-preview" class="person-photo-preview" alt="Vista previa de credencial" hidden />
-                  <p class="hint">Foto de la credencial de quien recibe/retira la unidad, o del pase de salida. Queda como evidencia del movimiento.</p>
+                  <p class="hint">INE por ambos lados (obligatorio) de quien recibe/retira la unidad, y opcionalmente el pase de salida. Queda como evidencia del movimiento.</p>
                 </div>
               </div>
 
