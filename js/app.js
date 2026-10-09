@@ -7,6 +7,7 @@ import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
 import { addPhoto } from "./photos.js";
+import { getCatalog, learnValue } from "./catalog.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
@@ -275,6 +276,17 @@ function updateEventButtons(vin) {
   // La tarjeta de entrada/salida se muestra siempre (para entrada nueva o salida).
   if (entryExitCard) entryExitCard.style.display = "";
 
+  // DATOS DE LA UNIDAD: solo se capturan al registrar ENTRADA (unidad NO dentro).
+  // En salida se oculta (la unidad ya existe con sus datos).
+  const unitBox = document.getElementById("unit-box");
+  if (unitBox) {
+    unitBox.style.display = dentro ? "none" : "";
+    if (!dentro) {
+      poblarDatalistsUnidad();
+      precargarDatosUnidad(v, vin);
+    }
+  }
+
   // Info de estado actual
   const info = document.getElementById("ev-status-info");
   if (info) {
@@ -289,6 +301,64 @@ function updateEventButtons(vin) {
       info.style.color = "var(--muted)";
     }
   }
+}
+
+// Rellena los <datalist> de los campos de la unidad con los catálogos (autocompletar).
+function poblarDatalistsUnidad() {
+  const fill = (id, values) => {
+    const dl = document.getElementById(id);
+    if (dl) dl.innerHTML = (values || []).map(v => `<option value="${escapeHtml(v)}"></option>`).join("");
+  };
+  fill("dl-u-color", getCatalog("color"));
+  fill("dl-u-vehType", getCatalog("vehType"));
+  fill("dl-u-powertrain", getCatalog("powertrain"));
+  fill("dl-u-transmission", getCatalog("transmission"));
+}
+
+// Precarga los campos de la unidad: con lo que ya exista en el vehículo (si regresa
+// tras una salida) o con la marca/tipo sugeridos por el VIN. Permite corregir.
+function precargarDatosUnidad(v, vin) {
+  const dec = currentDecode;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val != null ? val : ""; };
+  set("u-make", v?.make || dec?.make || dec?.apiMake || "");
+  set("u-model", v?.model || dec?.model || "");
+  set("u-color", v?.color || "");
+  set("u-vehType", v?.vehType || v?.bodyClass || dec?.bodyClass || "");
+  set("u-powertrain", v?.powertrain || "");
+  set("u-transmission", v?.transmission || "");
+  set("u-engineNo", v?.engineNo || "");
+  set("u-mileage", v?.mileage ?? "");
+  set("u-plate", v?.plate || "");
+}
+
+// Lee y VALIDA los datos de la unidad al registrar una ENTRADA.
+// Obligatorios: marca, modelo, color, tipo, versión/tren motriz, transmisión.
+function leerDatosUnidad() {
+  const g = (id) => (document.getElementById(id)?.value || "").trim();
+  const datos = {
+    make: g("u-make"), model: g("u-model"), color: g("u-color"),
+    vehType: g("u-vehType"), powertrain: g("u-powertrain"), transmission: g("u-transmission"),
+    engineNo: g("u-engineNo"), plate: g("u-plate"),
+    mileage: g("u-mileage"),
+  };
+  const obligatorios = [
+    ["u-make", datos.make, "la marca"],
+    ["u-model", datos.model, "el modelo"],
+    ["u-color", datos.color, "el color"],
+    ["u-vehType", datos.vehType, "el tipo / carrocería"],
+    ["u-powertrain", datos.powertrain, "la versión / tren motriz"],
+    ["u-transmission", datos.transmission, "la transmisión"],
+  ];
+  for (const [id, val, nombre] of obligatorios) {
+    if (!val) {
+      notify(`Captura ${nombre} de la unidad (es obligatorio en la recepción).`,
+        { type: "warn", title: "Faltan datos de la unidad" });
+      const el = document.getElementById(id);
+      if (el) { el.focus(); el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      return { ok: false };
+    }
+  }
+  return { ok: true, datos };
 }
 
 // Intenta extraer un VIN de 17 caracteres de un texto (el QR/código puede traer
@@ -883,6 +953,15 @@ function setupEventButtons() {
       return;
     }
 
+    // ============ ENTRADA (recepción): validar los DATOS DE LA UNIDAD ============
+    // Solo en entrada y cuando la unidad NO está dentro (recepción real).
+    let datosUnidad = null;
+    if (type === "entry") {
+      const r = leerDatosUnidad();
+      if (!r.ok) return;
+      datosUnidad = r.datos;
+    }
+
     // ============ ENTRADA / SALIDA: la AGENCIA se detecta por GPS ============
     onGps("Detectando ubicación por GPS…", "info");
     let pos;
@@ -963,11 +1042,11 @@ function setupEventButtons() {
     }
 
     // Pasamos la posición ya capturada para no volver a pedir GPS.
-    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos, sinGps, person);
+    return finalizeEvent(vin, type, agency, area, location, condition, existing, pos, sinGps, person, datosUnidad);
   };
 
   // Guarda datos básicos del VIN (1ª vez) y registra el evento.
-  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos, sinGps = false, person = null) => {
+  const finalizeEvent = async (vin, type, agency, area, location, condition, existing, presetPos, sinGps = false, person = null, datosUnidad = null) => {
     if (!existing) {
       store.upsertVehicle({
         vin,
@@ -975,6 +1054,27 @@ function setupEventButtons() {
         year: currentDecode.year,
         country: currentDecode.country,
       });
+    }
+    // En la ENTRADA se capturan/actualizan los datos de la unidad (obligatorios).
+    // Se guardan en el vehículo y los valores nuevos se aprenden en los catálogos.
+    if (datosUnidad) {
+      const mileageRaw = String(datosUnidad.mileage ?? "").trim();
+      store.upsertVehicle({
+        vin,
+        make: datosUnidad.make,
+        model: datosUnidad.model,
+        color: datosUnidad.color,
+        vehType: datosUnidad.vehType,
+        powertrain: datosUnidad.powertrain,
+        transmission: datosUnidad.transmission,
+        engineNo: datosUnidad.engineNo,
+        plate: datosUnidad.plate,
+        mileage: mileageRaw === "" ? "" : Number(mileageRaw),
+      });
+      if (datosUnidad.color) learnValue("color", datosUnidad.color);
+      if (datosUnidad.vehType) learnValue("vehType", datosUnidad.vehType);
+      if (datosUnidad.powertrain) learnValue("powertrain", datosUnidad.powertrain);
+      if (datosUnidad.transmission) learnValue("transmission", datosUnidad.transmission);
     }
     // Asegura que haya sesión iniciada para registrar.
     if (!auth.can("event.register")) {
@@ -1056,6 +1156,11 @@ function nuevoRegistro() {
   const ptype = document.getElementById("person-type"); if (ptype) ptype.value = "";
   // Limpiar la foto de credencial / pase.
   if (window.__clearPersonPhoto) window.__clearPersonPhoto();
+  // Limpiar los campos de datos de la unidad (recepción).
+  ["u-make", "u-model", "u-color", "u-vehType", "u-powertrain", "u-transmission",
+   "u-engineNo", "u-mileage", "u-plate"].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = "";
+  });
   document.getElementById("vin-input").focus();
   notify("Listo para un nuevo registro.", { type: "info", timeout: 1500 });
 }

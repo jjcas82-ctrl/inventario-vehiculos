@@ -37,7 +37,7 @@
     <div class="topbar-right">
       <button id="alert-bell" class="btn btn-ghost bell" title="Alertas y pendientes">🔔<span id="alert-bell-count" class="bell-badge" style="display:none">0</span></button>
       <button id="user-btn" class="btn btn-ghost" title="Sesión">👤 <span id="user-name">Iniciar sesión</span></button>
-      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v73</span>
+      <span id="app-version" class="badge" title="Versión de la app" style="background:rgba(255,255,255,.15)">v74</span>
       <span id="online-badge" class="badge badge-offline" title="Estado de conexión">Local</span>
       <button id="install-btn" class="btn btn-ghost" hidden>Instalar app</button>
     </div>
@@ -153,6 +153,37 @@
             <div class="loc-card" id="entry-exit-card">
               <b>Entrada / Salida</b>
               <p class="hint" style="margin-top:2px">📍 La agencia se detecta <b>automáticamente por GPS</b>. No se selecciona manualmente.</p>
+
+              <!-- DATOS DE LA UNIDAD: se capturan en la RECEPCIÓN (entrada). Obligatorios.
+                   Usan autocompletar para agilizar y evitar errores. Solo visible en entrada. -->
+              <div class="unit-box" id="unit-box">
+                <b>🚗 Datos de la unidad (recepción)</b>
+                <p class="hint" style="margin-top:2px">Captura los datos al recibir la unidad. Los marcados con <span class="req">*</span> son obligatorios.</p>
+                <div class="grid grid-2">
+                  <div class="field"><label for="u-make">Marca <span class="req">*</span></label>
+                    <input id="u-make" type="text" maxlength="60" placeholder="Chevrolet, Suzuki…" /></div>
+                  <div class="field"><label for="u-model">Modelo <span class="req">*</span></label>
+                    <input id="u-model" type="text" maxlength="80" placeholder="Aveo, Vitara…" /></div>
+                  <div class="field"><label for="u-color">Color <span class="req">*</span></label>
+                    <input id="u-color" type="text" list="dl-u-color" maxlength="40" placeholder="Escribe o elige…" />
+                    <datalist id="dl-u-color"></datalist></div>
+                  <div class="field"><label for="u-vehType">Tipo / carrocería <span class="req">*</span></label>
+                    <input id="u-vehType" type="text" list="dl-u-vehType" maxlength="60" placeholder="Sedán, SUV, Pickup…" />
+                    <datalist id="dl-u-vehType"></datalist></div>
+                  <div class="field"><label for="u-powertrain">Versión / tren motriz <span class="req">*</span></label>
+                    <input id="u-powertrain" type="text" list="dl-u-powertrain" maxlength="40" placeholder="Gasolina, Híbrido…" />
+                    <datalist id="dl-u-powertrain"></datalist></div>
+                  <div class="field"><label for="u-transmission">Transmisión <span class="req">*</span></label>
+                    <input id="u-transmission" type="text" list="dl-u-transmission" maxlength="40" placeholder="Manual, Automática…" />
+                    <datalist id="dl-u-transmission"></datalist></div>
+                  <div class="field"><label for="u-engineNo">No. de motor (opcional)</label>
+                    <input id="u-engineNo" type="text" maxlength="60" placeholder="Opcional" /></div>
+                  <div class="field"><label for="u-mileage">Kilometraje (opcional)</label>
+                    <input id="u-mileage" type="number" min="0" placeholder="Opcional" /></div>
+                  <div class="field"><label for="u-plate">Placa / matrícula (opcional)</label>
+                    <input id="u-plate" type="text" maxlength="20" placeholder="Opcional" /></div>
+                </div>
+              </div>
 
               <!-- Persona que entrega (entrada) o recibe (salida) la unidad. OBLIGATORIO. -->
               <div class="person-box" id="person-box">
