@@ -15,6 +15,8 @@ import * as auth from "./auth.js";
 import { initUsers, renderUsers } from "./users.js";
 import { initLabels, renderLabels } from "./labels.js";
 import { initCatalogAdmin } from "./catalogadmin.js";
+import { initDashboard, renderDashboard } from "./dashboard.js";
+import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
 import { getPosition } from "./events.js";
 import { nearestAgency } from "./geo.js";
 import "./audit.js";
@@ -135,6 +137,7 @@ function setupTabs() {
       document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("is-active"));
       const name = tab.dataset.tab;
       document.getElementById("tab-" + name).classList.add("is-active");
+      if (name === "dashboard") renderDashboard();
       if (name === "map") { refreshMapVinOptions(); drawMap(); }
       if (name === "reports") { refreshReportAgencies(); renderReports(); }
       if (name === "inventory") renderInventory();
@@ -1105,7 +1108,43 @@ function refreshAll() {
   refreshMapVinOptions();
   if (document.getElementById("tab-map").classList.contains("is-active")) drawMap();
   if (document.getElementById("tab-reports").classList.contains("is-active")) renderReports();
+  if (document.getElementById("tab-dashboard").classList.contains("is-active")) renderDashboard();
+  updateAlertBell();
   fillEventSelectors();
+}
+
+// Configuración de umbrales de antigüedad (solo admin, en la pestaña Agencias).
+function setupThresholds() {
+  const warnEl = document.getElementById("th-warn");
+  const dangerEl = document.getElementById("th-danger");
+  const saveBtn = document.getElementById("th-save");
+  const status = document.getElementById("th-status");
+  if (!warnEl || !dangerEl || !saveBtn) return;
+  const th = getThresholds();
+  warnEl.value = th.warn;
+  dangerEl.value = th.danger;
+  saveBtn.addEventListener("click", () => {
+    const saved = setThresholds({ warn: warnEl.value, danger: dangerEl.value });
+    warnEl.value = saved.warn;
+    dangerEl.value = saved.danger;
+    if (status) status.textContent = `Guardado: 🟡 ${saved.warn} días · 🔴 ${saved.danger} días.`;
+    notify("Umbrales de antigüedad actualizados.", { type: "success" });
+    // Reflejar de inmediato en inventario, dashboard y campana.
+    renderInventory();
+    renderDashboard();
+    updateAlertBell();
+  });
+}
+
+// Actualiza el contador (badge) de la campana de alertas en el topbar.
+function updateAlertBell() {
+  const bell = document.getElementById("alert-bell");
+  const badge = document.getElementById("alert-bell-count");
+  if (!bell || !badge) return;
+  const n = getAlerts().total;
+  badge.textContent = n > 99 ? "99+" : String(n);
+  badge.style.display = n ? "" : "none";
+  bell.title = n ? `${n} alerta(s) y pendientes` : "Sin pendientes";
 }
 
 // ---------- Arranque ----------
@@ -1126,6 +1165,19 @@ function main() {
   initMap();
   initReports();
   initCatalogAdmin();
+  // El dashboard puede navegar a otras pestañas (ej. al abrir una ficha de alerta).
+  initDashboard((tabName) => {
+    const t = document.querySelector(`.tab[data-tab="${tabName}"]`);
+    if (t) t.click();
+  });
+  // Campana de alertas: lleva a la pestaña Inicio.
+  const bell = document.getElementById("alert-bell");
+  if (bell) bell.addEventListener("click", () => {
+    const t = document.querySelector('.tab[data-tab="dashboard"]');
+    if (t) t.click();
+  });
+  updateAlertBell();
+  setupThresholds();
   fillEventSelectors();
 }
 

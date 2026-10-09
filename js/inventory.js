@@ -9,6 +9,7 @@ import { stagesFor } from "./stages.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
 import * as photos from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
+import { agingLevel } from "./alerts.js";
 
 let onChange = () => {};
 
@@ -125,10 +126,19 @@ export function renderInventory() {
     const statusTag = v.status === "fuera"
       ? '<span class="tag tag-out">Fuera</span>'
       : (v.status === "dentro" ? '<span class="tag tag-in">Dentro</span>' : '<span class="tag">—</span>');
+    // Semáforo de antigüedad (solo para unidades dentro): 🟢 ok, 🟡 por vencer, 🔴 estancada.
+    let semaforo = "";
+    if (v.status === "dentro") {
+      const ag = agingLevel(v.vin);
+      if (ag.days != null) {
+        const dot = ag.level === "danger" ? "🔴" : (ag.level === "warn" ? "🟡" : "🟢");
+        semaforo = ` <span title="${ag.days} día(s) sin movimiento">${dot}</span>`;
+      }
+    }
     const cells = INV_COLUMNS.map(c => {
       if (c.key === "vin") return `<td><code>${escapeHtml(v.vin)}</code></td>`;
       if (c.key === "stage") return `<td>${v.stage ? `<span class="tag" style="background:#dbeafe;color:#1e40af">${escapeHtml(v.stage)}</span>` : ""}</td>`;
-      if (c.key === "status") return `<td>${statusTag}</td>`;
+      if (c.key === "status") return `<td>${statusTag}${semaforo}</td>`;
       const text = c.display ? c.display(v) : String(c.value(v));
       return `<td>${escapeHtml(text)}</td>`;
     }).join("");

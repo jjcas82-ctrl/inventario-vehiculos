@@ -282,3 +282,17 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 /* Filtros por columna del inventario (estilo Excel) */
 .inv-filter-row th { padding: 4px 6px; background: #f8fafc; }
 .inv-filter { width: 100%; min-width: 80px; padding: 4px 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; }
+
+
+/* Campana de alertas en el topbar */
+.bell { position: relative; font-size: 18px; }
+.bell-badge { position: absolute; top: 2px; right: 2px; min-width: 18px; height: 18px; padding: 0 4px;
+  background: var(--danger); color: #fff; border-radius: 999px; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
+
+/* Bloques de alertas en el dashboard */
+.alert-block { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.alert-block.alert-danger { border-left: 4px solid var(--danger); }
+.alert-block.alert-warn { border-left: 4px solid #d97706; }
+.alert-block.alert-info { border-left: 4px solid var(--primary); }
+.alert-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.alert-vin { text-align: left; white-space: normal; }
