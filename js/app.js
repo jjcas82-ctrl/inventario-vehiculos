@@ -8,6 +8,7 @@ import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
 import { addPhoto } from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
+import { attachAutocomplete } from "./autocomplete.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
@@ -303,16 +304,21 @@ function updateEventButtons(vin) {
   }
 }
 
-// Rellena los <datalist> de los campos de la unidad con los catálogos (autocompletar).
+// Engancha el autocompletar propio (fiable en móvil) a los campos de la unidad.
+// Se engancha una sola vez por campo; lee el catálogo en vivo (así refleja valores
+// nuevos sin volver a enganchar).
+let _unitAutocompleteReady = false;
 function poblarDatalistsUnidad() {
-  const fill = (id, values) => {
-    const dl = document.getElementById(id);
-    if (dl) dl.innerHTML = (values || []).map(v => `<option value="${escapeHtml(v)}"></option>`).join("");
+  if (_unitAutocompleteReady) return;
+  const map = {
+    "u-color": "color", "u-vehType": "vehType",
+    "u-powertrain": "powertrain", "u-transmission": "transmission",
   };
-  fill("dl-u-color", getCatalog("color"));
-  fill("dl-u-vehType", getCatalog("vehType"));
-  fill("dl-u-powertrain", getCatalog("powertrain"));
-  fill("dl-u-transmission", getCatalog("transmission"));
+  for (const [inputId, cat] of Object.entries(map)) {
+    const el = document.getElementById(inputId);
+    if (el) attachAutocomplete(el, () => getCatalog(cat));
+  }
+  _unitAutocompleteReady = true;
 }
 
 // Precarga los campos de la unidad: con lo que ya exista en el vehículo (si regresa

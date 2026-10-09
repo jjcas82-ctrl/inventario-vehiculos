@@ -1,5 +1,5 @@
 // sw.js — Service worker: cache básico para funcionar sin conexión (app shell).
-const CACHE = "inv-vehiculos-v74";
+const CACHE = "inv-vehiculos-v75";
 const ASSETS = [
   "./",
   "./index.html",
@@ -32,6 +32,7 @@ const ASSETS = [
   "./js/catalogadmin.js",
   "./js/alerts.js",
   "./js/dashboard.js",
+  "./js/autocomplete.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/logo.png",

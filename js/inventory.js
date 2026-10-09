@@ -10,13 +10,9 @@ import { makeVinQrDataUrl, printVinLabel } from "./label.js";
 import * as photos from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
 import { agingLevel } from "./alerts.js";
+import { attachAutocomplete } from "./autocomplete.js";
 
 let onChange = () => {};
-
-// Genera un <datalist> con opciones para el autocompletar de un campo.
-function dlOptions(id, values) {
-  return `<datalist id="${id}">${(values || []).map(v => `<option value="${escapeHtml(v)}"></option>`).join("")}</datalist>`;
-}
 
 // Definición de columnas del inventario. `value(v)` extrae el texto mostrado/exportado.
 // `filter` indica el tipo de filtro por columna: "text" (contiene) o "select" (lista).
@@ -242,22 +238,18 @@ export function openVehicle(vin) {
         <div class="field"><label>Marca</label><input id="f-make" type="text" value="${escapeHtml(v.make || "")}" ${dis} /></div>
         <div class="field"><label>Modelo</label><input id="f-model" type="text" value="${escapeHtml(v.model || "")}" ${dis} /></div>
         <div class="field"><label>Color</label>
-          <input id="f-color" type="text" list="dl-color" value="${escapeHtml(v.color || "")}" placeholder="Escribe o elige…" ${dis} />
-          ${dlOptions("dl-color", getCatalog("color"))}
+          <input id="f-color" type="text" value="${escapeHtml(v.color || "")}" placeholder="Escribe o elige…" ${dis} />
         </div>
         <div class="field"><label>No. de motor</label><input id="f-engineNo" type="text" value="${escapeHtml(v.engineNo || "")}" ${dis} /></div>
         <div class="field"><label>Kilometraje</label><input id="f-mileage" type="number" min="0" value="${escapeHtml(v.mileage ?? "")}" ${dis} /></div>
         <div class="field"><label>Tipo (carrocería)</label>
-          <input id="f-vehType" type="text" list="dl-vehType" value="${escapeHtml(v.vehType || v.bodyClass || "")}" placeholder="Sedán, SUV, Pickup…" ${dis} />
-          ${dlOptions("dl-vehType", getCatalog("vehType"))}
+          <input id="f-vehType" type="text" value="${escapeHtml(v.vehType || v.bodyClass || "")}" placeholder="Sedán, SUV, Pickup…" ${dis} />
         </div>
         <div class="field"><label>Versión / tren motriz</label>
-          <input id="f-powertrain" type="text" list="dl-powertrain" value="${escapeHtml(v.powertrain || "")}" placeholder="Gasolina, Híbrido, Eléctrico…" ${dis} />
-          ${dlOptions("dl-powertrain", getCatalog("powertrain"))}
+          <input id="f-powertrain" type="text" value="${escapeHtml(v.powertrain || "")}" placeholder="Gasolina, Híbrido, Eléctrico…" ${dis} />
         </div>
         <div class="field"><label>Transmisión</label>
-          <input id="f-transmission" type="text" list="dl-transmission" value="${escapeHtml(v.transmission || "")}" placeholder="Manual, Automática, CVT…" ${dis} />
-          ${dlOptions("dl-transmission", getCatalog("transmission"))}
+          <input id="f-transmission" type="text" value="${escapeHtml(v.transmission || "")}" placeholder="Manual, Automática, CVT…" ${dis} />
         </div>
         <div class="field"><label>Placa / Matrícula</label><input id="f-plate" type="text" value="${escapeHtml(v.plate || "")}" ${dis} /></div>
         <div class="field"><label>Condición</label>
@@ -407,6 +399,13 @@ export function openVehicle(vin) {
     try { await printVinLabel(store.getVehicle(vin)); }
     catch (e) { notify(e.message || "No se pudo imprimir la etiqueta.", { type: "error" }); }
   });
+
+  // ---- Autocompletar propio (fiable en móvil) en los campos de catálogo ----
+  const acMap = { "f-color": "color", "f-vehType": "vehType", "f-powertrain": "powertrain", "f-transmission": "transmission" };
+  for (const [id, cat] of Object.entries(acMap)) {
+    const el = body.querySelector("#" + id);
+    if (el && !el.disabled) attachAutocomplete(el, () => getCatalog(cat));
+  }
 
   // ---- Fotos / Estado de la unidad (IndexedDB) ----
   setupPhotos(vin, body, canEdit);
