@@ -13,6 +13,7 @@
 // se valida en el servidor.
 
 import { store } from "./storage.js";
+import { logAction } from "./syslog.js";
 
 export const ROLES = {
   operador:   { label: "Operador",      desc: "Registra entradas, salidas y movimientos." },
@@ -66,7 +67,11 @@ function setSession(u) {
   if (_session) store.setUser(_session.name);
 }
 
-export function logout() { setSession(null); }
+export function logout() {
+  const name = _session?.name;
+  if (name) logAction("logout", "", name);
+  setSession(null);
+}
 
 // ---- Login ----
 export async function login(username, password) {
@@ -76,6 +81,7 @@ export async function login(username, password) {
   const h = await hashPassword(password, u.salt);
   if (h !== u.passHash) return { ok: false, error: "Contraseña incorrecta." };
   setSession(u);
+  logAction("login", `Rol: ${u.role}`, _session.name);
   return { ok: true, user: _session };
 }
 
@@ -108,18 +114,29 @@ export async function createUser(data) {
     username, role: data.role || "operador",
     salt, passHash,
   });
+  logAction("user.create", `${username} (${user.role})`, currentUser()?.name || "—");
   return { ok: true, user };
 }
 
-export function updateUser(id, patch) { return store.updateUser(id, patch); }
-export function removeUser(id) { return store.removeUser(id); }
+export function updateUser(id, patch) {
+  const r = store.updateUser(id, patch);
+  logAction("user.edit", `Usuario ${r?.username || id}`, currentUser()?.name || "—");
+  return r;
+}
+export function removeUser(id) {
+  const u = store.listUsers().find(x => x.id === id);
+  logAction("user.delete", `Usuario ${u?.username || id}`, currentUser()?.name || "—");
+  return store.removeUser(id);
+}
 
 // Restablecer contraseña (admin). Devuelve {ok}.
 export async function resetPassword(id, newPassword) {
   if (!newPassword || newPassword.length < 4) return { ok: false, error: "Mínimo 4 caracteres." };
   const salt = randomSalt();
   const passHash = await hashPassword(newPassword, salt);
-  store.updateUser(id, { salt, passHash });
+  store.updateUser(id, { salt, passHash, mustChangePassword: false });
+  const u = store.listUsers().find(x => x.id === id);
+  logAction("user.password", `Contraseña restablecida para ${u?.username || id}`, currentUser()?.name || "—");
   return { ok: true };
 }
 
@@ -137,9 +154,35 @@ export async function ensureSeedAdmin() {
   if (admin) {
     store.updateUser(admin.id, {
       firstName: admin.firstName || "Administrador", lastName: admin.lastName || "",
-      email: admin.email || "", username: "jcabrera", salt, passHash,
+      email: admin.email || "", username: "jcabrera", salt, passHash, mustChangePassword: true,
     });
   } else {
-    store.addUser({ firstName: "Administrador", lastName: "", email: "", username: "jcabrera", role: "admin", salt, passHash });
+    store.addUser({ firstName: "Administrador", lastName: "", email: "", username: "jcabrera", role: "admin", salt, passHash, mustChangePassword: true });
   }
+}
+
+// ¿El usuario actual debe cambiar su contraseña (p. ej. el admin inicial 1234)?
+export function mustChangePassword() {
+  const u = currentUser();
+  if (!u) return false;
+  const full = store.listUsers().find(x => x.id === u.id);
+  return !!(full && full.mustChangePassword);
+}
+
+// Cambia la contraseña del usuario ACTUAL (requiere la actual) y quita la marca
+// de cambio obligatorio. Devuelve {ok, error}.
+export async function changeOwnPassword(currentPassword, newPassword) {
+  const u = currentUser();
+  if (!u) return { ok: false, error: "No hay sesión." };
+  const full = store.listUsers().find(x => x.id === u.id);
+  if (!full) return { ok: false, error: "Usuario no encontrado." };
+  const h = await hashPassword(currentPassword, full.salt);
+  if (h !== full.passHash) return { ok: false, error: "La contraseña actual es incorrecta." };
+  if (!newPassword || newPassword.length < 4) return { ok: false, error: "La nueva contraseña debe tener al menos 4 caracteres." };
+  if (newPassword === currentPassword) return { ok: false, error: "La nueva contraseña debe ser distinta a la actual." };
+  const salt = randomSalt();
+  const passHash = await hashPassword(newPassword, salt);
+  store.updateUser(u.id, { salt, passHash, mustChangePassword: false });
+  logAction("user.password", "Cambió su propia contraseña", u.name);
+  return { ok: true };
 }

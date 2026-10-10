@@ -6,7 +6,9 @@ import * as auth from "./auth.js";
 import { notify, confirmDialog } from "./ui.js";
 import { decodeVin } from "./vin.js";
 import { stagesFor, isClosed } from "./stages.js";
+import { logAction } from "./syslog.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
+import { printVehicleSheet } from "./pdf.js";
 import * as photos from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
 import { agingLevel } from "./alerts.js";
@@ -294,7 +296,10 @@ export function openVehicle(vin) {
     <hr />
     <div class="row between wrap">
       <h3 style="margin:0">Etiqueta QR de la unidad</h3>
-      <button id="print-label" class="btn btn-primary">🖨️ Imprimir etiqueta</button>
+      <div class="row gap">
+        <button id="print-sheet" class="btn">📄 Ficha PDF</button>
+        <button id="print-label" class="btn btn-primary">🖨️ Imprimir etiqueta</button>
+      </div>
     </div>
     <p class="hint">Pega esta etiqueta en la unidad (parabrisas/tablero). Escaneando este QR el registro de entradas, salidas y movimientos es instantáneo y exacto.</p>
     <div id="qr-box" style="text-align:center;margin:8px 0"><span class="muted">Generando QR…</span></div>
@@ -382,6 +387,7 @@ export function openVehicle(vin) {
     closeModal();
     renderInventory();
     onChange();
+    logAction("vehicle.edit", "Edición de ficha", auth.currentUser()?.name || "—", vin);
     notify("Ficha guardada.", { type: "success" });
   });
 
@@ -406,6 +412,7 @@ export function openVehicle(vin) {
     if (choice !== "ok") return;
     const res = store.changeVin(vin, nuevo);
     if (!res.ok) { notify(res.error, { type: "error" }); return; }
+    logAction("vehicle.vin", `Cambio de VIN: ${vin} → ${nuevo}`, auth.currentUser()?.name || "—", nuevo);
     closeModal();
     renderInventory();
     onChange();
@@ -419,6 +426,11 @@ export function openVehicle(vin) {
       .then(url => { qrBox.innerHTML = `<img src="${url}" alt="QR ${escapeHtml(vin)}" style="width:200px;height:200px" />`; })
       .catch(() => { qrBox.innerHTML = '<span class="muted">No se pudo generar el QR (¿sin internet?).</span>'; });
   }
+  const sheetBtn = body.querySelector("#print-sheet");
+  if (sheetBtn) sheetBtn.addEventListener("click", async () => {
+    try { await printVehicleSheet(store.getVehicle(vin)); }
+    catch (e) { notify(e.message || "No se pudo generar la ficha.", { type: "error" }); }
+  });
   const printBtn = body.querySelector("#print-label");
   if (printBtn) printBtn.addEventListener("click", async () => {
     try { await printVinLabel(store.getVehicle(vin)); }

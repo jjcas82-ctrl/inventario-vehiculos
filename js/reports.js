@@ -3,6 +3,7 @@ import { store } from "./storage.js";
 import { escapeHtml } from "./agencies.js";
 import { EVENT_LABELS } from "./events.js";
 import { allStages, isClosed, isSoldStage } from "./stages.js";
+import { printReport } from "./pdf.js";
 
 let lastRows = [];   // filas actuales (para copiar/exportar)
 let lastCols = [];   // columnas actuales
@@ -15,7 +16,12 @@ export function initReports() {
     el.addEventListener("input", render);
     el.addEventListener("change", render);
   });
-  document.getElementById("rep-print").addEventListener("click", () => window.print());
+  document.getElementById("rep-print").addEventListener("click", () => {
+    const sel = document.getElementById("rep-type");
+    const titulo = "Reporte: " + (sel.options[sel.selectedIndex]?.text || "Inventario");
+    try { printReport(titulo, lastCols, lastRows); }
+    catch (e) { window.print(); }
+  });
   document.getElementById("rep-copy").addEventListener("click", copyForExcel);
   document.getElementById("rep-csv").addEventListener("click", exportCsv);
   // Poblar filtro de etapa

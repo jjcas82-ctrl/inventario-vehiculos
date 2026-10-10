@@ -10,6 +10,7 @@ import { addPhoto } from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
 import { attachAutocomplete } from "./autocomplete.js";
 import { isSoldStage, isClosed } from "./stages.js";
+import { logAction } from "./syslog.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
@@ -20,6 +21,7 @@ import { initUsers, renderUsers } from "./users.js";
 import { initLabels, renderLabels } from "./labels.js";
 import { initCatalogAdmin } from "./catalogadmin.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
+import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
 import { getPosition } from "./events.js";
 import { nearestAgency } from "./geo.js";
@@ -56,6 +58,34 @@ function applyPermissions() {
     const first = [...document.querySelectorAll(".tab")].find(t => t.style.display !== "none");
     if (first) first.click();
   }
+}
+
+// ---- Cierre de sesión por inactividad (seguridad) ----
+const INACTIVITY_MS = 30 * 60 * 1000; // 30 minutos
+let _inactivityTimer = null;
+
+function resetInactivityTimer() {
+  if (!auth.currentUser()) return;        // solo si hay sesión
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(onInactivityTimeout, INACTIVITY_MS);
+}
+
+function onInactivityTimeout() {
+  if (!auth.currentUser()) return;
+  const nombre = auth.currentUser().name;
+  logAction("session.expire", "Cierre automático por 30 min de inactividad", nombre);
+  auth.logout();
+  refreshUserLabel();
+  applyPermissions();
+  showLoginScreen(true);
+  notify("Tu sesión se cerró por inactividad (30 min). Vuelve a iniciar sesión.", { type: "warn", title: "Sesión cerrada" });
+}
+
+// Reinicia el contador con cualquier actividad del usuario.
+function setupInactivityWatch() {
+  ["click", "keydown", "pointerdown", "touchstart", "scroll"].forEach(evt =>
+    document.addEventListener(evt, resetInactivityTimer, { passive: true })
+  );
 }
 
 // Muestra u oculta la pantalla de login (bloquea la app hasta autenticarse).
@@ -95,6 +125,38 @@ async function submitLoginScreen(e) {
   applyPermissions();
   renderUsers();
   notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
+  resetInactivityTimer();              // arranca el control de inactividad
+  if (auth.mustChangePassword()) await forzarCambioPassword();
+}
+
+// Diálogo OBLIGATORIO de cambio de contraseña (p. ej. admin inicial 1234). No se
+// puede cerrar sin cambiarla; si cancela, se cierra la sesión por seguridad.
+async function forzarCambioPassword() {
+  while (auth.mustChangePassword()) {
+    const actual = await promptDialog({
+      icon: "🔒", title: "Cambia tu contraseña",
+      message: "Por seguridad debes cambiar la contraseña inicial antes de continuar.\n\nEscribe tu contraseña ACTUAL:",
+      placeholder: "Contraseña actual", okLabel: "Siguiente",
+    });
+    if (actual === null) { cerrarPorSeguridad(); return; }
+    const nueva = await promptDialog({
+      icon: "🔒", title: "Nueva contraseña",
+      message: "Escribe tu NUEVA contraseña (mínimo 4 caracteres):",
+      placeholder: "Nueva contraseña", okLabel: "Guardar",
+    });
+    if (nueva === null) { cerrarPorSeguridad(); return; }
+    const res = await auth.changeOwnPassword(actual, nueva);
+    if (!res.ok) { notify(res.error, { type: "error" }); continue; }
+    notify("Contraseña actualizada. ¡Gracias!", { type: "success" });
+  }
+}
+
+function cerrarPorSeguridad() {
+  notify("Debes cambiar la contraseña para usar el sistema. Sesión cerrada.", { type: "warn" });
+  auth.logout();
+  refreshUserLabel();
+  applyPermissions();
+  showLoginScreen(true);
 }
 
 async function setupUser() {
@@ -123,9 +185,12 @@ async function setupUser() {
   });
 
   applyPermissions();
+  setupInactivityWatch();
   // Al arrancar: si no hay sesión activa, mostrar la pantalla de login (bloquea la app).
   if (auth.currentUser()) {
     showLoginScreen(false);
+    resetInactivityTimer();
+    if (auth.mustChangePassword()) await forzarCambioPassword();
   } else {
     showLoginScreen(true);
   }
@@ -146,6 +211,7 @@ function setupTabs() {
       if (name === "reports") { refreshReportAgencies(); renderReports(); }
       if (name === "inventory") renderInventory();
       if (name === "users") renderUsers();
+      if (name === "syslog") renderSyslog();
       if (name === "labels") renderLabels();
       if (name === "audit") window.__initAudit && window.__initAudit();
     })
@@ -386,6 +452,7 @@ async function reabrirUnidad(vin) {
   const quien = auth.currentUser()?.name || "—";
   store.upsertVehicle({ vin, status: "dentro" });
   store.setStage(vin, "Disponible", quien);
+  logAction("vehicle.reopen", "Unidad reabierta (volvió a Disponible/dentro)", quien, vin);
   notify("Unidad reabierta. Ahora está DENTRO y Disponible.", { type: "success" });
   refreshAll();
   if (currentDecode && currentDecode.vin === vin) updateEventButtons(vin);
@@ -1251,8 +1318,14 @@ function setupEventButtons() {
       return;
     }
     const by = auth.currentUser()?.name || store.getUser() || "—";
+    const esNueva = !existing;
     await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
+
+    // Bitácora: registrar el evento (y el alta si la unidad era nueva).
+    const quienRecibe = person && person.name ? ` · ${person.type || ""}: ${person.name}` : "";
+    logAction("event." + type, `${agency}${location && location !== agency ? " / " + location : ""}${quienRecibe}${sinGps ? " · ⚠️ sin GPS" : ""}`, by, vin);
+    if (esNueva && type === "entry") logAction("vehicle.create", `${datosUnidad?.make || ""} ${datosUnidad?.model || ""}`.trim(), by, vin);
 
     // Guardar las fotos de evidencia (INE frente/reverso + pase) ligadas a la unidad.
     // (En la Fase 2 estas fotos se enviarán al NAS; por ahora quedan locales.)
@@ -1275,6 +1348,7 @@ function setupEventButtons() {
       const vActual = store.getVehicle(vin);
       if (vActual && vActual.stage === "Vendido") {
         store.setStage(vin, "Entregado", by);
+        logAction("vehicle.deliver", `Entregada al cliente y dada de baja del inventario`, by, vin);
         notify(`Unidad marcada como ENTREGADA al cliente.`, { type: "success", title: vin });
       }
     }
@@ -1338,6 +1412,7 @@ function setupEventButtons() {
     if (choice !== "ok") return;
     const quien = auth.currentUser()?.name || "—";
     store.setStage(vin, "Vendido", quien);
+    logAction("vehicle.sold", "Marcada como Vendida desde escaneo", quien, vin);
     notify(`Unidad marcada como VENDIDA. Registra su salida para entregarla al cliente.`, { type: "success", title: vin });
     refreshAll();
     updateEventButtons(vin);
@@ -1392,6 +1467,7 @@ function setupDataButtons() {
     if (!file) return;
     try {
       store.import(await file.text());
+      logAction("data.import", "Respaldo JSON importado", auth.currentUser()?.name || "—");
       notify("Respaldo importado correctamente.", { type: "success" });
       refreshAll();
     } catch (e) { notify("Archivo no válido: " + e.message, { type: "error" }); }
@@ -1409,6 +1485,7 @@ function setupDataButtons() {
       ],
     });
     if (choice === "wipe") {
+      logAction("data.wipe", "Borrado total de datos del dispositivo", auth.currentUser()?.name || "—");
       store.wipe();
       notify("Datos borrados.", { type: "success" });
       setTimeout(() => location.reload(), 600);
@@ -1539,6 +1616,7 @@ function main() {
   initMap();
   initReports();
   initCatalogAdmin();
+  initSyslog();
   // El dashboard puede navegar a otras pestañas (ej. al abrir una ficha de alerta).
   initDashboard((tabName) => {
     const t = document.querySelector(`.tab[data-tab="${tabName}"]`);
