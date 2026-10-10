@@ -2,7 +2,7 @@
 import { store } from "./storage.js";
 import { escapeHtml } from "./agencies.js";
 import { EVENT_LABELS } from "./events.js";
-import { allStages } from "./stages.js";
+import { allStages, isClosed, isSoldStage } from "./stages.js";
 
 let lastRows = [];   // filas actuales (para copiar/exportar)
 let lastCols = [];   // columnas actuales
@@ -125,6 +125,32 @@ function buildData() {
       e.sinGps ? "⚠️ Sin GPS" : "OK",
     ]);
   }
+  else if (type === "sold") {
+    // Vendidas / Entregadas (solo consulta). Incluye las vendidas aún dentro y las
+    // ya entregadas/cerradas que salieron.
+    cols = ["VIN", "Marca", "Modelo", "Año", "Color", "Etapa", "Agencia", "Estado", "Salida", "Entregó/Recibió"];
+    rows = store.listVehicles()
+      .filter(v => isSoldStage(v.stage))
+      .filter(v => !agency || v.currentAgency === agency)
+      .filter(v => {
+        if (!q) return true;
+        return [v.vin, v.make, v.model, v.color].filter(Boolean).some(f => String(f).toLowerCase().includes(q));
+      })
+      .sort((a, b) => (b.exitAt || b.updatedAt || "").localeCompare(a.exitAt || a.updatedAt || ""))
+      .map(v => {
+        // Buscar el nombre de quien recibió en el último evento de salida.
+        const salidas = store.eventsForVin(v.vin).filter(e => e.type === "exit");
+        const ult = salidas.length ? salidas[salidas.length - 1] : null;
+        const recibio = ult && ult.person && ult.person.name ? ult.person.name : "";
+        return [
+          v.vin, v.make || "", v.model || "", v.year || "", v.color || "",
+          v.stage || "", v.currentAgency || "",
+          v.status === "fuera" ? "Entregada/Salió" : "Dentro",
+          v.exitAt ? new Date(v.exitAt).toLocaleString() : "",
+          recibio,
+        ];
+      });
+  }
   else if (type === "incomplete") {
     cols = ["VIN", "Marca", "Año", "Falta modelo", "Falta color", "Agencia"];
     rows = store.listVehicles().filter(matchVehicle)
@@ -180,6 +206,7 @@ function applyFilterVisibility(type) {
     aging:      { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
     idle:       { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
     flow:       { agency: 1, condition: 0, stage: 0, from: 1, to: 1, days: 0, search: 1 },
+    sold:       { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
     incomplete: { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
   };
   const cfg = map[type] || map.inventory;

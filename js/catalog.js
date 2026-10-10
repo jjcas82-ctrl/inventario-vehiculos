@@ -17,12 +17,18 @@ const DEFAULTS = {
   transmission: ["Manual", "Automática", "CVT", "Automática secuencial", "DCT (doble embrague)"],
 };
 
+// Catálogos que NO tienen valores por defecto: aprenden solos de lo capturado
+// y/o de NHTSA (marca y modelo). Se mantienen aunque estén vacíos.
+const APRENDIDOS = ["make", "model"];
+
 // Etiquetas legibles para la UI del panel de administración.
 export const CATALOG_LABELS = {
   color: "Colores",
   vehType: "Tipos de vehículo (carrocería)",
   powertrain: "Versión / tren motriz",
   transmission: "Transmisión",
+  make: "Marcas (aprendidas)",
+  model: "Modelos (aprendidos)",
 };
 
 let _cache = null;
@@ -36,6 +42,10 @@ function read() {
   // Sembrar los catálogos faltantes con sus valores por defecto.
   for (const k of Object.keys(DEFAULTS)) {
     if (!Array.isArray(_cache[k]) || !_cache[k].length) _cache[k] = [...DEFAULTS[k]];
+  }
+  // Catálogos aprendidos (marca/modelo): inicializar vacíos si no existen, sin sembrar.
+  for (const k of APRENDIDOS) {
+    if (!Array.isArray(_cache[k])) _cache[k] = [];
   }
   return _cache;
 }

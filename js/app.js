@@ -9,6 +9,7 @@ import { registerEvent } from "./events.js";
 import { addPhoto } from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
 import { attachAutocomplete } from "./autocomplete.js";
+import { isSoldStage, isClosed } from "./stages.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
 import { initInventory, renderInventory } from "./inventory.js";
 import { initMap, drawMap, refreshMapVinOptions } from "./map.js";
@@ -269,30 +270,42 @@ function updateEventButtons(vin) {
   const entryExitCard = document.getElementById("entry-exit-card");
 
   const dentro = status === "dentro";
-  // Entrada: solo si NO está dentro. Salida: solo si está dentro.
-  entryBtn.style.display = dentro ? "none" : "";
-  exitBtn.style.display = dentro ? "" : "none";
-  // El apartado de movimiento interno solo aparece si la unidad está dentro.
-  if (moveCard) moveCard.style.display = dentro ? "" : "none";
-  // La tarjeta de entrada/salida se muestra siempre (para entrada nueva o salida).
-  if (entryExitCard) entryExitCard.style.display = "";
+  const cerrada = isClosed(v); // Vendido/Entregado + fuera → unidad liquidada.
 
-  // DATOS DE LA UNIDAD: solo se capturan al registrar ENTRADA (unidad NO dentro).
-  // En salida se oculta (la unidad ya existe con sus datos).
+  // Unidad CERRADA: no se puede dar entrada ni mover. Todo el formulario de evento
+  // se bloquea; solo el administrador puede reabrirla (botón aparte).
+  entryBtn.style.display = (dentro || cerrada) ? "none" : "";
+  exitBtn.style.display = dentro ? "" : "none";
+  if (moveCard) moveCard.style.display = dentro ? "" : "none";
+  if (entryExitCard) entryExitCard.style.display = cerrada ? "none" : "";
+
+  // Botón de REABRIR (solo admin) para unidades cerradas.
+  renderReopen(v, vin, cerrada);
+
+  // DATOS DE LA UNIDAD: solo se capturan al registrar ENTRADA (unidad NO dentro ni cerrada).
   const unitBox = document.getElementById("unit-box");
   if (unitBox) {
-    unitBox.style.display = dentro ? "none" : "";
-    if (!dentro) {
+    unitBox.style.display = (dentro || cerrada) ? "none" : "";
+    if (!dentro && !cerrada) {
       poblarDatalistsUnidad();
       precargarDatosUnidad(v, vin);
     }
   }
 
+  // SALIDA INTELIGENTE: si la unidad está DENTRO y ya está "Vendido", su salida es una
+  // ENTREGA A CLIENTE. Fijamos el tipo de persona en "Cliente" (bloqueado) para que
+  // el usuario no se equivoque de opción.
+  prepararSalidaVendido(v, dentro);
+
   // Info de estado actual
   const info = document.getElementById("ev-status-info");
   if (info) {
-    if (dentro) {
-      info.textContent = `🚗 Unidad DENTRO en: ${v.currentLocation || "—"} (${v.currentAgency || "—"}). Puedes moverla internamente o registrar su salida.`;
+    if (cerrada) {
+      info.textContent = `🔒 Unidad CERRADA (${v.stage}). Ya salió del inventario y no admite nueva entrada ni edición. Solo un administrador puede reabrirla.`;
+      info.style.color = "var(--danger)";
+    } else if (dentro) {
+      const vendido = isSoldStage(v.stage) ? ` · 🏷️ ${v.stage}` : "";
+      info.textContent = `🚗 Unidad DENTRO en: ${v.currentLocation || "—"} (${v.currentAgency || "—"})${vendido}. Puedes moverla internamente o registrar su salida.`;
       info.style.color = "var(--primary)";
     } else if (status === "fuera") {
       info.textContent = "La unidad figura FUERA. Puedes registrar su entrada.";
@@ -304,6 +317,75 @@ function updateEventButtons(vin) {
   }
 }
 
+// Si la unidad está dentro y en etapa "Vendido", prepara la salida como entrega a
+// Cliente: fija el selector de tipo en "Cliente" y lo bloquea para evitar errores.
+function prepararSalidaVendido(v, dentro) {
+  const sel = document.getElementById("person-type");
+  if (!sel) return;
+  const esVentaPendiente = dentro && v && v.stage === "Vendido";
+  if (esVentaPendiente) {
+    sel.value = "Cliente";
+    sel.disabled = true;
+    sel.title = "Unidad vendida: la salida es una entrega a cliente.";
+    let hint = document.getElementById("person-type-locked");
+    if (!hint) {
+      hint = document.createElement("p");
+      hint.id = "person-type-locked";
+      hint.className = "hint";
+      hint.style.color = "var(--primary)";
+      sel.closest(".field")?.appendChild(hint);
+    }
+    hint.textContent = "🏷️ Unidad VENDIDA: al registrar la salida se marca como ENTREGADA al cliente.";
+  } else {
+    sel.disabled = false;
+    sel.title = "";
+    const hint = document.getElementById("person-type-locked");
+    if (hint) hint.remove();
+  }
+}
+
+// Muestra/oculta un botón de REABRIR (solo admin) para unidades cerradas.
+function renderReopen(v, vin, cerrada) {
+  const card = document.getElementById("entry-exit-card");
+  let box = document.getElementById("reopen-box");
+  const esAdmin = auth.can("vehicle.editVin"); // permiso de admin
+  if (cerrada && esAdmin) {
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "reopen-box";
+      box.className = "loc-card";
+      box.style.marginTop = "12px";
+      card.parentNode.insertBefore(box, card.nextSibling);
+    }
+    box.style.display = "";
+    box.innerHTML = `<b>🔒 Unidad cerrada (${escapeHtml(v.stage)})</b>
+      <p class="hint" style="margin-top:2px">Esta unidad ya fue entregada/vendida y salió del inventario. Si fue un error, puedes reabrirla.</p>
+      <button id="reopen-btn" class="btn btn-danger">Reabrir unidad (admin)</button>`;
+    box.querySelector("#reopen-btn").addEventListener("click", () => reabrirUnidad(vin));
+  } else if (box) {
+    box.style.display = "none";
+  }
+}
+
+// Reabre una unidad cerrada: la regresa a etapa "Disponible" y estado "dentro".
+async function reabrirUnidad(vin) {
+  const choice = await confirmDialog({
+    icon: "🔓", title: "Reabrir unidad",
+    message: `Vas a REABRIR la unidad ${vin}.\n\nVolverá al inventario como DENTRO y en etapa "Disponible". Úsalo solo para corregir un cierre equivocado.\n\n¿Continuar?`,
+    buttons: [
+      { label: "Cancelar", value: null, variant: "ghost" },
+      { label: "Sí, reabrir", value: "ok", variant: "danger" },
+    ],
+  });
+  if (choice !== "ok") return;
+  const quien = auth.currentUser()?.name || "—";
+  store.upsertVehicle({ vin, status: "dentro" });
+  store.setStage(vin, "Disponible", quien);
+  notify("Unidad reabierta. Ahora está DENTRO y Disponible.", { type: "success" });
+  refreshAll();
+  if (currentDecode && currentDecode.vin === vin) updateEventButtons(vin);
+}
+
 // Engancha el autocompletar propio (fiable en móvil) a los campos de la unidad.
 // Se engancha una sola vez por campo; lee el catálogo en vivo (así refleja valores
 // nuevos sin volver a enganchar).
@@ -311,6 +393,7 @@ let _unitAutocompleteReady = false;
 function poblarDatalistsUnidad() {
   if (_unitAutocompleteReady) return;
   const map = {
+    "u-make": "make", "u-model": "model",
     "u-color": "color", "u-vehType": "vehType",
     "u-powertrain": "powertrain", "u-transmission": "transmission",
   };
@@ -486,6 +569,21 @@ async function tryEnrich(dec) {
   updateMakeField(dec);       // reescribe el campo "Marca" principal de la vista
   renderApiExtras(dec);       // añade los campos extra a la vista
   saveVinBasics(dec);         // actualiza los datos guardados del vehículo
+  // Autollenar Marca/Modelo en los campos de recepción si están vacíos (NHTSA llegó
+  // después de mostrar el formulario). No pisa lo que el usuario ya escribió.
+  autollenarMarcaModelo(dec);
+}
+
+// Rellena los campos de recepción Marca/Modelo con los datos de NHTSA SOLO si siguen
+// vacíos (para no sobrescribir una corrección manual del usuario).
+function autollenarMarcaModelo(dec) {
+  const unitBox = document.getElementById("unit-box");
+  if (!unitBox || unitBox.style.display === "none") return;
+  const mk = document.getElementById("u-make");
+  const md = document.getElementById("u-model");
+  const marca = dec.make || dec.apiMake;
+  if (mk && !mk.value.trim() && marca) mk.value = toTitle(marca);
+  if (md && !md.value.trim() && dec.model) md.value = dec.model;
 }
 
 // Normaliza "SUZUKI" / "suzuki" → "Suzuki" (NHTSA suele devolver en mayúsculas).
@@ -899,14 +997,39 @@ function setupEventButtons() {
     const vin = currentDecode.vin;
     const existing = store.getVehicle(vin);
     const condition = document.getElementById("ev-condition").value;
+    const status = existing?.status; // "dentro" | "fuera" | undefined
+    const curLocation = existing?.currentLocation;
+    const curAgency = existing?.currentAgency;
+
+    // BLOQUEO: una unidad CERRADA (vendida/entregada y fuera) no admite entrada ni
+    // movimiento. Solo el administrador puede reabrirla desde la ficha/panel.
+    if (existing && isClosed(existing) && (type === "entry" || type === "move")) {
+      notify(`La unidad ${vin} está CERRADA (${existing.stage}) y salió del inventario. ` +
+        `No se puede registrar entrada ni movimiento. Un administrador debe reabrirla primero.`,
+        { type: "error", title: "Unidad cerrada" });
+      return;
+    }
+
+    // ADVERTENCIA DE SALIDA: si se da salida a una unidad que NO está marcada como
+    // vendida/entregada (p. ej. está Disponible), avisar — puede ser un traslado o
+    // servicio legítimo, pero conviene confirmarlo.
+    if (type === "exit" && existing && !isSoldStage(existing.stage)) {
+      const choice = await confirmDialog({
+        icon: "🚪", title: "Salida de unidad no vendida",
+        message: `La unidad ${vin} NO está marcada como vendida (etapa actual: "${existing.stage || "—"}").\n\n` +
+          `Si es una venta/entrega, cámbiala a "Vendido" antes de dar salida.\n` +
+          `Si es un traslado, servicio externo u otra salida, puedes continuar.\n\n¿Registrar la salida de todos modos?`,
+        buttons: [
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: "Sí, registrar salida", value: "ok", variant: "primary" },
+        ],
+      });
+      if (choice !== "ok") { notify("Salida cancelada.", { type: "info" }); return; }
+    }
 
     // Validar/leer la persona responsable ANTES de continuar.
     const { person, ok: personOk } = readPerson(type);
     if (!personOk) return;
-
-    const status = existing?.status; // "dentro" | "fuera" | undefined
-    const curLocation = existing?.currentLocation;
-    const curAgency = existing?.currentAgency;
 
     // SALVAGUARDA anti-retrabajo: si el VIN NO pasa el dígito de control ISO 3779
     // y es una unidad NUEVA (no registrada), pedimos confirmación explícita antes
@@ -1094,6 +1217,8 @@ function setupEventButtons() {
         plate: datosUnidad.plate,
         mileage: mileageRaw === "" ? "" : Number(mileageRaw),
       });
+      if (datosUnidad.make) learnValue("make", datosUnidad.make);
+      if (datosUnidad.model) learnValue("model", datosUnidad.model);
       if (datosUnidad.color) learnValue("color", datosUnidad.color);
       if (datosUnidad.vehType) learnValue("vehType", datosUnidad.vehType);
       if (datosUnidad.powertrain) learnValue("powertrain", datosUnidad.powertrain);
@@ -1120,6 +1245,16 @@ function setupEventButtons() {
           notify(`El evento se registró, pero no se pudo guardar la foto (${ph.label}): ` + (e.message || e),
             { type: "warn" });
         }
+      }
+    }
+
+    // VENTA CONCRETADA: al dar SALIDA de una unidad "Vendido", pasa a "Entregado"
+    // automáticamente (la salida ES la entrega al cliente).
+    if (type === "exit") {
+      const vActual = store.getVehicle(vin);
+      if (vActual && vActual.stage === "Vendido") {
+        store.setStage(vin, "Entregado", by);
+        notify(`Unidad marcada como ENTREGADA al cliente.`, { type: "success", title: vin });
       }
     }
 

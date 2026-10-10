@@ -5,7 +5,7 @@ import { EVENT_LABELS } from "./events.js";
 import * as auth from "./auth.js";
 import { notify, confirmDialog } from "./ui.js";
 import { decodeVin } from "./vin.js";
-import { stagesFor } from "./stages.js";
+import { stagesFor, isClosed } from "./stages.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
 import * as photos from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
@@ -55,13 +55,21 @@ export function initInventory(refreshCallback) {
   });
   const repBtn = document.getElementById("inv-report");
   if (repBtn) repBtn.addEventListener("click", exportInventoryCsv);
+  const showSold = document.getElementById("inv-show-sold");
+  if (showSold) showSold.addEventListener("change", renderInventory);
   renderInventory();
 }
 
 // Devuelve la lista de vehículos ya filtrada (búsqueda global + filtros por columna).
+// Por defecto EXCLUYE las unidades cerradas (vendidas/entregadas y fuera): ya no son
+// existencia. Se incluyen solo si el usuario activa "Incluir vendidas/entregadas".
 function filteredVehicles() {
   const q = (document.getElementById("inv-search")?.value || "").toLowerCase().trim();
+  const showSold = !!document.getElementById("inv-show-sold")?.checked;
   let list = store.listVehicles();
+
+  // Excluir unidades cerradas del inventario de existencias (salvo que se pidan).
+  if (!showSold) list = list.filter(v => !isClosed(v));
 
   if (q) {
     list = list.filter(v =>
@@ -145,8 +153,18 @@ export function renderInventory() {
     btn.addEventListener("click", () => openVehicle(btn.dataset.vin))
   );
 
+  // Contador: total de existencias (sin cerradas) y, si hay filtros, cuántas se muestran.
   const count = document.getElementById("inv-count");
-  if (count) count.textContent = `${list.length} unidad${list.length === 1 ? "" : "es"} mostrada${list.length === 1 ? "" : "s"}`;
+  if (count) {
+    const showSold = !!document.getElementById("inv-show-sold")?.checked;
+    const base = store.listVehicles().filter(v => showSold || !isClosed(v));
+    const total = base.length;
+    const q = (document.getElementById("inv-search")?.value || "").trim();
+    const hayFiltro = !!q || Object.values(colFilters).some(f => (f || "").trim());
+    count.textContent = hayFiltro
+      ? `Mostrando ${list.length} de ${total} registro${total === 1 ? "" : "s"}`
+      : `${total} registro${total === 1 ? "" : "s"}`;
+  }
 }
 
 // Exporta a CSV exactamente lo que está filtrado en pantalla (sin la columna de acciones).
@@ -196,7 +214,9 @@ export function openVehicle(vin) {
   }).join("");
 
   const incomplete = !v.model || !v.color;
-  const canEdit = auth.can("vehicle.edit");
+  const cerrada = isClosed(v); // Vendido/Entregado + fuera → ficha solo lectura.
+  // Una unidad cerrada NO es editable (salvo cambio de VIN de admin, que se mantiene).
+  const canEdit = auth.can("vehicle.edit") && !cerrada;
   const canEditVin = auth.can("vehicle.editVin");
   const dis = canEdit ? "" : "disabled";
 
@@ -214,8 +234,9 @@ export function openVehicle(vin) {
        </div>`;
 
   body.innerHTML = `
-    ${incomplete ? '<p class="hint" style="color:var(--danger)">⚠️ Ficha incompleta: faltan datos por completar.</p>' : ''}
-    ${!canEdit ? '<p class="hint">Tu rol permite ver esta ficha, pero no editarla.</p>' : ''}
+    ${cerrada ? `<p class="hint" style="color:var(--danger);font-weight:600">🔒 Unidad CERRADA (${escapeHtml(v.stage)}): entregada/vendida y fuera del inventario. Solo lectura. Un administrador puede reabrirla desde la pantalla de Escaneo.</p>` : ''}
+    ${incomplete && !cerrada ? '<p class="hint" style="color:var(--danger)">⚠️ Ficha incompleta: faltan datos por completar.</p>' : ''}
+    ${!canEdit && !cerrada ? '<p class="hint">Tu rol permite ver esta ficha, pero no editarla.</p>' : ''}
     <p class="ficha-meta">
       📅 Ingreso: <b>${v.entryAt ? new Date(v.entryAt).toLocaleString() : "—"}</b>
       &nbsp;·&nbsp; 👤 Registró: <b>${escapeHtml(v.entryBy || v.lastBy || "—")}</b>
@@ -332,6 +353,10 @@ export function openVehicle(vin) {
     const transmission = body.querySelector("#f-transmission").value.trim();
     // Autoaprendizaje: si escribieron un valor nuevo, se agrega al catálogo
     // para mantener la lista de autocompletar actualizada y la base consistente.
+    const makeV = body.querySelector("#f-make").value.trim();
+    const modelV = body.querySelector("#f-model").value.trim();
+    if (makeV) learnValue("make", makeV);
+    if (modelV) learnValue("model", modelV);
     if (color) learnValue("color", color);
     if (vehType) learnValue("vehType", vehType);
     if (powertrain) learnValue("powertrain", powertrain);
@@ -401,7 +426,7 @@ export function openVehicle(vin) {
   });
 
   // ---- Autocompletar propio (fiable en móvil) en los campos de catálogo ----
-  const acMap = { "f-color": "color", "f-vehType": "vehType", "f-powertrain": "powertrain", "f-transmission": "transmission" };
+  const acMap = { "f-make": "make", "f-model": "model", "f-color": "color", "f-vehType": "vehType", "f-powertrain": "powertrain", "f-transmission": "transmission" };
   for (const [id, cat] of Object.entries(acMap)) {
     const el = body.querySelector("#" + id);
     if (el && !el.disabled) attachAutocomplete(el, () => getCatalog(cat));

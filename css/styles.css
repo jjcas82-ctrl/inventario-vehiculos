@@ -318,3 +318,8 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 }
 .ac-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; }
 .ac-item:hover, .ac-item.is-active { background: #eef2ff; color: var(--primary); }
+
+
+/* Checkbox en línea (ej. "Incluir vendidas/entregadas") */
+.chk-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); cursor: pointer; }
+.chk-inline input { width: 16px; height: 16px; }
