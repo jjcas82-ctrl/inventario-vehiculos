@@ -297,6 +297,11 @@ function updateEventButtons(vin) {
   // el usuario no se equivoque de opción.
   prepararSalidaVendido(v, dentro);
 
+  // Botón "Marcar como Vendido": atajo para marcar la venta sin ir a la ficha.
+  // Visible solo si la unidad está DENTRO y aún NO está en etapa de venta.
+  const markSoldBtn = document.getElementById("ev-mark-sold");
+  if (markSoldBtn) markSoldBtn.style.display = (dentro && !isSoldStage(v?.stage)) ? "" : "none";
+
   // Info de estado actual
   const info = document.getElementById("ev-status-info");
   if (info) {
@@ -1026,6 +1031,22 @@ function setupEventButtons() {
       });
       if (choice !== "ok") { notify("Salida cancelada.", { type: "info" }); return; }
     }
+    // SALIDA de una unidad VENDIDA: se entregará al cliente y se DARÁ DE BAJA del
+    // inventario. Avisamos con claridad y opción de cancelar.
+    else if (type === "exit" && existing && isSoldStage(existing.stage)) {
+      const choice = await confirmDialog({
+        icon: "📤", title: "Dar de baja del inventario",
+        message: `Vas a registrar la ENTREGA al cliente de la unidad ${vin}.\n\n` +
+          `⚠️ Esta unidad se marcará como ENTREGADA y se DARÁ DE BAJA del inventario ` +
+          `(dejará de contar como existencia). Podrás consultarla en el reporte de ` +
+          `"Vendidas / Entregadas", pero ya no será editable.\n\n¿Deseas continuar?`,
+        buttons: [
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: "Sí, entregar y dar de baja", value: "ok", variant: "danger" },
+        ],
+      });
+      if (choice !== "ok") { notify("Entrega cancelada. La unidad sigue en inventario.", { type: "info" }); return; }
+    }
 
     // Validar/leer la persona responsable ANTES de continuar.
     const { person, ok: personOk } = readPerson(type);
@@ -1295,6 +1316,32 @@ function setupEventButtons() {
   document.getElementById("ev-move").addEventListener("click", () => doEvent("move"));
   document.getElementById("ev-exit").addEventListener("click", () => doEvent("exit"));
   document.getElementById("ev-new").addEventListener("click", nuevoRegistro);
+
+  // Atajo: marcar la unidad (dentro) como "Vendido" sin ir a la ficha.
+  const markSoldBtn = document.getElementById("ev-mark-sold");
+  if (markSoldBtn) markSoldBtn.addEventListener("click", async () => {
+    if (!currentDecode) return;
+    const vin = currentDecode.vin;
+    const v = store.getVehicle(vin);
+    if (!v || v.status !== "dentro") {
+      notify("Solo se puede marcar como Vendido una unidad que está dentro.", { type: "warn" });
+      return;
+    }
+    const choice = await confirmDialog({
+      icon: "🏷️", title: "Marcar como Vendido",
+      message: `¿Marcar la unidad ${vin} como VENDIDA?\n\nAl registrar su salida se entregará al cliente y se dará de baja del inventario.`,
+      buttons: [
+        { label: "Cancelar", value: null, variant: "ghost" },
+        { label: "Sí, marcar Vendido", value: "ok", variant: "primary" },
+      ],
+    });
+    if (choice !== "ok") return;
+    const quien = auth.currentUser()?.name || "—";
+    store.setStage(vin, "Vendido", quien);
+    notify(`Unidad marcada como VENDIDA. Registra su salida para entregarla al cliente.`, { type: "success", title: vin });
+    refreshAll();
+    updateEventButtons(vin);
+  });
 }
 
 // Limpia la pantalla para escanear/registrar otra unidad desde cero.
