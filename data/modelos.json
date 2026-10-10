@@ -1,0 +1,6 @@
+{
+  "_comment": "Catalogo OFFLINE de modelos por marca (mercado MX). Formato: { \"Marca\": [\"Modelo1\", \"Modelo2\", ...] }. Se genera desde los CSV (brand.csv + modelos.csv). Carga diferida: la app solo lo descarga al entrar a captura, nunca al arrancar. Las claves con guion bajo (_) se ignoran.",
+  "_ejemplo": ["BORRAR estas claves _ al generar el real"],
+  "Chevrolet": ["Aveo", "Onix", "Spark", "Beat", "Captiva", "Tracker", "Groove"],
+  "Nissan": ["Versa", "Sentra", "March", "Kicks", "X-Trail", "Frontier"]
+}
