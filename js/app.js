@@ -9,6 +9,7 @@ import { registerEvent } from "./events.js";
 import { addPhoto } from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
 import { attachAutocomplete } from "./autocomplete.js";
+import { attachModelAutocomplete } from "./models.js";
 import { isSoldStage, isClosed } from "./stages.js";
 import { logAction } from "./syslog.js";
 import { initAgencies, escapeHtml } from "./agencies.js";
@@ -465,13 +466,20 @@ let _unitAutocompleteReady = false;
 function poblarDatalistsUnidad() {
   if (_unitAutocompleteReady) return;
   const map = {
-    "u-make": "make", "u-model": "model",
+    "u-make": "make",
     "u-color": "color", "u-vehType": "vehType",
     "u-powertrain": "powertrain", "u-transmission": "transmission",
   };
   for (const [inputId, cat] of Object.entries(map)) {
     const el = document.getElementById(inputId);
     if (el) attachAutocomplete(el, () => getCatalog(cat));
+  }
+  // El campo Modelo usa autocompletar por marca (local offline + NHTSA en vivo),
+  // fusionado con los modelos aprendidos en el catálogo. Degrada a texto libre.
+  const modelEl = document.getElementById("u-model");
+  const makeEl = document.getElementById("u-make");
+  if (modelEl && makeEl) {
+    attachModelAutocomplete(modelEl, () => makeEl.value, () => getCatalog("model"));
   }
   _unitAutocompleteReady = true;
 }

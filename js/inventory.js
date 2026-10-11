@@ -13,6 +13,7 @@ import * as photos from "./photos.js";
 import { getCatalog, learnValue } from "./catalog.js";
 import { agingLevel } from "./alerts.js";
 import { attachAutocomplete } from "./autocomplete.js";
+import { attachModelAutocomplete } from "./models.js";
 
 let onChange = () => {};
 
@@ -438,10 +439,16 @@ export function openVehicle(vin) {
   });
 
   // ---- Autocompletar propio (fiable en móvil) en los campos de catálogo ----
-  const acMap = { "f-make": "make", "f-model": "model", "f-color": "color", "f-vehType": "vehType", "f-powertrain": "powertrain", "f-transmission": "transmission" };
+  const acMap = { "f-make": "make", "f-color": "color", "f-vehType": "vehType", "f-powertrain": "powertrain", "f-transmission": "transmission" };
   for (const [id, cat] of Object.entries(acMap)) {
     const el = body.querySelector("#" + id);
     if (el && !el.disabled) attachAutocomplete(el, () => getCatalog(cat));
+  }
+  // Campo Modelo: autocompletar por marca (local offline + NHTSA) + aprendidos.
+  const fModel = body.querySelector("#f-model");
+  const fMake = body.querySelector("#f-make");
+  if (fModel && !fModel.disabled && fMake) {
+    attachModelAutocomplete(fModel, () => fMake.value, () => getCatalog("model"));
   }
 
   // ---- Fotos / Estado de la unidad (IndexedDB) ----
