@@ -455,6 +455,43 @@
                 style="background:#fee2e2;color:#991b1b;font-weight:700">🔒 Inventario congelado</span>
         </div>
 
+        <!-- ===== AGENDA · auditorías programadas ===== -->
+        <details id="audit-agenda" class="audit-agenda" open>
+          <summary>📅 Auditorías programadas</summary>
+          <div id="audit-sched-list"></div>
+          <div class="filters" style="margin-top:10px">
+            <div class="field">
+              <label for="sched-agency">Agencia</label>
+              <select id="sched-agency"></select>
+            </div>
+            <div class="field">
+              <label for="sched-mode">Tipo</label>
+              <select id="sched-mode">
+                <option value="full">Total</option>
+                <option value="random">Rotativo</option>
+              </select>
+            </div>
+            <div class="field" id="sched-count-field" style="display:none">
+              <label for="sched-count">Cantidad</label>
+              <input id="sched-count" type="number" min="1" value="10" />
+            </div>
+            <div class="field">
+              <label for="sched-date">Fecha programada</label>
+              <input id="sched-date" type="date" />
+            </div>
+            <div class="field">
+              <label for="sched-notify">Avisar (días antes)</label>
+              <input id="sched-notify" type="number" min="0" max="60" value="3" />
+            </div>
+            <div class="field" style="flex:2;min-width:180px">
+              <label for="sched-note">Nota (opcional)</label>
+              <input id="sched-note" type="text" maxlength="120" placeholder="Ej. corte mensual" />
+            </div>
+          </div>
+          <button id="sched-add" class="btn btn-primary">➕ Programar auditoría</button>
+        </details>
+        <hr />
+
         <!-- Barra de etapas -->
         <ol id="audit-steps" class="audit-steps">
           <li data-step="1"><span class="n">1</span> Inicio</li>

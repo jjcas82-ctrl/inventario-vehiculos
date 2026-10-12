@@ -119,6 +119,7 @@ function seed() {
     users: [],   // el admin inicial (jcabrera) lo crea auth.ensureSeedAdmin()
     audits: [],
     openAudits: {},  // auditorías en curso por agencia (congelar/retomar)
+    scheduledAudits: [], // agenda de auditorías programadas
   };
 }
 
@@ -155,6 +156,7 @@ function read() {
   if (!Array.isArray(_cache.users)) _cache.users = [];
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
   if (!_cache.openAudits || typeof _cache.openAudits !== "object") _cache.openAudits = {};
+  if (!Array.isArray(_cache.scheduledAudits)) _cache.scheduledAudits = [];
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
   // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
@@ -391,6 +393,33 @@ export const store = {
   isAgencyFrozen(agency) {
     const o = store.getOpenAudit(agency);
     return !!(o && o.frozen);
+  },
+
+  // ---- Auditorías PROGRAMADAS (agenda) ----
+  // Estructura: { id, agency, mode, count, date (YYYY-MM-DD), notifyDays, note,
+  //   by, createdAt, notified (bool), done (bool) }
+  listScheduledAudits() {
+    const db = read();
+    return (db.scheduledAudits || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  },
+  addScheduledAudit(data) {
+    const db = read();
+    db.scheduledAudits = db.scheduledAudits || [];
+    const rec = { id: cryptoId(), createdAt: new Date().toISOString(), notified: false, done: false, ...data };
+    db.scheduledAudits.push(rec);
+    write(db);
+    return rec;
+  },
+  updateScheduledAudit(id, patch) {
+    const db = read();
+    const s = (db.scheduledAudits || []).find(x => x.id === id);
+    if (s) { Object.assign(s, patch); write(db); }
+    return s;
+  },
+  removeScheduledAudit(id) {
+    const db = read();
+    db.scheduledAudits = (db.scheduledAudits || []).filter(x => x.id !== id);
+    write(db);
   },
 
   // ---- Respaldo ----

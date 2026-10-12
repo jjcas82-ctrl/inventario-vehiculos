@@ -361,3 +361,9 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 .audit-difflist li { margin: 4px 0; }
 
 .btn-sm { padding: 2px 10px; font-size: 12px; margin-left: 8px; }
+
+
+/* Agenda de auditorías programadas */
+.audit-agenda { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: #f8fafc; margin-bottom: 4px; }
+.audit-agenda > summary { cursor: pointer; font-weight: 700; color: var(--primary); font-size: 14px; }
+.audit-agenda > summary::-webkit-details-marker { color: var(--primary); }

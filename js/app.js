@@ -27,6 +27,7 @@ import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
 import { getPosition } from "./events.js";
 import { nearestAgency } from "./geo.js";
 import "./audit.js";
+import { checkAuditReminders } from "./audit.js";
 
 let currentDecode = null;   // resultado del último VIN decodificado
 let scanner = null;
@@ -128,6 +129,8 @@ async function submitLoginScreen(e) {
   notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
   resetInactivityTimer();              // arranca el control de inactividad
   if (auth.mustChangePassword()) await forzarCambioPassword();
+  // Avisa de auditorías programadas próximas o vencidas (a todos los usuarios).
+  try { checkAuditReminders(); } catch (e) {}
 }
 
 // Diálogo OBLIGATORIO de cambio de contraseña (p. ej. admin inicial 1234). No se

@@ -71,6 +71,7 @@ export function initAudit() {
     if (e.key === "Enter") { e.preventDefault(); document.getElementById("audit-manual-btn").click(); }
   });
 
+  setupAgenda();
   setupAuditScanner();
   renderHistory();
   updateScope();
@@ -82,6 +83,115 @@ export function initAudit() {
   } else {
     gotoStage(1);
   }
+}
+
+// --- Agenda de auditorías programadas ---
+function setupAgenda() {
+  const canSchedule = auth.can("audit.schedule");
+  const agenda = document.getElementById("audit-agenda");
+  if (agenda) agenda.hidden = false;
+
+  const schAg = document.getElementById("sched-agency");
+  if (schAg) {
+    schAg.innerHTML = store.listAgencies()
+      .map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join("");
+  }
+  const schMode = document.getElementById("sched-mode");
+  const schCountField = document.getElementById("sched-count-field");
+  if (schMode) {
+    schMode.onchange = () => { schCountField.style.display = schMode.value === "random" ? "" : "none"; };
+  }
+  // Fecha por defecto: hoy (en zona local).
+  const schDate = document.getElementById("sched-date");
+  if (schDate && !schDate.value) schDate.value = new Date().toISOString().slice(0, 10);
+
+  const addBtn = document.getElementById("sched-add");
+  if (addBtn) {
+    // Solo admin/auditor pueden programar; si no, se oculta el formulario de alta.
+    const form = addBtn.previousElementSibling; // .filters
+    addBtn.style.display = canSchedule ? "" : "none";
+    if (form && form.classList.contains("filters")) form.style.display = canSchedule ? "" : "none";
+    addBtn.onclick = addScheduled;
+  }
+  renderScheduled();
+}
+
+function addScheduled() {
+  const agency = document.getElementById("sched-agency").value;
+  const mode = document.getElementById("sched-mode").value;
+  const count = parseInt(document.getElementById("sched-count").value, 10) || 10;
+  const date = document.getElementById("sched-date").value;
+  const notifyDays = Math.max(0, parseInt(document.getElementById("sched-notify").value, 10) || 0);
+  const note = document.getElementById("sched-note").value.trim();
+  if (!date) { notify("Elige una fecha para la auditoría.", { type: "warn" }); return; }
+
+  store.addScheduledAudit({
+    agency, mode, count: mode === "random" ? count : null,
+    date, notifyDays, note,
+    by: auth.currentUser()?.name || "—",
+  });
+  document.getElementById("sched-note").value = "";
+  renderScheduled();
+  notify(`Auditoría programada para ${formatDate(date)} en ${agency}.`, { type: "success" });
+}
+
+function renderScheduled() {
+  const wrap = document.getElementById("audit-sched-list");
+  if (!wrap) return;
+  const list = store.listScheduledAudits().filter(s => !s.done);
+  if (!list.length) {
+    wrap.innerHTML = '<p class="muted">No hay auditorías programadas.</p>';
+    return;
+  }
+  const canSchedule = auth.can("audit.schedule");
+  wrap.innerHTML = list.map(s => {
+    const dLeft = daysUntil(s.date);
+    const estado = dLeft < 0 ? `<span class="tag tag-out">Vencida (${-dLeft} d)</span>`
+      : dLeft === 0 ? '<span class="tag" style="background:#fef3c7;color:#92400e">¡Hoy!</span>'
+      : `<span class="tag tag-in">En ${dLeft} día${dLeft === 1 ? "" : "s"}</span>`;
+    return `<div class="agency">
+      <div class="agency-head">
+        <b>${escapeHtml(s.agency)} · ${s.mode === "full" ? "Total" : "Rotativo"}</b>
+        ${estado}
+      </div>
+      <p class="hint">📅 ${formatDate(s.date)} · aviso ${s.notifyDays} día(s) antes · programó ${escapeHtml(s.by || "—")}${s.note ? " · " + escapeHtml(s.note) : ""}</p>
+      <div class="row gap wrap">
+        <button class="btn btn-sm sched-start" data-id="${s.id}">▶️ Iniciar ahora</button>
+        ${canSchedule ? `<button class="btn btn-sm btn-ghost sched-del" data-id="${s.id}">Eliminar</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+
+  wrap.querySelectorAll(".sched-start").forEach(btn =>
+    btn.addEventListener("click", () => startFromSchedule(btn.dataset.id)));
+  wrap.querySelectorAll(".sched-del").forEach(btn =>
+    btn.addEventListener("click", async () => {
+      const choice = await confirmDialog({
+        icon: "🗓️", title: "Eliminar programación",
+        message: "¿Eliminar esta auditoría programada?",
+        buttons: [
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: "Eliminar", value: "del", variant: "danger" },
+        ],
+      });
+      if (choice === "del") { store.removeScheduledAudit(btn.dataset.id); renderScheduled(); }
+    }));
+}
+
+// Inicia una auditoría tomando los datos de una programación (precarga etapa 1).
+function startFromSchedule(id) {
+  const s = store.listScheduledAudits().find(x => x.id === id);
+  if (!s) return;
+  document.getElementById("audit-agency").value = s.agency;
+  document.getElementById("audit-mode").value = s.mode;
+  document.getElementById("audit-count-field").style.display = s.mode === "random" ? "" : "none";
+  if (s.mode === "random" && s.count) document.getElementById("audit-count").value = s.count;
+  // Marca la programación como realizada (para que no siga avisando).
+  store.updateScheduledAudit(id, { done: true });
+  renderScheduled();
+  gotoStage(1);
+  document.getElementById("audit-agency").dispatchEvent(new Event("change"));
+  notify(`Auditoría de ${s.agency} lista para iniciar. Revisa las opciones y pulsa "Iniciar auditoría".`, { type: "info", timeout: 6000 });
 }
 
 // --- Helpers de datos ---
@@ -520,6 +630,20 @@ function shuffle(arr) {
   }
   return arr;
 }
+// Días (enteros) desde HOY hasta la fecha YYYY-MM-DD (negativo si ya pasó).
+function daysUntil(dateStr) {
+  if (!dateStr) return 0;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const target = new Date(y, (m || 1) - 1, d || 1); target.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+function formatDate(dateStr) {
+  if (!dateStr) return "—";
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString("es-MX",
+    { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+}
 function csvCell(s) {
   const str = String(s ?? "");
   return /[",\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
@@ -535,6 +659,51 @@ function downloadText(filename, text, mime) {
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+}
+
+// --- Avisos de auditorías próximas (nivel A: in-app; nivel B: navegador) ---
+// Se llama al iniciar sesión. Muestra un aviso por cada auditoría programada que
+// esté dentro de su ventana de aviso (date - notifyDays <= hoy) o ya vencida.
+// La notificación del navegador solo se envía si el usuario concede permiso.
+export function checkAuditReminders() {
+  const pendientes = store.listScheduledAudits().filter(s => {
+    if (s.done) return false;
+    const dLeft = daysUntil(s.date);
+    return dLeft <= (s.notifyDays ?? 3); // dentro de la ventana de aviso o vencida
+  });
+  if (!pendientes.length) return;
+
+  // Aviso in-app (siempre).
+  pendientes.forEach(s => {
+    const dLeft = daysUntil(s.date);
+    const cuando = dLeft < 0 ? `vencida hace ${-dLeft} día(s)`
+      : dLeft === 0 ? "programada para HOY" : `en ${dLeft} día(s)`;
+    notify(`🔔 Auditoría ${cuando}: ${s.agency} (${formatDate(s.date)}).`,
+      { type: dLeft <= 0 ? "warn" : "info", title: "Auditoría programada", timeout: 9000 });
+  });
+
+  // Aviso del navegador (nivel B), si hay permiso o se puede pedir.
+  maybeBrowserNotify(pendientes);
+}
+
+function maybeBrowserNotify(pendientes) {
+  if (!("Notification" in window)) return;
+  const send = () => {
+    pendientes.forEach(s => {
+      const dLeft = daysUntil(s.date);
+      const cuando = dLeft < 0 ? "vencida" : dLeft === 0 ? "hoy" : `en ${dLeft} día(s)`;
+      try {
+        new Notification("Auditoría programada", {
+          body: `${s.agency} · ${s.mode === "full" ? "Total" : "Rotativo"} · ${cuando} (${formatDate(s.date)})`,
+          icon: "icons/icon-192.png",
+        });
+      } catch (e) { /* algunos navegadores exigen SW para notificar: ignorar */ }
+    });
+  };
+  if (Notification.permission === "granted") send();
+  else if (Notification.permission !== "denied") {
+    Notification.requestPermission().then(p => { if (p === "granted") send(); });
+  }
 }
 
 // Expuesto para que app.js lo llame al abrir la pestaña.
