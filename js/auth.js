@@ -28,10 +28,10 @@ const PERMISSIONS = {
   consultor:  ["inventory.view", "reports.view", "map.view"],
   capturista: ["event.register", "inventory.view", "reports.view", "map.view", "vehicle.edit"],
   // El auditor SOLO ve/usa la pestaña Auditoría (sin registrar eventos ni ver inventario).
-  auditor:    ["audit.run"],
+  auditor:    ["audit.run", "audit.schedule"],
   admin:      ["event.register", "inventory.view", "reports.view", "map.view", "vehicle.edit",
                "vehicle.editVin", "agencies.manage", "users.manage", "data.wipe", "audit.run",
-               "audit.override"],
+               "audit.override", "audit.schedule"],
 };
 
 let _session = null; // { id, username, name, role }
