@@ -48,12 +48,12 @@ const HYP_AREAS = [
 // Sitios que se precargan con sus direcciones y coordenadas reales.
 const SEED_SITES = [
   {
-    name: "Agencia Aeropuerto",
+    name: "Aeroplasa Aeropuerto",
     address: "Blvd. Puerto Aéreo 141, Col. Federal, Venustiano Carranza, 15700 Ciudad de México, CDMX",
     lat: 19.425222, lng: -99.093219, radius: 200, areas: DEFAULT_AREAS,
   },
   {
-    name: "Agencia Aeroplasa Auto",
+    name: "Aeroplasa Auto",
     address: "Carretera Federal México-Tuxpan Km 190 S/N, Col. El Potro, C.P. 73176, Huauchinango, Puebla",
     lat: 20.173122, lng: -98.070828, radius: 200, areas: AEROPLASA_AUTO_AREAS,
   },
@@ -118,6 +118,7 @@ function seed() {
     })),
     users: [],   // el admin inicial (jcabrera) lo crea auth.ensureSeedAdmin()
     audits: [],
+    openAudits: {},  // auditorías en curso por agencia (congelar/retomar)
   };
 }
 
@@ -153,6 +154,7 @@ function read() {
   _cache.agencies = (_cache.agencies || seed().agencies).map(migrateAgency);
   if (!Array.isArray(_cache.users)) _cache.users = [];
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
+  if (!_cache.openAudits || typeof _cache.openAudits !== "object") _cache.openAudits = {};
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
   // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
@@ -160,10 +162,13 @@ function read() {
   SEED_SITES.forEach(site => {
     let a = _cache.agencies.find(x => x.name.toLowerCase() === site.name.toLowerCase());
     // Caso especial: instalaciones antiguas donde la agencia se llamaba distinto.
-    if (!a && site.name === "Agencia Aeroplasa Auto") {
-      a = _cache.agencies.find(x => /^agencia aeroplasa auto$/i.test(x.name) || /^aeroplasa auto$/i.test(x.name));
+    // "Agencia Aeroplasa Auto" / "Aeroplasa Auto" -> ahora "Aeroplasa Auto".
+    if (!a && site.name === "Aeroplasa Auto") {
+      a = _cache.agencies.find(x => /^(agencia\s+)?aeroplasa auto$/i.test(x.name));
     }
-    if (!a && site.name === "Agencia Aeropuerto") {
+    // "Agencia Aeropuerto" / "Aeroplasa Aeropuerto" -> ahora "Aeroplasa Aeropuerto".
+    // Nota: NO debe capturar "Aeroplasa Auto"; por eso exige la palabra "aeropuerto".
+    if (!a && site.name === "Aeroplasa Aeropuerto") {
       a = _cache.agencies.find(x => /aeropuerto/i.test(x.name));
     }
     if (!a) {
@@ -173,13 +178,22 @@ function read() {
         lat: site.lat, lng: site.lng, radius: site.radius, areas: cloneAreas(site.areas),
       });
     } else {
+      const oldName = a.name;
       a.name = site.name;
+      // Si la agencia se renombró, propagar el nuevo nombre a los vehículos y
+      // eventos que apuntaban al nombre viejo (para no dejar registros huérfanos).
+      if (oldName && oldName !== site.name) {
+        Object.values(_cache.vehicles).forEach(v => {
+          if (v.currentAgency === oldName) v.currentAgency = site.name;
+        });
+        _cache.events.forEach(e => { if (e.agency === oldName) e.agency = site.name; });
+      }
       if (!a.address && site.address) a.address = site.address;
       if ((a.lat == null || a.lng == null) && site.lat != null) { a.lat = site.lat; a.lng = site.lng; }
       if (!a.radius) a.radius = site.radius;
       // Actualizar la estructura interna de Aeroplasa Auto a la versión vigente
       // si todavía tiene áreas antiguas ("Bodega"/"Puntos de venta" como área interna).
-      if (site.name === "Agencia Aeroplasa Auto" && a.areas &&
+      if (site.name === "Aeroplasa Auto" && a.areas &&
           a.areas.some(ar => ["Bodega", "Puntos de venta", "Sala de Exhibición", "Área de Entrega"].includes(ar.name))) {
         a.areas = cloneAreas(AEROPLASA_AUTO_AREAS);
       }
@@ -345,6 +359,38 @@ export const store = {
     const a = db.audits.find(x => x.id === id);
     if (a) { Object.assign(a, patch); write(db); }
     return a;
+  },
+
+  // ---- Auditoría EN CURSO (sesión persistente + congelar inventario) ----
+  // Estructura: db.openAudits = { [agency]: { agency, mode, frozen, by, startedAt,
+  //   stage, expected:[vin], seen:{vin:status}, count } }
+  // Persistir permite retomar el conteo si el auditor recarga o cierra la app.
+  listOpenAudits() {
+    const db = read();
+    return Object.values(db.openAudits || {});
+  },
+  getOpenAudit(agency) {
+    const db = read();
+    return (db.openAudits || {})[agency] || null;
+  },
+  saveOpenAudit(agency, data) {
+    const db = read();
+    db.openAudits = db.openAudits || {};
+    db.openAudits[agency] = { ...(db.openAudits[agency] || {}), ...data, agency };
+    write(db);
+    return db.openAudits[agency];
+  },
+  clearOpenAudit(agency) {
+    const db = read();
+    if (db.openAudits && db.openAudits[agency]) {
+      delete db.openAudits[agency];
+      write(db);
+    }
+  },
+  // ¿Está congelado el inventario de una agencia? (auditoría abierta con frozen=true)
+  isAgencyFrozen(agency) {
+    const o = store.getOpenAudit(agency);
+    return !!(o && o.frozen);
   },
 
   // ---- Respaldo ----

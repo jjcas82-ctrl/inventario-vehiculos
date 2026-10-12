@@ -446,20 +446,34 @@
       </div>
     </section>
 
-    <!-- ================= AUDITORÍA / CONTEO FÍSICO ================= -->
+    <!-- ================= AUDITORÍA / CONTEO FÍSICO (asistente 5 etapas) ========= -->
     <section id="tab-audit" class="tab-panel" role="tabpanel">
       <div class="card">
-        <h2>Conteo físico / Auditoría</h2>
-        <p class="hint">Escanea las unidades físicamente presentes y el sistema las compara contra el inventario para detectar faltantes y sobrantes.</p>
+        <div class="row gap wrap" style="justify-content:space-between;align-items:center">
+          <h2 style="margin:0">Auditoría de inventario</h2>
+          <span id="audit-frozen-badge" class="tag" hidden
+                style="background:#fee2e2;color:#991b1b;font-weight:700">🔒 Inventario congelado</span>
+        </div>
 
-        <div id="audit-setup">
+        <!-- Barra de etapas -->
+        <ol id="audit-steps" class="audit-steps">
+          <li data-step="1"><span class="n">1</span> Inicio</li>
+          <li data-step="2"><span class="n">2</span> Lista</li>
+          <li data-step="3"><span class="n">3</span> Conteo</li>
+          <li data-step="4"><span class="n">4</span> Diferencias</li>
+          <li data-step="5"><span class="n">5</span> Corrección</li>
+        </ol>
+
+        <!-- ===== ETAPA 1 · INICIO ===== -->
+        <div class="audit-stage" data-stage="1">
+          <p class="hint">Selecciona la agencia y el tipo de inventario. Puedes congelar el inventario para que no entren ni salgan unidades durante el conteo.</p>
           <div class="filters">
             <div class="field">
               <label for="audit-agency">Agencia a auditar</label>
               <select id="audit-agency"></select>
             </div>
             <div class="field">
-              <label for="audit-mode">Tipo de conteo</label>
+              <label for="audit-mode">Tipo de inventario</label>
               <select id="audit-mode">
                 <option value="full">Total (todo el inventario de la agencia)</option>
                 <option value="random">Rotativo (muestra aleatoria)</option>
@@ -470,13 +484,37 @@
               <input id="audit-count" type="number" min="1" value="10" />
             </div>
           </div>
+          <label class="check-row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
+            <input type="checkbox" id="audit-freeze" />
+            <span>🔒 Congelar inventario durante el conteo (bloquea entradas y salidas en esta agencia)</span>
+          </label>
           <p id="audit-scope" class="hint"></p>
-          <button id="audit-start" class="btn btn-primary">Iniciar conteo</button>
+          <button id="audit-start" class="btn btn-primary">Iniciar auditoría →</button>
+          <p id="audit-resume-note" class="hint" hidden style="color:var(--primary)"></p>
         </div>
 
-        <div id="audit-run" hidden>
+        <!-- ===== ETAPA 2 · PREPARAR LISTA ===== -->
+        <div class="audit-stage" data-stage="2" hidden>
+          <p class="hint">Estas son las unidades esperadas. Puedes imprimir la lista con casillas para palomear durante el recorrido.</p>
+          <div id="audit-list-summary" class="summary"></div>
+          <div class="table-wrap" style="max-height:340px;overflow:auto">
+            <table class="table" id="audit-list-table">
+              <thead><tr><th>#</th><th>VIN</th><th>Marca</th><th>Modelo</th><th>Ubicación</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="row gap wrap" style="margin-top:10px">
+            <button id="audit-print-list" class="btn">🖨️ Imprimir lista de conteo</button>
+            <button id="audit-to-count" class="btn btn-primary">Comenzar conteo físico →</button>
+            <button id="audit-back-1" class="btn btn-ghost">← Volver</button>
+          </div>
+        </div>
+
+        <!-- ===== ETAPA 3 · CONTEO FÍSICO ===== -->
+        <div class="audit-stage" data-stage="3" hidden>
           <div class="summary" id="audit-progress"></div>
-          <div class="row gap wrap">
+          <div class="audit-progressbar"><span id="audit-progress-fill"></span></div>
+          <div class="row gap wrap" style="margin-top:8px">
             <button id="audit-scan" class="btn btn-primary">📷 Escanear unidad</button>
             <button id="audit-scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
           </div>
@@ -492,15 +530,36 @@
             </div>
           </div>
           <p id="audit-status" class="hint"></p>
-          <div class="table-wrap">
+          <div class="table-wrap" style="max-height:300px;overflow:auto">
             <table class="table" id="audit-table">
               <thead><tr><th>VIN</th><th>Marca</th><th>Ubicación esperada</th><th>Resultado</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
-          <div class="row gap wrap">
-            <button id="audit-finish" class="btn btn-primary">Finalizar y guardar resultado</button>
-            <button id="audit-cancel" class="btn btn-ghost">Cancelar</button>
+          <div class="row gap wrap" style="margin-top:10px">
+            <button id="audit-finish" class="btn btn-primary">Terminar conteo →</button>
+            <button id="audit-cancel" class="btn btn-ghost">Cancelar auditoría</button>
+          </div>
+        </div>
+
+        <!-- ===== ETAPA 4 · REPORTE DE DIFERENCIAS ===== -->
+        <div class="audit-stage" data-stage="4" hidden>
+          <div class="summary" id="audit-diff-summary"></div>
+          <div id="audit-diff-lists"></div>
+          <div class="row gap wrap" style="margin-top:10px">
+            <button id="audit-report-pdf" class="btn">🖨️ Reporte PDF</button>
+            <button id="audit-report-csv" class="btn">📄 Exportar CSV</button>
+            <button id="audit-to-fix" class="btn btn-primary">Revisar y corregir →</button>
+          </div>
+        </div>
+
+        <!-- ===== ETAPA 5 · CORRECCIÓN DE UBICACIONES ===== -->
+        <div class="audit-stage" data-stage="5" hidden>
+          <p class="hint">Antes de cerrar, corrige las diferencias: reasigna los sobrantes a esta agencia o marca los faltantes para investigación.</p>
+          <div id="audit-fix-lists"></div>
+          <div class="row gap wrap" style="margin-top:10px">
+            <button id="audit-close" class="btn btn-primary">✓ Cerrar auditoría</button>
+            <button id="audit-back-4" class="btn btn-ghost">← Volver a diferencias</button>
           </div>
         </div>
       </div>

@@ -1325,9 +1325,48 @@ function setupEventButtons() {
       notify("Tu rol no permite registrar eventos.", { type: "warn" });
       return;
     }
+
     const by = auth.currentUser()?.name || store.getUser() || "—";
+
+    // ---- Bloqueo por auditoría en curso (inventario congelado) ----
+    // Solo bloquea ENTRADAS y SALIDAS (cambian el total del patio). Los
+    // movimientos internos no se bloquean. Un admin puede saltar el bloqueo
+    // (p. ej. entrega/ingreso de seminuevo o unidades nuevas en madrina),
+    // y el evento queda marcado con una observación.
+    let overrideNote = null;
+    if ((type === "entry" || type === "exit") && store.isAgencyFrozen(agency)) {
+      const o = store.getOpenAudit(agency);
+      const quien = o?.by || "—";
+      const desde = o?.startedAt ? new Date(o.startedAt).toLocaleString() : "";
+      if (!auth.can("audit.override")) {
+        notify(
+          `🔒 Inventario congelado: hay una auditoría en curso en ${agency}` +
+          (quien !== "—" ? ` (abierta por ${quien}${desde ? " · " + desde : ""})` : "") +
+          `. No se pueden registrar entradas ni salidas hasta cerrarla.`,
+          { type: "error", title: "Inventario congelado", timeout: 8000 }
+        );
+        return;
+      }
+      // Admin: puede saltar el bloqueo, con confirmación.
+      const choice = await confirmDialog({
+        icon: "🔒",
+        title: "Inventario congelado",
+        message: `Hay una auditoría en curso en ${agency}` +
+          (quien !== "—" ? ` (abierta por ${quien}).` : ".") +
+          `\n\nComo administrador puedes registrar esta ${type === "entry" ? "entrada" : "salida"} de todos modos ` +
+          `(p. ej. entrega/ingreso de seminuevo o unidades nuevas en madrina). ` +
+          `Quedará una observación en el evento.\n\n¿Continuar?`,
+        buttons: [
+          { label: "Cancelar", value: null, variant: "ghost" },
+          { label: "Registrar de todos modos", value: "ok", variant: "danger" },
+        ],
+      });
+      if (choice !== "ok") return;
+      overrideNote = `Registrado durante auditoría congelada (override de ${by}) el ${new Date().toLocaleString()}`;
+    }
+
     const esNueva = !existing;
-    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person }, onGps);
+    await registerEvent({ vin, type, agency, area, location, condition, by, presetPos, sinGps, person, overrideNote }, onGps);
     const labels = { entry: "Entrada", move: "Movimiento", exit: "Salida" };
 
     // Bitácora: registrar el evento (y el alta si la unidad era nueva).
