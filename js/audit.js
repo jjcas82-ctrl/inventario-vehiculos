@@ -1,26 +1,31 @@
-// audit.js — Conteo físico / auditoría de inventario.
+// audit.js — Auditoría / conteo físico como ASISTENTE DE 5 ETAPAS.
 //
-// Flujo:
-//   1) El usuario elige agencia y tipo de conteo:
-//        - "full": todas las unidades que figuran DENTRO de esa agencia.
-//        - "random": una muestra aleatoria de N unidades (rotativo).
-//   2) Escanea (o captura) cada unidad presente físicamente.
-//   3) El sistema marca: PRESENTE, FALTANTE (esperada no vista) y SOBRANTE
-//      (vista pero no esperada / de otra agencia / no registrada).
-//   4) Se guarda el resultado con fecha y usuario.
+//   Etapa 1 · Inicio          → elegir agencia, tipo (total/rotativo) y congelar.
+//   Etapa 2 · Lista           → ver/imprimir las unidades esperadas (con casillas).
+//   Etapa 3 · Conteo físico   → escanear/capturar; contador en vivo + progreso.
+//   Etapa 4 · Diferencias     → presentes/faltantes/sobrantes; reporte PDF/CSV.
+//   Etapa 5 · Corrección      → reasignar sobrantes / marcar faltantes; cerrar.
+//
+// El progreso se PERSISTE en store.openAudits para poder retomar tras recargar.
+// "Congelar" marca la agencia como bloqueada: app.js impide entradas/salidas
+// mientras la auditoría siga abierta (salvo override de admin).
 
 import { store } from "./storage.js";
 import { Scanner } from "./scanner.js";
 import { normalizeVin } from "./vin.js";
 import { escapeHtml } from "./agencies.js";
 import { notify, confirmDialog } from "./ui.js";
+import { printReport, printCountList } from "./pdf.js";
 import * as auth from "./auth.js";
 
-let session = null;   // { agency, mode, expected:Set, seen:Map(vin->status), extras:Set }
+let session = null;   // sesión viva en memoria (ver buildSession)
 let scanner = null;
+let currentStage = 1;
 
 export function initAudit() {
-  // Poblar agencias
+  // Si hay una auditoría abierta persistida, ofrecemos retomarla.
+  const open = store.listOpenAudits();
+
   const agSel = document.getElementById("audit-agency");
   agSel.innerHTML = store.listAgencies()
     .map(a => `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join("");
@@ -30,7 +35,7 @@ export function initAudit() {
   const updateScope = () => {
     countField.style.display = modeSel.value === "random" ? "" : "none";
     const agency = agSel.value;
-    const dentro = store.listVehicles().filter(v => v.status === "dentro" && v.currentAgency === agency);
+    const dentro = unitsInAgency(agency);
     const scope = document.getElementById("audit-scope");
     if (modeSel.value === "full") {
       scope.textContent = `Se auditarán las ${dentro.length} unidades que figuran DENTRO de ${agency}.`;
@@ -38,15 +43,26 @@ export function initAudit() {
       const n = Math.min(parseInt(document.getElementById("audit-count").value, 10) || 0, dentro.length);
       scope.textContent = `Se elegirán ${n} unidades al azar de las ${dentro.length} que figuran DENTRO de ${agency}.`;
     }
+    showResumeNote(agency);
   };
   agSel.onchange = updateScope;
   modeSel.onchange = updateScope;
   document.getElementById("audit-count").oninput = updateScope;
-  updateScope();
 
+  // --- Botones de navegación entre etapas ---
   document.getElementById("audit-start").onclick = startAudit;
+  document.getElementById("audit-back-1").onclick = () => gotoStage(1);
+  document.getElementById("audit-print-list").onclick = printList;
+  document.getElementById("audit-to-count").onclick = () => gotoStage(3);
+  document.getElementById("audit-finish").onclick = () => { stopScanner(); computeAndRenderDiff(); gotoStage(4); };
   document.getElementById("audit-cancel").onclick = cancelAudit;
-  document.getElementById("audit-finish").onclick = finishAudit;
+  document.getElementById("audit-report-pdf").onclick = reportPDF;
+  document.getElementById("audit-report-csv").onclick = reportCSV;
+  document.getElementById("audit-to-fix").onclick = () => { renderFix(); gotoStage(5); };
+  document.getElementById("audit-back-4").onclick = () => gotoStage(4);
+  document.getElementById("audit-close").onclick = closeAudit;
+
+  // Conteo manual
   document.getElementById("audit-manual-btn").onclick = () => {
     markPresent(document.getElementById("audit-manual").value);
     document.getElementById("audit-manual").value = "";
@@ -57,13 +73,87 @@ export function initAudit() {
 
   setupAuditScanner();
   renderHistory();
+  updateScope();
+  updateFrozenBadge();
+
+  // Si hay auditoría(s) abiertas, retomar la primera automáticamente.
+  if (open.length) {
+    resumeSession(open[0]);
+  } else {
+    gotoStage(1);
+  }
+}
+
+// --- Helpers de datos ---
+function unitsInAgency(agency) {
+  return store.listVehicles().filter(v => v.status === "dentro" && v.currentAgency === agency);
+}
+
+function showResumeNote(agency) {
+  const note = document.getElementById("audit-resume-note");
+  const o = store.getOpenAudit(agency);
+  if (o) {
+    note.hidden = false;
+    note.textContent = `↩️ Hay una auditoría en curso en ${agency} (abierta por ${o.by || "—"}). Al iniciar, se retomará.`;
+  } else {
+    note.hidden = true;
+  }
+}
+
+function updateFrozenBadge() {
+  const badge = document.getElementById("audit-frozen-badge");
+  if (!badge) return;
+  const frozen = store.listOpenAudits().some(o => o.frozen);
+  badge.hidden = !frozen;
+}
+
+// --- Navegación por etapas ---
+function gotoStage(n) {
+  currentStage = n;
+  document.querySelectorAll(".audit-stage").forEach(el => {
+    el.hidden = Number(el.dataset.stage) !== n;
+  });
+  document.querySelectorAll("#audit-steps li").forEach(li => {
+    const s = Number(li.dataset.step);
+    li.classList.toggle("is-active", s === n);
+    li.classList.toggle("is-done", s < n);
+  });
+}
+
+// --- Construcción / persistencia de la sesión ---
+function buildSession(agency, mode, frozen, expectedVehicles, seenObj) {
+  return {
+    agency, mode, frozen,
+    startedAt: new Date().toISOString(),
+    by: auth.currentUser()?.name || "—",
+    expected: new Map(expectedVehicles.map(v => [v.vin, v])),
+    seen: new Map(Object.entries(seenObj || {})),  // vin -> "presente" | "sobrante"
+  };
+}
+
+function persist() {
+  if (!session) return;
+  store.saveOpenAudit(session.agency, {
+    mode: session.mode,
+    frozen: session.frozen,
+    by: session.by,
+    startedAt: session.startedAt,
+    expected: [...session.expected.keys()],
+    seen: Object.fromEntries(session.seen),
+  });
+  updateFrozenBadge();
 }
 
 function startAudit() {
   const agency = document.getElementById("audit-agency").value;
   const mode = document.getElementById("audit-mode").value;
-  const dentro = store.listVehicles().filter(v => v.status === "dentro" && v.currentAgency === agency);
+  const freeze = document.getElementById("audit-freeze").checked;
 
+  // Si ya había una auditoría abierta en esta agencia, la retomamos.
+  const existing = store.getOpenAudit(agency);
+  if (existing) { resumeSession(existing); return; }
+
+  const dentro = unitsInAgency(agency);
   let expectedVehicles = dentro;
   if (mode === "random") {
     const n = Math.max(1, Math.min(parseInt(document.getElementById("audit-count").value, 10) || 1, dentro.length));
@@ -74,42 +164,78 @@ function startAudit() {
     return;
   }
 
-  session = {
-    agency, mode,
-    startedAt: new Date().toISOString(),
-    by: auth.currentUser()?.name || "—",
-    expected: new Map(expectedVehicles.map(v => [v.vin, v])),
-    seen: new Map(),   // vin -> "presente" | "sobrante"
-  };
-
-  document.getElementById("audit-setup").hidden = true;
-  document.getElementById("audit-run").hidden = false;
-  renderRun();
+  session = buildSession(agency, mode, freeze, expectedVehicles, {});
+  persist();
+  if (freeze) notify(`🔒 Inventario de ${agency} congelado durante el conteo.`, { type: "info", timeout: 5000 });
+  renderList();
+  gotoStage(2);
 }
 
+// Retoma una auditoría persistida (tras recargar o reabrir la app).
+function resumeSession(open) {
+  // Reconstruye la lista esperada a partir de los VIN guardados.
+  const expectedVehicles = (open.expected || [])
+    .map(vin => store.getVehicle(vin) || { vin, make: "", model: "", currentLocation: "" });
+  session = buildSession(open.agency, open.mode, open.frozen, expectedVehicles, open.seen);
+  session.startedAt = open.startedAt || session.startedAt;
+  session.by = open.by || session.by;
+  notify(`↩️ Auditoría retomada en ${open.agency}.`, { type: "info", timeout: 4000 });
+  renderList();
+  renderRun();
+  gotoStage(3);
+}
+
+// --- Etapa 2: lista de unidades esperadas ---
+function renderList() {
+  if (!session) return;
+  const rows = [...session.expected.values()].map((v, i) => `
+    <tr><td>${i + 1}</td><td><code>${escapeHtml(v.vin)}</code></td>
+      <td>${escapeHtml(v.make || "")}</td><td>${escapeHtml(v.model || "")}</td>
+      <td>${escapeHtml(v.currentLocation || "")}</td></tr>`).join("");
+  document.querySelector("#audit-list-table tbody").innerHTML = rows;
+  document.getElementById("audit-list-summary").innerHTML = `
+    <div class="stat"><b>${session.expected.size}</b><span>Unidades a contar</span></div>
+    <div class="stat"><b>${session.mode === "full" ? "Total" : "Rotativo"}</b><span>Tipo</span></div>
+    <div class="stat"><b>${session.frozen ? "Sí 🔒" : "No"}</b><span>Congelado</span></div>`;
+}
+
+function printList() {
+  if (!session) return;
+  const rows = [...session.expected.values()].map((v, i) =>
+    [String(i + 1), v.vin, v.make || "", v.model || "", v.currentLocation || ""]);
+  printCountList({
+    agency: session.agency,
+    mode: session.mode === "full" ? "Total" : "Rotativo",
+    by: session.by,
+    rows,
+  });
+}
+
+// --- Etapa 3: conteo físico ---
 function markPresent(raw) {
   if (!session) return;
   const vin = normalizeVin(raw);
-  if (vin.length !== 17) { setStatus("VIN inválido (deben ser 17 caracteres).", "error"); return; }
-
+  if (vin.length !== 17) { setStatus("VIN inválido (deben ser 17 caracteres).", "error"); beep(false); return; }
   if (session.seen.has(vin)) { setStatus("Esa unidad ya fue contada.", "info"); return; }
 
   if (session.expected.has(vin)) {
     session.seen.set(vin, "presente");
     setStatus("✓ Presente: " + vin, "ok");
+    beep(true);
   } else {
-    // No estaba en la lista esperada: sobrante (o de otra agencia / no registrada)
     session.seen.set(vin, "sobrante");
     const v = store.getVehicle(vin);
     const donde = v ? ` (figura en ${v.currentAgency || "—"})` : " (no registrada)";
     setStatus("⚠️ Sobrante: " + vin + donde, "warn");
+    beep(false);
   }
+  persist();
   renderRun();
 }
 
 function computeResults() {
   const presentes = [], faltantes = [], sobrantes = [];
-  for (const [vin, v] of session.expected) {
+  for (const [vin] of session.expected) {
     if (session.seen.get(vin) === "presente") presentes.push(vin);
     else faltantes.push(vin);
   }
@@ -120,16 +246,19 @@ function computeResults() {
 }
 
 function renderRun() {
+  if (!session) return;
   const { presentes, faltantes, sobrantes } = computeResults();
   const total = session.expected.size;
+  const pct = total ? Math.round((presentes.length / total) * 100) : 0;
 
   document.getElementById("audit-progress").innerHTML = `
     <div class="stat"><b>${presentes.length}/${total}</b><span>Contadas</span></div>
-    <div class="stat"><b>${faltantes.length}</b><span>Faltantes</span></div>
-    <div class="stat"><b>${sobrantes.length}</b><span>Sobrantes</span></div>
-  `;
+    <div class="stat"><b style="color:var(--danger)">${faltantes.length}</b><span>Faltantes</span></div>
+    <div class="stat"><b style="color:#b45309">${sobrantes.length}</b><span>Sobrantes</span></div>
+    <div class="stat"><b>${pct}%</b><span>Avance</span></div>`;
+  const fill = document.getElementById("audit-progress-fill");
+  if (fill) fill.style.width = pct + "%";
 
-  // Tabla: esperadas + sobrantes
   const rows = [];
   for (const [vin, v] of session.expected) {
     const st = session.seen.get(vin) === "presente"
@@ -148,45 +277,177 @@ function renderRun() {
   document.querySelector("#audit-table tbody").innerHTML = rows.join("");
 }
 
-async function finishAudit() {
+// --- Etapa 4: diferencias ---
+function computeAndRenderDiff() {
+  if (!session) return;
+  const { presentes, faltantes, sobrantes } = computeResults();
+  document.getElementById("audit-diff-summary").innerHTML = `
+    <div class="stat"><b style="color:var(--primary)">${presentes.length}</b><span>Presentes</span></div>
+    <div class="stat"><b style="color:var(--danger)">${faltantes.length}</b><span>Faltantes</span></div>
+    <div class="stat"><b style="color:#b45309">${sobrantes.length}</b><span>Sobrantes</span></div>`;
+
+  const listBlock = (title, vins, extra) => {
+    if (!vins.length) return `<h3>${title} (0)</h3><p class="muted">Ninguna.</p>`;
+    const items = vins.map(vin => {
+      const v = store.getVehicle(vin);
+      return `<li><code>${escapeHtml(vin)}</code> · ${escapeHtml(v?.make || "")} ${escapeHtml(v?.model || "")}${extra ? extra(v) : ""}</li>`;
+    }).join("");
+    return `<h3>${title} (${vins.length})</h3><ul class="audit-difflist">${items}</ul>`;
+  };
+
+  document.getElementById("audit-diff-lists").innerHTML =
+    listBlock("❌ Faltantes (esperadas, no vistas)", faltantes) +
+    listBlock("⚠️ Sobrantes (vistas, no esperadas)", sobrantes,
+      v => v ? ` <span class="muted">— figura en ${escapeHtml(v.currentAgency || "—")}</span>` : ' <span class="muted">— no registrada</span>');
+}
+
+function diffRowsForExport() {
+  const { presentes, faltantes, sobrantes } = computeResults();
+  const rows = [];
+  presentes.forEach(vin => rows.push([vin, vehLabel(vin), "Presente", ""]));
+  faltantes.forEach(vin => rows.push([vin, vehLabel(vin), "Faltante", ""]));
+  sobrantes.forEach(vin => {
+    const v = store.getVehicle(vin);
+    rows.push([vin, vehLabel(vin), "Sobrante", v ? "figura en " + (v.currentAgency || "—") : "no registrada"]);
+  });
+  return rows;
+}
+function vehLabel(vin) {
+  const v = store.getVehicle(vin);
+  return v ? `${v.make || ""} ${v.model || ""}`.trim() : "";
+}
+
+function reportPDF() {
+  if (!session) return;
+  const title = `Reporte de auditoría · ${session.agency} · ${session.mode === "full" ? "Total" : "Rotativo"}`;
+  printReport(title, ["VIN", "Unidad", "Resultado", "Observación"], diffRowsForExport());
+}
+
+function reportCSV() {
+  if (!session) return;
+  const header = ["VIN", "Unidad", "Resultado", "Observacion"];
+  const lines = [header, ...diffRowsForExport()]
+    .map(r => r.map(csvCell).join(",")).join("\r\n");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  downloadText(`auditoria-${slug(session.agency)}-${stamp}.csv`, "\ufeff" + lines, "text/csv;charset=utf-8");
+  notify("CSV exportado.", { type: "success" });
+}
+
+// --- Etapa 5: corrección de ubicaciones ---
+function renderFix() {
+  if (!session) return;
+  const { faltantes, sobrantes } = computeResults();
+
+  const sobBlock = sobrantes.length ? `
+    <h3>⚠️ Sobrantes — reasignar a ${escapeHtml(session.agency)}</h3>
+    <ul class="audit-difflist">${sobrantes.map(vin => {
+      const v = store.getVehicle(vin);
+      const reg = !!v;
+      return `<li>
+        <code>${escapeHtml(vin)}</code> · ${escapeHtml(vehLabel(vin) || "no registrada")}
+        ${reg ? `<span class="muted">— figura en ${escapeHtml(v.currentAgency || "—")}</span>` : '<span class="muted">— no registrada</span>'}
+        ${reg ? `<button class="btn btn-sm fix-reassign" data-vin="${escapeHtml(vin)}">Reasignar aquí</button>` : ""}
+      </li>`;
+    }).join("")}</ul>` : "<h3>⚠️ Sobrantes (0)</h3><p class='muted'>Ninguno.</p>";
+
+  const falBlock = faltantes.length ? `
+    <h3>❌ Faltantes — marcar para investigación</h3>
+    <ul class="audit-difflist">${faltantes.map(vin => `
+      <li><code>${escapeHtml(vin)}</code> · ${escapeHtml(vehLabel(vin))}
+        <button class="btn btn-sm fix-flag" data-vin="${escapeHtml(vin)}">Marcar investigación</button>
+      </li>`).join("")}</ul>` : "<h3>❌ Faltantes (0)</h3><p class='muted'>Ninguno.</p>";
+
+  const wrap = document.getElementById("audit-fix-lists");
+  wrap.innerHTML = sobBlock + falBlock;
+
+  wrap.querySelectorAll(".fix-reassign").forEach(btn =>
+    btn.addEventListener("click", () => {
+      const vin = btn.dataset.vin;
+      const v = store.getVehicle(vin);
+      if (!v) return;
+      store.upsertVehicle({ vin, currentAgency: session.agency, status: "dentro" });
+      store.addEvent({ vin, type: "move", agency: session.agency, area: "", location: session.agency,
+        by: session.by });
+      btn.outerHTML = '<span class="tag tag-in">Reasignada ✓</span>';
+      notify(`${vin} reasignada a ${session.agency}.`, { type: "success" });
+    })
+  );
+  wrap.querySelectorAll(".fix-flag").forEach(btn =>
+    btn.addEventListener("click", () => {
+      const vin = btn.dataset.vin;
+      store.upsertVehicle({ vin, auditFlag: `Faltante en auditoría ${session.agency} · ${new Date().toLocaleString()}` });
+      btn.outerHTML = '<span class="tag tag-out">Marcada 🔎</span>';
+      notify(`${vin} marcada para investigación.`, { type: "info" });
+    })
+  );
+}
+
+async function closeAudit() {
   if (!session) return;
   const { presentes, faltantes, sobrantes } = computeResults();
   const choice = await confirmDialog({
-    icon: "📋", title: "Finalizar conteo",
-    message: `Resultado del conteo en ${session.agency}:\n\n` +
-      `• Presentes: ${presentes.length}\n• Faltantes: ${faltantes.length}\n• Sobrantes: ${sobrantes.length}\n\n¿Guardar este resultado?`,
+    icon: "📋", title: "Cerrar auditoría",
+    message: `Resultado en ${session.agency}:\n\n` +
+      `• Presentes: ${presentes.length}\n• Faltantes: ${faltantes.length}\n• Sobrantes: ${sobrantes.length}\n\n` +
+      (session.frozen ? "Se descongelará el inventario.\n\n" : "") + "¿Guardar y cerrar?",
     buttons: [
-      { label: "Seguir contando", value: null, variant: "ghost" },
-      { label: "Guardar resultado", value: "save", variant: "primary" },
+      { label: "Seguir en corrección", value: null, variant: "ghost" },
+      { label: "Guardar y cerrar", value: "save", variant: "primary" },
     ],
   });
   if (choice !== "save") return;
 
   store.addAudit({
-    agency: session.agency,
-    mode: session.mode,
-    by: session.by,
-    startedAt: session.startedAt,
-    finishedAt: new Date().toISOString(),
+    agency: session.agency, mode: session.mode, by: session.by,
+    startedAt: session.startedAt, finishedAt: new Date().toISOString(),
+    frozen: session.frozen,
     totalExpected: session.expected.size,
     presentes, faltantes, sobrantes,
   });
+  store.clearOpenAudit(session.agency); // descongela
   stopScanner();
   session = null;
-  document.getElementById("audit-run").hidden = true;
-  document.getElementById("audit-setup").hidden = false;
+  updateFrozenBadge();
   renderHistory();
-  notify("Conteo guardado.", { type: "success" });
+  gotoStage(1);
+  document.getElementById("audit-freeze").checked = false;
+  notify("Auditoría guardada y cerrada.", { type: "success" });
 }
 
-function cancelAudit() {
+async function cancelAudit() {
+  const choice = await confirmDialog({
+    icon: "✖️", title: "Cancelar auditoría",
+    message: "¿Cancelar la auditoría en curso? Se perderá el conteo y se descongelará el inventario.",
+    buttons: [
+      { label: "Seguir contando", value: null, variant: "ghost" },
+      { label: "Cancelar auditoría", value: "cancel", variant: "danger" },
+    ],
+  });
+  if (choice !== "cancel") return;
   stopScanner();
+  if (session) store.clearOpenAudit(session.agency);
   session = null;
-  document.getElementById("audit-run").hidden = true;
-  document.getElementById("audit-setup").hidden = false;
+  updateFrozenBadge();
+  gotoStage(1);
 }
 
-// ---- Escáner de auditoría (reutiliza la clase Scanner) ----
+// --- Sonido / vibración de confirmación ---
+let _audioCtx = null;
+function beep(ok) {
+  try {
+    if (navigator.vibrate) navigator.vibrate(ok ? 40 : [60, 40, 60]);
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = _audioCtx.createOscillator();
+    const g = _audioCtx.createGain();
+    o.frequency.value = ok ? 880 : 300;
+    o.connect(g); g.connect(_audioCtx.destination);
+    g.gain.setValueAtTime(0.08, _audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, _audioCtx.currentTime + 0.18);
+    o.start(); o.stop(_audioCtx.currentTime + 0.18);
+  } catch (e) { /* audio no disponible: ignorar */ }
+}
+
+// --- Escáner (reutiliza la clase Scanner) ---
 function setupAuditScanner() {
   const video = document.getElementById("audit-video");
   const wrap = document.getElementById("audit-scanner-wrap");
@@ -204,9 +465,7 @@ function setupAuditScanner() {
   startBtn.onclick = async () => {
     try {
       await scanner.start();
-      wrap.hidden = false;
-      startBtn.hidden = true;
-      stopBtn.hidden = false;
+      wrap.hidden = false; startBtn.hidden = true; stopBtn.hidden = false;
     } catch (e) {}
   };
   stopBtn.onclick = stopScanner;
@@ -253,12 +512,29 @@ function renderHistory() {
     </div>`).join("");
 }
 
+// --- Utilidades ---
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+function csvCell(s) {
+  const str = String(s ?? "");
+  return /[",\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+}
+function slug(s) {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+function downloadText(filename, text, mime) {
+  const blob = new Blob([text], { type: mime || "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
 }
 
 // Expuesto para que app.js lo llame al abrir la pestaña.

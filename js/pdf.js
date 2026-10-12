@@ -120,6 +120,31 @@ export async function printVehicleSheet(vehicle) {
   openDoc("Ficha " + v.vin, inner);
 }
 
+// Lista de conteo para auditoría: tabla con una casilla ☐ al final de cada fila
+// para palomear a mano durante el recorrido físico.
+// data: { agency, mode, by, rows: [[#, vin, marca, modelo, ubicacion], ...] }
+export function printCountList(data) {
+  const { agency, mode, by, rows } = data;
+  const thead = `<tr>
+    <th style="width:36px">#</th><th>VIN</th><th>Marca</th><th>Modelo</th>
+    <th>Ubicación</th><th style="width:60px">Contado</th></tr>`;
+  const tbody = rows.map(r => `<tr>
+    <td>${esc(r[0])}</td><td><code>${esc(r[1])}</code></td><td>${esc(r[2])}</td>
+    <td>${esc(r[3])}</td><td>${esc(r[4])}</td>
+    <td style="text-align:center;font-size:16px">☐</td></tr>`).join("");
+  const inner = `
+    <h1>Lista de conteo · ${esc(agency)}</h1>
+    <p style="font-size:12px;color:#475569">
+      Tipo: <b>${esc(mode)}</b> · Preparó: <b>${esc(by || "—")}</b> ·
+      Unidades: <b>${rows.length}</b></p>
+    <table><thead>${thead}</thead>
+      <tbody>${tbody || `<tr><td colspan="6">Sin unidades.</td></tr>`}</tbody></table>
+    <p style="margin-top:24px;font-size:12px">
+      Auditó: _______________________________  Firma: _______________________________
+    </p>`;
+  openDoc("Lista de conteo " + agency, inner);
+}
+
 // Reporte tabular con encabezado corporativo (lo usa la pestaña Reportes).
 export function printReport(title, cols, rows) {
   const thead = "<tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr>";
