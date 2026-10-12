@@ -37,6 +37,14 @@ const PUNTO_VENTA_AREAS = [
   { name: "Entrega",    subs: [] },
 ];
 
+// Taller de Hojalatería y Pintura (HyP): áreas propias de un taller de carrocería.
+const HYP_AREAS = [
+  { name: "Recepción",    subs: [] },
+  { name: "Hojalatería",  subs: [] },
+  { name: "Pintura",      subs: [] },
+  { name: "Entrega",      subs: [] },
+];
+
 // Sitios que se precargan con sus direcciones y coordenadas reales.
 const SEED_SITES = [
   {
@@ -66,6 +74,32 @@ const SEED_SITES = [
     name: "Punto de Venta Chignahuapan",
     address: "Vicente Guerrero 31, Centro, 73300 Chignahuapan, Pue.",
     lat: 19.840180, lng: -98.031988, radius: 150, areas: PUNTO_VENTA_AREAS,
+  },
+
+  // --- Aeroplasa Aeropuerto (CDMX) ---
+  {
+    // Taller de Hojalatería y Pintura (HyP).
+    name: "Dirección de HyP",
+    address: "C. Uno 387, Cuchilla Pantitlán, Venustiano Carranza, 15610 Ciudad de México, CDMX",
+    lat: 19.422836, lng: -99.067075, radius: 80, areas: HYP_AREAS,
+  },
+  {
+    name: "Punto de Venta Calzada del Hueso",
+    address: "Calz. del Hueso 689, Segunda Sección, Tlalpan, 14325 Ciudad de México, CDMX",
+    lat: 19.301453, lng: -99.117438, radius: 80, areas: PUNTO_VENTA_AREAS,
+  },
+  {
+    name: "Punto de Venta Miramontes",
+    address: "Canal de Miramontes 3164, Coapa, Acoxpa, Tlalpan, 14300 Ciudad de México, CDMX",
+    lat: 19.300289, lng: -99.124641, radius: 80, areas: PUNTO_VENTA_AREAS,
+  },
+  {
+    // Bodega (solo almacenaje).
+    name: "Bodega WALMART",
+    address: "Calz. Ignacio Zaragoza 58, Industrial Puerto Aéreo, Venustiano Carranza, 15700 Ciudad de México, CDMX",
+    lat: 19.419611, lng: -99.093835, radius: 80, areas: [
+      { name: "Almacén", subs: [] },
+    ],
   },
 ];
 
