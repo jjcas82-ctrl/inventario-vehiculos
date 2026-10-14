@@ -72,7 +72,7 @@ async function handleFile(file) {
     return;
   }
 
-  prog.textContent = `Analizadas ${result.totalLines} líneas del documento.`;
+  prog.textContent = `Analizadas ${result.totalLines} líneas del documento (método: ${result.method}).`;
 
   // Clasificar: nuevas / duplicadas (ya existen) / errores (VIN inválido).
   const nuevas = [], duplicadas = [], errores = [];
@@ -82,6 +82,31 @@ async function handleFile(file) {
     else nuevas.push(u);
   }
   lastParsed = { nuevas, duplicadas, errores };
+
+  // DIAGNÓSTICO: si no se detectó ninguna unidad, mostrar el texto crudo extraído
+  // para poder ajustar el parser al formato real de este PDF.
+  if (result.units.length === 0) {
+    const raw = (result.lines || []).join("\n");
+    summary.innerHTML = `<div class="stat"><b style="color:var(--danger)">0</b><span>Unidades detectadas</span></div>`;
+    preview.innerHTML = `
+      <p style="color:var(--danger)"><b>No se detectó ninguna unidad en el PDF.</b></p>
+      <p class="hint">Esto suele pasar si el PDF está escaneado (imagen) o si el formato cambió.
+      Copia el texto de abajo y compártelo para ajustar la lectura a tu archivo.</p>
+      <div class="row gap wrap" style="margin:6px 0">
+        <button id="cdo-copy-raw" class="btn btn-sm">📋 Copiar texto extraído</button>
+        <span class="muted">${raw.length} caracteres · ${(result.lines || []).length} líneas</span>
+      </div>
+      <textarea id="cdo-raw" readonly style="width:100%;height:220px;font-family:ui-monospace,monospace;font-size:11px;white-space:pre;overflow:auto">${escapeHtml(raw || "(el PDF no devolvió texto: probablemente es una imagen escaneada)")}</textarea>`;
+    const copyBtn = document.getElementById("cdo-copy-raw");
+    if (copyBtn) copyBtn.addEventListener("click", () => {
+      const ta = document.getElementById("cdo-raw");
+      ta.select();
+      try { navigator.clipboard.writeText(ta.value); notify("Texto copiado.", { type: "success" }); }
+      catch (e) { document.execCommand("copy"); }
+    });
+    confirmBtn.hidden = true;
+    return;
+  }
 
   summary.innerHTML = `
     <div class="stat"><b>${result.units.length}</b><span>Detectadas</span></div>

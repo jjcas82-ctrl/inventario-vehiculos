@@ -67,6 +67,7 @@ const VIN_RE = /\b[A-HJ-NPR-Z0-9]{17}\b/;          // VIN completo en una línea
 const VIN_HEAD_RE = /([A-HJ-NPR-Z0-9]{11,13})\s*$/; // VIN partido: cola de una línea
 const YEAR_RE = /\b(19|20)\d{2}\b/;
 const DESC_RE = /^UN\s+(VEHICULO|CAMION)\b/i;
+const DESC_ANY_RE = /UN\s+(VEHICULO|CAMION)\b/i;    // descripción en cualquier parte
 
 // Marcas conocidas que aparecen en la descripción de GM.
 const MARCAS = ["CHEVROLET", "GMC", "BUICK", "CADILLAC"];
@@ -161,13 +162,78 @@ function dedupeByVin(units) {
   return [...seen.values()];
 }
 
+// MÉTODO ROBUSTO (respaldo): opera sobre el texto completo del documento.
+// Útil cuando pdf.js no separa las líneas igual que en el ejemplo. Busca TODOS
+// los VIN de 17 caracteres (incluso partidos por espacios/saltos) y, para cada
+// uno, toma la descripción "UN VEHICULO/CAMION..." más cercana a continuación.
+function parseCdoWhole(lines) {
+  // Texto plano con marcadores de salto para poder ubicar descripciones.
+  const full = lines.join("\n");
+  // 1) Quitar espacios DENTRO de posibles VIN: unimos tokens alfanuméricos
+  //    contiguos separados solo por espacios/saltos y luego buscamos 17 chars.
+  //    Para no romper el texto, trabajamos sobre una copia "compacta".
+  const compact = full.replace(/[ \t]*\n[ \t]*/g, "\n");
+
+  const units = [];
+  // Busca VIN completos primero.
+  const vinGlobal = /[A-HJ-NPR-Z0-9]{17}/g;
+  // También intenta VIN partido por UN salto de línea: 11-14 + resto hasta 17.
+  const vinSplit = /([A-HJ-NPR-Z0-9]{10,14})\n([A-HJ-NPR-Z0-9]{3,7})/g;
+
+  const foundVins = new Set();
+
+  // a) partidos por salto de línea
+  let m;
+  while ((m = vinSplit.exec(compact))) {
+    const cand = (m[1] + m[2]).replace(/[^A-HJ-NPR-Z0-9]/g, "");
+    if (cand.length === 17) foundVins.add(cand);
+  }
+  // b) completos en una corrida
+  while ((m = vinGlobal.exec(full.replace(/\s+/g, " ")))) {
+    foundVins.add(m[0]);
+  }
+
+  // Para cada VIN, buscar su descripción (la más cercana después de su aparición).
+  const descMatches = [];
+  const descGlobal = /UN\s+(?:VEHICULO|CAMION)[^\n]*/gi;
+  let dm;
+  const flat = full.replace(/\s+/g, " ");
+  while ((dm = descGlobal.exec(flat))) descMatches.push({ idx: dm.index, text: dm[0] });
+
+  for (const vin of foundVins) {
+    const unit = { vin, make: "", model: "", version: "", color: "", year: "", raw: [vin] };
+    // Posición del VIN en el texto plano (para asociar la descripción siguiente).
+    const pos = flat.indexOf(vin.slice(0, 8)); // por si el VIN está partido, buscar su cabeza
+    const desc = descMatches.find(d => d.idx > (pos >= 0 ? pos : 0)) || descMatches[0];
+    if (desc) {
+      const parsed = parseDescription(desc.text);
+      unit.make = parsed.make; unit.model = parsed.model; unit.version = parsed.version;
+      // Color: palabra(s) en mayúsculas justo después de la descripción.
+      const after = flat.slice(desc.idx + desc.text.length, desc.idx + desc.text.length + 40);
+      const col = after.match(/\b([A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ]{2,})?)\b/);
+      if (col) unit.color = toTitle(col[1]);
+    }
+    const ym = flat.match(YEAR_RE);
+    if (ym) unit.year = ym[0];
+    units.push(unit);
+  }
+  return dedupeByVin(units);
+}
+
 function toTitle(s) {
   return String(s || "").toLowerCase().replace(/\b([a-záéíóúñ])/g, c => c.toUpperCase()).trim();
 }
 
 // Orquesta: lee el PDF y devuelve las unidades parseadas.
+// Usa el método por líneas y, si detecta pocas unidades, el método robusto
+// sobre el texto completo. Devuelve también las líneas crudas (diagnóstico).
 export async function parseCdoFile(file, onProgress) {
   const lines = await extractPdfLines(file, onProgress);
-  const units = parseCdoLines(lines);
-  return { units, totalLines: lines.length };
+  let units = parseCdoLines(lines);
+  let method = "lineas";
+  if (!units.length) {
+    units = parseCdoWhole(lines);
+    method = "robusto";
+  }
+  return { units, totalLines: lines.length, lines, method };
 }
