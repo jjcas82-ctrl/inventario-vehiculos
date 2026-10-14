@@ -37,7 +37,8 @@ const INV_COLUMNS = [
   { key: "currentAgency", label: "Agencia",filter: "select", value: v => v.currentAgency || "" },
   { key: "entryAt",  label: "Ingreso",     filter: "text",   value: v => v.entryAt ? new Date(v.entryAt).toLocaleString() : "" },
   { key: "entryBy",  label: "Registró",    filter: "text",   value: v => v.entryBy || v.lastBy || "" },
-  { key: "status",   label: "Estado",      filter: "select", value: v => v.status || "" },
+  { key: "status",   label: "Estado",      filter: "select",
+                     value: v => ({ dentro: "Dentro", fuera: "Fuera", transito: "En tránsito" }[v.status] || v.status || "") },
 ];
 
 // Estado de los filtros por columna: { [key]: "texto" }
@@ -132,7 +133,9 @@ export function renderInventory() {
   tbody.innerHTML = list.map(v => {
     const statusTag = v.status === "fuera"
       ? '<span class="tag tag-out">Fuera</span>'
-      : (v.status === "dentro" ? '<span class="tag tag-in">Dentro</span>' : '<span class="tag">—</span>');
+      : (v.status === "dentro" ? '<span class="tag tag-in">Dentro</span>'
+      : (v.status === "transito" ? '<span class="tag" style="background:#dbeafe;color:#1e40af">En tránsito</span>'
+      : '<span class="tag">—</span>'));
     // Semáforo de antigüedad (solo para unidades dentro): 🟢 ok, 🟡 por vencer, 🔴 estancada.
     let semaforo = "";
     if (v.status === "dentro") {
@@ -562,3 +565,7 @@ function closeModal() {
   modal.hidden = true;
   modal.style.display = "none";
 }
+
+
+// Expuesto para que la carga de CDO pueda abrir la ficha de una unidad existente.
+if (typeof window !== "undefined") window.__openVehicle = openVehicle;
