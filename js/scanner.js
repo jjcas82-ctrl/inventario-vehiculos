@@ -10,6 +10,13 @@
 //
 // IMPORTANTE: getUserMedia solo funciona en HTTPS o http://localhost.
 
+// ZXing se carga PRIMERO desde una copia LOCAL (vendor/) para que el escáner
+// funcione sin internet (p. ej. en el patio con señal débil, donde fallaba).
+// Si la copia local no existe, se recurre al CDN como respaldo (opción B).
+//   → Para activar el modo offline: descarga los 2 archivos indicados en
+//     vendor/README.md y colócalos en vendor/. (opción A)
+const ZXING_LOCAL = "../vendor/zxing-browser.js";
+const ZXING_LIB_LOCAL = "../vendor/zxing-library.js";
 const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
 const ZXING_LIB_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/+esm";
 
@@ -158,14 +165,24 @@ export class Scanner {
 
   async _startZxing() {
     let browserMod, libMod;
+    // 1º intento: copia LOCAL (offline). 2º intento: CDN (respaldo).
     try {
       [browserMod, libMod] = await Promise.all([
-        import(/* @vite-ignore */ ZXING_CDN),
-        import(/* @vite-ignore */ ZXING_LIB_CDN).catch(() => null),
+        import(/* @vite-ignore */ ZXING_LOCAL),
+        import(/* @vite-ignore */ ZXING_LIB_LOCAL).catch(() => null),
       ]);
-    } catch (e) {
-      this.onDetect("no se pudo cargar ZXing (¿sin internet?)", "info");
-      return;
+      this.onDetect("ZXing cargado LOCAL (offline) ✓", "info");
+    } catch (eLocal) {
+      try {
+        [browserMod, libMod] = await Promise.all([
+          import(/* @vite-ignore */ ZXING_CDN),
+          import(/* @vite-ignore */ ZXING_LIB_CDN).catch(() => null),
+        ]);
+        this.onDetect("ZXing cargado desde CDN (respaldo)", "info");
+      } catch (e) {
+        this.onDetect("no se pudo cargar ZXing (sin copia local y sin internet)", "info");
+        return;
+      }
     }
     try {
       const { BrowserMultiFormatReader } = browserMod;
