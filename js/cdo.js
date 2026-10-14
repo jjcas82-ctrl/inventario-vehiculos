@@ -342,16 +342,235 @@ function toTitle(s) {
   return String(s || "").toLowerCase().replace(/\b([a-záéíóúñ])/g, c => c.toUpperCase()).trim();
 }
 
+// MÉTODO POR COLUMNAS: algunos PDFs del CDO se extraen "transpuestos", es decir,
+// pdf.js devuelve el contenido COLUMNA por columna (todos los VIN juntos, todas
+// las facturas juntas, todos los colores juntos, etc.), no fila por fila.
+// Reconstruimos cada unidad emparejando por POSICIÓN dentro de cada columna.
+//
+// El ancla es la línea "Serie" seguida de los VIN (posiblemente partidos). De ahí
+// obtenemos cuántas unidades hay y sus VIN. Luego ubicamos cada columna por su
+// encabezado o por su patrón y emparejamos por índice.
+export function parseCdoColumns(lines) {
+  const txt = lines.map(l => String(l || "").trim());
+
+  // 1) Localizar la línea de VIN: la que contiene 2+ secuencias tipo VIN-largo.
+  //    En el ejemplo: "LZWRLMGL2TB5 71002 1GCPT9EK7T13 21682 LZWPPMGN5TF0 34551"
+  //    Tras "Serie". Buscamos la línea con más tokens alfanuméricos "VIN-like".
+  const vinLineIdx = findVinColumnLine(txt);
+  if (vinLineIdx < 0) return [];
+
+  const vins = reconstructVinsFromColumn(txt[vinLineIdx]);
+  if (!vins.length) return [];
+  const n = vins.length;
+
+  // 2) Para cada "columna" conocida, obtener n valores emparejados por índice.
+  const facturas = pickColumnValues(txt, /^Factura$/i, v => /^\d{6,8}$/.test(v), n);
+  const colores = pickColorColumn(txt, n);
+  // Fechas y pedimentos vienen partidos con espacio tras el guion ("2026- 10-12",
+  // "4024-F3- 6002272"); por eso se reconstruyen a nivel de LÍNEA, no de token.
+  const { fechasPedi, fechasFact } = pickAllFechas(txt, n);
+  const pedimentos = pickPedimentos(txt, n);
+  const modelosGm = pickColumnValues(txt, /^Model|^Modelo/i, v => /^[0-9A-Z]{4,6}$/.test(v) && /\d/.test(v), n);
+  const anios = pickColumnValues(txt, /Año|Mod\./i, v => /^(19|20)\d{2}$/.test(v), n);
+  const ovs = pickColumnValues(txt, /^O\.?\/?V\.?$/i, v => /^[A-Z0-9]{5,7}$/.test(v), n);
+  const cves = pickColumnValues(txt, /Cve\.?Veh/i, v => /^[0-9A-Z]{6,8}$/.test(v), n);
+  const nummovs = reconstructNumMovs(txt, n);
+
+  const units = [];
+  for (let k = 0; k < n; k++) {
+    const unit = {
+      vin: vins[k], make: "", model: "", version: "", color: "", year: "", raw: [vins[k]],
+      ov: ovs[k] || "", cveVeh: cves[k] || "", factura: facturas[k] || "",
+      numMov: nummovs[k] || "", aduana: "", pedimento: pedimentos[k] || "",
+      fechaPedimento: fechasPedi[k] || "", modeloGm: modelosGm[k] || "",
+      fechaFactura: fechasFact[k] || "",
+    };
+    // En el CDO de GM la marca es siempre Chevrolet/GMC/etc.
+    // NOTA: en PDFs "transpuestos" muy desordenados, los NOMBRES de modelo no se
+    // pueden emparejar de forma fiable por posición (riesgo de asignar el modelo
+    // equivocado). Preferimos NO adivinar: dejamos el modelo vacío (se completará
+    // al dar entrada o editando la ficha). El modeloGm (clave) SÍ queda bien
+    // emparejado por columna y permite identificar el modelo con certeza.
+    unit.make = "Chevrolet";
+    unit.model = ""; // se completa al dar entrada (NHTSA decodifica el VIN); evita emparejado erróneo
+    if (colores[k]) unit.color = toTitle(colores[k]);
+    if (anios[k]) unit.year = anios[k];
+    units.push(unit);
+  }
+  return dedupeByVin(units);
+}
+
+// Encuentra la línea que contiene la columna de VIN (varios VIN partidos juntos).
+function findVinColumnLine(txt) {
+  let best = -1, bestCount = 0;
+  for (let i = 0; i < txt.length; i++) {
+    // Cuenta cuántas "cabezas de VIN" (≥10 chars alfanuméricos sin IOQ) hay.
+    const heads = (txt[i].match(/\b[A-HJ-NPR-Z0-9]{10,13}\b/g) || []).length;
+    if (heads >= 2 && heads > bestCount) { bestCount = heads; best = i; }
+  }
+  return best;
+}
+
+// Reconstruye los VIN de una línea tipo "AAAA 11111 BBBB 22222 CCCC 33333".
+// Une cada cabeza (10-14) con la cola siguiente (3-7) hasta formar 17.
+function reconstructVinsFromColumn(line) {
+  const toks = String(line || "").split(/\s+/).filter(Boolean);
+  const vins = [];
+  let i = 0;
+  while (i < toks.length) {
+    let acc = toks[i].replace(/[^A-HJ-NPR-Z0-9]/g, "");
+    i++;
+    // Acumula tokens siguientes hasta llegar a 17 (por si viene en 2 o 3 trozos).
+    while (acc.length < 17 && i < toks.length) {
+      acc += toks[i].replace(/[^A-HJ-NPR-Z0-9]/g, "");
+      i++;
+    }
+    if (acc.length === 17 && VIN_RE.test(acc)) vins.push(acc);
+  }
+  return vins;
+}
+
+// Devuelve n valores de una "columna": busca una línea que haga match con `header`
+// y toma los valores (de esa línea o de las siguientes) que cumplan `valid`.
+// Si `inline` es true, los valores pueden venir TODOS en una sola línea.
+function pickColumnValues(txt, headerRe, valid, n, inline = false) {
+  for (let i = 0; i < txt.length; i++) {
+    if (!headerRe.test(txt[i])) continue;
+    // Reunir candidatos desde la misma línea y las siguientes.
+    const pool = [];
+    for (let j = i; j < Math.min(txt.length, i + 6); j++) {
+      const toks = txt[j].split(/\s+/).filter(Boolean);
+      for (const t of toks) if (valid(t)) pool.push(t);
+      if (pool.length >= n) break;
+    }
+    if (pool.length >= n) return pool.slice(0, n);
+  }
+  // Respaldo: buscar en TODO el texto los que cumplan el patrón.
+  const all = [];
+  for (const l of txt) for (const t of l.split(/\s+/)) if (valid(t)) all.push(t);
+  return all.slice(0, n);
+}
+
+// Color: busca la línea con colores (p. ej. "ROJO METALICO GRIS TIBURON ...").
+// Los colores son 1-2 palabras en mayúsculas; emparejamos por índice.
+function pickColorColumn(txt, n) {
+  const COLORS = ["ROJO", "GRIS", "BLANCO", "NEGRO", "AZUL", "PLATA", "PLATEADO", "VERDE",
+    "CAFE", "CAFÉ", "BEIGE", "DORADO", "AMARILLO", "NARANJA", "VINO", "ARENA", "COBRE"];
+  for (let i = 0; i < txt.length; i++) {
+    const up = txt[i].toUpperCase();
+    const hits = COLORS.filter(c => up.includes(c)).length;
+    if (hits >= 1 && /METALICO|TIBURON|PERLA|MATE|SOLIDO|METÁLICO/.test(up) || hits >= 2) {
+      // Partir en colores de 1-2 palabras.
+      const words = txt[i].split(/\s+/);
+      const out = [];
+      for (let w = 0; w < words.length; w++) {
+        const base = words[w].toUpperCase();
+        if (COLORS.includes(base)) {
+          // ¿La siguiente palabra es un modificador (METALICO, etc.)?
+          const next = (words[w + 1] || "").toUpperCase();
+          if (/METALICO|METÁLICO|TIBURON|PERLA|MATE|SOLIDO|CLARO|OSCURO/.test(next)) {
+            out.push(words[w] + " " + words[w + 1]); w++;
+          } else out.push(words[w]);
+        }
+      }
+      if (out.length) return padTo(out, n);
+    }
+  }
+  return padTo([], n);
+}
+
+// Descripciones: todas las "UN VEHICULO/CAMION ..." en orden.
+function pickDescriptions(txt, n) {
+  const flat = txt.join(" ");
+  const out = (flat.match(/UN\s+(?:VEHICULO|CAMION)\b[^]*?(?=UN\s+(?:VEHICULO|CAMION)\b|$)/gi) || [])
+    .map(s => s.replace(/\s+/g, " ").trim());
+  return padTo(out, n);
+}
+
+// Num. Mov.: suele venir partido "CAD5671 2631". Reunir y re-emparejar.
+function reconstructNumMovs(txt, n) {
+  for (let i = 0; i < txt.length; i++) {
+    if (!/Num\.?\s*Mov/i.test(txt[i])) continue;
+    const pool = [];
+    for (let j = i; j < Math.min(txt.length, i + 6); j++) {
+      const toks = txt[j].split(/\s+/).filter(Boolean);
+      for (const t of toks) if (/^[A-Z]{2,4}\d{3,}$|^\d{3,}$/.test(t)) pool.push(t);
+    }
+    // Unir pares cabeza+cola (CAD5671 + 2631) → CAD56712631.
+    const out = [];
+    for (let k = 0; k < pool.length; k++) {
+      if (/^[A-Z]{2,4}\d+$/.test(pool[k]) && /^\d+$/.test(pool[k + 1] || "")) {
+        out.push(pool[k] + pool[k + 1]); k++;
+      } else if (/^[A-Z]{2,4}\d{5,}$/.test(pool[k])) out.push(pool[k]);
+    }
+    if (out.length) return padTo(out, n);
+  }
+  return padTo([], n);
+}
+
+// Fechas: en el PDF transpuesto hay una línea con las fechas de FACTURA (tras
+// "Fecha"/"Factura") y otra con las de PEDIMENTO (tras "Fecha Pedi."). Vienen
+// partidas con espacio ("2026- 10-12"); las normalizamos. Devolvemos ambas.
+function pickAllFechas(txt, n) {
+  const fechasEnLinea = (l) => {
+    // Captura "2026- 10-12" o "2026-10-12" (con posible espacio tras guiones).
+    const ms = l.match(/\d{4}-\s?\d{2}-\s?\d{2}/g) || [];
+    return ms.map(f => f.replace(/\s/g, ""));
+  };
+  let fechasFact = [], fechasPedi = [];
+  for (let i = 0; i < txt.length; i++) {
+    const line = txt[i];
+    const inThis = fechasEnLinea(line);
+    if (inThis.length >= n) {
+      // ¿Es la línea de pedimento? (cerca de un encabezado "Fecha Pedi.")
+      const ctx = (txt[i - 1] || "") + " " + line;
+      if (/Pedi/i.test(ctx)) { if (!fechasPedi.length) fechasPedi = inThis.slice(0, n); }
+      else { if (!fechasFact.length) fechasFact = inThis.slice(0, n); }
+    }
+  }
+  // Respaldo: si no se distinguieron, repartir todas las fechas encontradas.
+  if (!fechasFact.length || !fechasPedi.length) {
+    const todas = [];
+    for (const l of txt) for (const f of fechasEnLinea(l)) todas.push(f);
+    if (!fechasPedi.length && todas.length >= n) fechasPedi = todas.slice(0, n);
+    if (!fechasFact.length && todas.length >= 2 * n) fechasFact = todas.slice(n, 2 * n);
+    else if (!fechasFact.length && todas.length >= n) fechasFact = todas.slice(-n);
+  }
+  return { fechasPedi: padTo(fechasPedi, n), fechasFact: padTo(fechasFact, n) };
+}
+
+// Pedimentos: vienen partidos ("4024-F3- 6002272"). Los reconstruimos por línea.
+function pickPedimentos(txt, n) {
+  for (let i = 0; i < txt.length; i++) {
+    const line = txt[i];
+    const ms = line.match(/\d{4}-\w\d-\s?\d{6,7}/g) || [];
+    const clean = ms.map(x => x.replace(/\s/g, ""));
+    if (clean.length >= n) return clean.slice(0, n);
+    // A veces el encabezado "Pedimento" está en una línea y los valores en la sgte.
+    if (/Pedimento/i.test(line)) {
+      for (let j = i; j < Math.min(txt.length, i + 4); j++) {
+        const m2 = (txt[j].match(/\d{4}-\w\d-\s?\d{6,7}/g) || []).map(x => x.replace(/\s/g, ""));
+        if (m2.length >= n) return m2.slice(0, n);
+      }
+    }
+  }
+  return padTo([], n);
+}
+
+function padTo(arr, n) {
+  const out = arr.slice(0, n);
+  while (out.length < n) out.push("");
+  return out;
+}
+
 // Orquesta: lee el PDF y devuelve las unidades parseadas.
-// Usa el método por líneas y, si detecta pocas unidades, el método robusto
-// sobre el texto completo. Devuelve también las líneas crudas (diagnóstico).
+// Prueba 3 métodos en orden: por líneas → robusto → por columnas (PDF transpuesto).
+// Devuelve también las líneas crudas (diagnóstico) y el método que funcionó.
 export async function parseCdoFile(file, onProgress) {
   const lines = await extractPdfLines(file, onProgress);
   let units = parseCdoLines(lines);
   let method = "lineas";
-  if (!units.length) {
-    units = parseCdoWhole(lines);
-    method = "robusto";
-  }
+  if (!units.length) { units = parseCdoWhole(lines); method = "robusto"; }
+  if (!units.length) { units = parseCdoColumns(lines); method = "columnas"; }
   return { units, totalLines: lines.length, lines, method };
 }
