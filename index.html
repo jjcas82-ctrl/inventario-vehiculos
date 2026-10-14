@@ -299,6 +299,8 @@
         <div class="row gap wrap" style="margin:8px 0;align-items:center">
           <button id="inv-clear-filters" class="btn btn-ghost">Limpiar filtros</button>
           <button id="inv-report" class="btn btn-primary">📊 Generar reporte (CSV de lo filtrado)</button>
+          <button id="cdo-upload-btn" class="btn" data-perm="vehicle.edit">📄 Subir CDO (unidades en tránsito)</button>
+          <input id="cdo-file" type="file" accept="application/pdf,.pdf" hidden />
           <label class="chk-inline"><input type="checkbox" id="inv-show-sold" /> Incluir vendidas/entregadas</label>
           <span id="inv-count" class="muted" style="align-self:center"></span>
         </div>
@@ -671,6 +673,23 @@
         <button id="modal-close" class="btn btn-ghost">✕</button>
       </div>
       <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Modal de carga de CDO (vista previa de unidades en tránsito) -->
+  <div id="cdo-modal" class="modal" hidden style="display:none">
+    <div class="modal-card" style="max-width:900px">
+      <div class="row between">
+        <h2>📄 Carga de CDO · Unidades en tránsito</h2>
+        <button id="cdo-close" class="btn btn-ghost">✕</button>
+      </div>
+      <div id="cdo-progress" class="hint"></div>
+      <div class="summary" id="cdo-summary"></div>
+      <div id="cdo-preview"></div>
+      <div class="row gap wrap" style="margin-top:12px">
+        <button id="cdo-confirm" class="btn btn-primary" hidden>✓ Cargar unidades nuevas</button>
+        <button id="cdo-cancel" class="btn btn-ghost">Cerrar</button>
+      </div>
     </div>
   </div>
 

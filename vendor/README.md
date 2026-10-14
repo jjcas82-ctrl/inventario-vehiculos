@@ -46,3 +46,31 @@ Cada archivo debe pesar varios cientos de KB y empezar con código JavaScript
 
 Estos archivos son el build **ESM** de ZXing (el mismo que servía el CDN). Al estar
 en el mismo origen que la app, cargan más rápido y sin depender de la red.
+
+
+---
+
+## pdf.js — Para leer el archivo CDO (unidades en tránsito)
+
+La carga del **CDO de GM** usa **pdf.js** (de Mozilla) para extraer el texto del PDF.
+Igual que ZXing, se carga primero desde una copia local y, si no está, del CDN.
+
+### Archivos a colocar
+
+Crea la carpeta `vendor/pdfjs/` y coloca ahí estos 2 archivos:
+
+| Guardar como | Descargar de |
+|---|---|
+| `vendor/pdfjs/pdf.min.mjs`        | https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs |
+| `vendor/pdfjs/pdf.worker.min.mjs` | https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs |
+
+```bash
+mkdir -p vendor/pdfjs
+curl -L "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs"        -o vendor/pdfjs/pdf.min.mjs
+curl -L "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs" -o vendor/pdfjs/pdf.worker.min.mjs
+```
+
+> Mientras no estén, la carga de CDO **sigue funcionando** usando el CDN (requiere
+> internet). Al colocarlos, también funciona offline. Son archivos grandes
+> (~1-2 MB cada uno); por eso NO se agregan a la precarga del service worker:
+> se cachearán solos la primera vez que se use la carga de CDO (network-first).

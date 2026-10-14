@@ -1,0 +1,196 @@
+// cdoui.js — Interfaz de carga del CDO: botón, modal, vista previa (nuevas/
+// duplicadas/errores), barra de progreso y guardado masivo en "En tránsito".
+// Optimizado para flotillas de 100+ unidades (paginación de la vista previa).
+
+import { store } from "./storage.js";
+import { parseCdoFile } from "./cdo.js";
+import { notify } from "./ui.js";
+import { escapeHtml } from "./agencies.js";
+import { logAction } from "./syslog.js";
+import * as auth from "./auth.js";
+
+let lastParsed = null;   // { nuevas:[], duplicadas:[], errores:[] }
+let onLoaded = () => {}; // callback para refrescar el inventario tras cargar
+
+export function initCdoUpload(refreshCallback) {
+  onLoaded = refreshCallback || (() => {});
+  const btn = document.getElementById("cdo-upload-btn");
+  const fileInput = document.getElementById("cdo-file");
+  if (!btn || !fileInput) return;
+
+  btn.addEventListener("click", () => {
+    if (!auth.can("vehicle.edit")) {
+      notify("Tu rol no permite cargar unidades.", { type: "warn" });
+      return;
+    }
+    fileInput.value = "";
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (file) await handleFile(file);
+  });
+
+  document.getElementById("cdo-close").addEventListener("click", closeModal);
+  document.getElementById("cdo-cancel").addEventListener("click", closeModal);
+  document.getElementById("cdo-confirm").addEventListener("click", confirmLoad);
+  document.getElementById("cdo-modal").addEventListener("click", (e) => {
+    if (e.target.id === "cdo-modal") closeModal();
+  });
+}
+
+function openModal() {
+  const m = document.getElementById("cdo-modal");
+  m.hidden = false; m.style.display = "flex";
+}
+function closeModal() {
+  const m = document.getElementById("cdo-modal");
+  m.hidden = true; m.style.display = "none";
+  lastParsed = null;
+}
+
+async function handleFile(file) {
+  openModal();
+  const prog = document.getElementById("cdo-progress");
+  const summary = document.getElementById("cdo-summary");
+  const preview = document.getElementById("cdo-preview");
+  const confirmBtn = document.getElementById("cdo-confirm");
+  confirmBtn.hidden = true;
+  summary.innerHTML = "";
+  preview.innerHTML = "";
+  prog.textContent = "Leyendo el PDF…";
+
+  let result;
+  try {
+    result = await parseCdoFile(file, (p, total) => {
+      prog.textContent = `Leyendo página ${p} de ${total}…`;
+    });
+  } catch (e) {
+    prog.textContent = "";
+    preview.innerHTML = `<p style="color:var(--danger)">No se pudo leer el PDF: ${escapeHtml(e.message || String(e))}.
+      Verifica que sea el archivo CDO de GM. Si el problema persiste, puede que el formato haya cambiado.</p>`;
+    return;
+  }
+
+  prog.textContent = `Analizadas ${result.totalLines} líneas del documento.`;
+
+  // Clasificar: nuevas / duplicadas (ya existen) / errores (VIN inválido).
+  const nuevas = [], duplicadas = [], errores = [];
+  for (const u of result.units) {
+    if (!u.vin || u.vin.length !== 17) { errores.push(u); continue; }
+    if (store.getVehicle(u.vin)) duplicadas.push(u);
+    else nuevas.push(u);
+  }
+  lastParsed = { nuevas, duplicadas, errores };
+
+  summary.innerHTML = `
+    <div class="stat"><b>${result.units.length}</b><span>Detectadas</span></div>
+    <div class="stat"><b style="color:var(--primary)">${nuevas.length}</b><span>Nuevas a cargar</span></div>
+    <div class="stat"><b style="color:#b45309">${duplicadas.length}</b><span>Ya registradas</span></div>
+    <div class="stat"><b style="color:var(--danger)">${errores.length}</b><span>Con error</span></div>`;
+
+  preview.innerHTML =
+    sectionNuevas(nuevas) +
+    sectionDuplicadas(duplicadas) +
+    sectionErrores(errores);
+
+  // Enlaces "Ver unidad" para las duplicadas.
+  preview.querySelectorAll(".cdo-see").forEach(a =>
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      closeModal();
+      // Abre la ficha de la unidad existente (función global del inventario).
+      if (window.__openVehicle) window.__openVehicle(a.dataset.vin);
+    }));
+
+  confirmBtn.hidden = nuevas.length === 0;
+  confirmBtn.textContent = `✓ Cargar ${nuevas.length} unidad${nuevas.length === 1 ? "" : "es"} nueva${nuevas.length === 1 ? "" : "s"}`;
+}
+
+// --- Secciones de la vista previa (con paginación para volúmenes grandes) ---
+const PAGE = 50;
+
+function unitRow(u, i) {
+  return `<tr><td>${i + 1}</td><td><code>${escapeHtml(u.vin)}</code></td>
+    <td>${escapeHtml(u.make)}</td><td>${escapeHtml(u.model)}</td>
+    <td>${escapeHtml(u.version)}</td><td>${escapeHtml(u.color)}</td><td>${escapeHtml(u.year)}</td></tr>`;
+}
+
+function pagedTable(units, headExtra) {
+  const shown = units.slice(0, PAGE).map(unitRow).join("");
+  const more = units.length > PAGE
+    ? `<tr><td colspan="7" class="muted">… y ${units.length - PAGE} más (se cargarán todas al confirmar).</td></tr>`
+    : "";
+  return `<div class="table-wrap" style="max-height:300px;overflow:auto">
+    <table class="table"><thead><tr>
+      <th>#</th><th>VIN</th><th>Marca</th><th>Modelo</th><th>Versión</th><th>Color</th><th>Año</th>
+    </tr></thead><tbody>${shown}${more}</tbody></table></div>`;
+}
+
+function sectionNuevas(nuevas) {
+  if (!nuevas.length) return "<h3>✅ Nuevas (0)</h3><p class='muted'>No hay unidades nuevas para cargar.</p>";
+  return `<h3>✅ Nuevas a cargar (${nuevas.length})</h3>` + pagedTable(nuevas);
+}
+
+function sectionDuplicadas(dups) {
+  if (!dups.length) return "";
+  const rows = dups.slice(0, PAGE).map((u, i) => {
+    const v = store.getVehicle(u.vin);
+    const estado = v ? ({ dentro: "Dentro", fuera: "Fuera", transito: "En tránsito" }[v.status] || v.status || "—") : "—";
+    return `<tr><td>${i + 1}</td><td><code>${escapeHtml(u.vin)}</code></td>
+      <td>${escapeHtml(u.make || v?.make || "")}</td><td>${escapeHtml(u.model || v?.model || "")}</td>
+      <td>${escapeHtml(estado)}</td>
+      <td><a href="#" class="cdo-see" data-vin="${escapeHtml(u.vin)}">Ver unidad →</a></td></tr>`;
+  }).join("");
+  const more = dups.length > PAGE ? `<tr><td colspan="6" class="muted">… y ${dups.length - PAGE} más.</td></tr>` : "";
+  return `<h3 style="color:#b45309">⚠️ Ya registradas (${dups.length}) — no se cargarán</h3>
+    <p class="hint">Estas unidades ya existen. Valida si corresponde. No se duplicarán.</p>
+    <div class="table-wrap" style="max-height:220px;overflow:auto">
+      <table class="table"><thead><tr>
+        <th>#</th><th>VIN</th><th>Marca</th><th>Modelo</th><th>Estado actual</th><th></th>
+      </tr></thead><tbody>${rows}${more}</tbody></table></div>`;
+}
+
+function sectionErrores(errs) {
+  if (!errs.length) return "";
+  const rows = errs.map((u, i) =>
+    `<tr><td>${i + 1}</td><td><code>${escapeHtml(u.vin || "")}</code></td>
+      <td class="muted">${escapeHtml((u.raw || []).join(" | ").slice(0, 80))}</td></tr>`).join("");
+  return `<h3 style="color:var(--danger)">❌ Con error de lectura (${errs.length})</h3>
+    <p class="hint">No se pudo reconstruir un VIN válido de 17 caracteres. Revisa estas filas en el PDF.</p>
+    <div class="table-wrap" style="max-height:180px;overflow:auto">
+      <table class="table"><thead><tr><th>#</th><th>VIN leído</th><th>Texto origen</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+}
+
+// --- Guardado masivo ---
+function confirmLoad() {
+  if (!lastParsed || !lastParsed.nuevas.length) return;
+  const by = auth.currentUser()?.name || "—";
+  const now = new Date().toISOString();
+
+  const toSave = lastParsed.nuevas.map(u => ({
+    vin: u.vin,
+    make: u.make || "",
+    model: u.model || "",
+    powertrain: u.version || "",
+    color: u.color || "",
+    year: u.year || "",
+    status: "transito",       // ← estatus inicial: en tránsito (facturada por planta)
+    condition: "nuevo",
+    origin: "CDO",
+    transitAt: now,
+    transitBy: by,
+  }));
+
+  const { added, skipped } = store.bulkUpsertVehicles(toSave, { skipExisting: true });
+  logAction("cdo.load", `Cargadas ${added.length} unidades en tránsito (CDO)` +
+    (skipped.length ? ` · ${skipped.length} omitidas por existir` : ""), by);
+
+  notify(`Se cargaron ${added.length} unidades en tránsito.` +
+    (skipped.length ? ` ${skipped.length} ya existían y se omitieron.` : ""),
+    { type: "success", timeout: 6000 });
+
+  closeModal();
+  onLoaded();
+}

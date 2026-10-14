@@ -229,6 +229,29 @@ export const store = {
     return db.vehicles[v.vin];
   },
 
+  // Alta/actualización MASIVA en una sola escritura (para cargar flotillas del CDO).
+  // `vehiclesArr`: array de objetos con al menos { vin, ... }.
+  // Opciones: { skipExisting:true } omite los VIN que ya existan (no los pisa).
+  // Devuelve { added:[vin], skipped:[vin] }.
+  bulkUpsertVehicles(vehiclesArr, { skipExisting = true } = {}) {
+    const db = read();
+    const now = new Date().toISOString();
+    const added = [], skipped = [];
+    for (const v of (vehiclesArr || [])) {
+      if (!v || !v.vin) continue;
+      const prev = db.vehicles[v.vin];
+      if (prev && skipExisting) { skipped.push(v.vin); continue; }
+      db.vehicles[v.vin] = {
+        ...prev, ...v,
+        createdAt: prev?.createdAt || now,
+        updatedAt: now,
+      };
+      added.push(v.vin);
+    }
+    write(db); // una sola escritura para todo el lote
+    return { added, skipped };
+  },
+
   // ---- Usuario actual (quién registra) ----
   getUser() { try { return localStorage.getItem(USER_KEY) || ""; } catch (e) { return ""; } },
   setUser(name) { try { localStorage.setItem(USER_KEY, name || ""); } catch (e) {} },
