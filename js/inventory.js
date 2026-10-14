@@ -191,6 +191,25 @@ function exportInventoryCsv() {
   notify(`Reporte generado con ${list.length} unidad(es).`, { type: "success" });
 }
 
+// Diferencia en días (entero, floor) entre dos Date. Mínimo implícito según uso.
+function daysBetween(a, b) {
+  if (!(a instanceof Date) || !(b instanceof Date) || isNaN(a) || isNaN(b)) return null;
+  return Math.floor((b - a) / (1000 * 60 * 60 * 24));
+}
+
+// Parsea una fecha "YYYY-MM-DD" como fecha LOCAL (sin corrimiento de zona horaria).
+function parseYmd(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "").trim());
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+// Fecha de ENTRADA de la unidad = primer evento "entry" de ese VIN.
+function entryDateFor(vin) {
+  const evs = store.eventsForVin(vin).filter(e => e.type === "entry");
+  return evs.length ? new Date(evs[0].at) : null;
+}
+
 export function openVehicle(vin) {
   const v = store.getVehicle(vin);
   if (!v) return;
@@ -225,6 +244,54 @@ export function openVehicle(vin) {
   const canEdit = auth.can("vehicle.edit") && !cerrada;
   const canEditVin = auth.can("vehicle.editVin");
   const dis = canEdit ? "" : "disabled";
+
+  // --- Sección "Datos de facturación (CDO)" (SOLO LECTURA) ---
+  // Se muestra únicamente si al menos uno de los campos del CDO tiene valor,
+  // para no ensuciar fichas de unidades antiguas sin estos datos.
+  const cdoFields = [
+    ["Factura", v.factura],
+    ["Núm. movimiento", v.numMov],
+    ["Pedimento", v.pedimento],
+    ["Aduana", v.aduana],
+    ["Fecha de pedimento", v.fechaPedimento],
+    ["Fecha de facturación", v.fechaFactura],
+    ["Modelo GM", v.modeloGm],
+    ["O/V", v.ov],
+    ["Cve. Veh.", v.cveVeh],
+    ["Origen", v.origin],
+  ];
+  const tieneCdo = cdoFields.some(([, val]) => val != null && String(val).trim() !== "");
+
+  // Días calculados: tránsito (facturación → entrada) e inventario (entrada → hoy).
+  const entrada = entryDateFor(vin);
+  const refTransito = parseYmd(v.fechaFactura) || (v.transitAt ? new Date(v.transitAt) : null);
+  let diasTransitoTxt;
+  if (!entrada) {
+    diasTransitoTxt = "En tránsito (aún no llega)";
+  } else if (refTransito) {
+    const d = daysBetween(refTransito, entrada);
+    diasTransitoTxt = (d == null) ? "—" : String(Math.max(0, d));
+  } else {
+    diasTransitoTxt = "—";
+  }
+  let diasInventarioTxt;
+  if (!entrada) {
+    diasInventarioTxt = "—";
+  } else {
+    const d = daysBetween(entrada, new Date());
+    diasInventarioTxt = (d == null) ? "—" : String(Math.max(0, d));
+  }
+
+  const cdoSection = tieneCdo ? `
+    <hr />
+    <h3>Datos de facturación (CDO)</h3>
+    <p class="hint">Datos cargados desde el CDO de planta. Son de solo lectura y no se editan desde esta ficha.</p>
+    <dl class="vin-result">
+      ${cdoFields.filter(([, val]) => val != null && String(val).trim() !== "")
+        .map(([label, val]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(val))}</dd>`).join("")}
+      <dt>Días de tránsito</dt><dd>${escapeHtml(diasTransitoTxt)}</dd>
+      <dt>Días en inventario</dt><dd>${escapeHtml(diasInventarioTxt)}</dd>
+    </dl>` : "";
 
   // Fila del VIN: editable solo por administrador; para el resto es de solo lectura.
   const vinRow = canEditVin
@@ -296,6 +363,7 @@ export function openVehicle(vin) {
         </div>
       </div>
     </div>
+    ${cdoSection}
     ${canEdit ? '<div class="row gap"><button id="save-veh" class="btn btn-primary">Guardar cambios</button></div>' : ''}
     <hr />
     <div class="row between wrap">

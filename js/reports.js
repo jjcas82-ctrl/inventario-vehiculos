@@ -9,6 +9,10 @@ let lastRows = [];   // filas actuales (para copiar/exportar)
 let lastCols = [];   // columnas actuales
 let sortState = { col: null, dir: 1 };
 
+// FEATURE 4 — Columnas seleccionadas en el reporte PERSONALIZADO (claves del catálogo).
+// Por defecto, unas pocas útiles. El usuario las ajusta con casillas (checkboxes).
+let customCols = ["vin", "make", "model", "fechaFactura", "diasTransito", "diasInventario"];
+
 export function initReports() {
   const ids = ["rep-type", "rep-agency", "rep-condition", "rep-stage", "rep-from", "rep-to", "rep-days", "rep-search"];
   ids.forEach(id => {
@@ -52,6 +56,70 @@ function lastMoveDate(vin) {
   const evs = store.eventsForVin(vin);
   return evs.length ? new Date(evs[evs.length - 1].at) : null;
 }
+
+// Primer evento "entry" de un VIN = fecha de ENTRADA de la unidad.
+function firstEntryDate(vin) {
+  const evs = store.eventsForVin(vin).filter(e => e.type === "entry");
+  return evs.length ? new Date(evs[0].at) : null;
+}
+// Parsea "YYYY-MM-DD" como fecha LOCAL (evita corrimiento por zona horaria).
+function parseYmd(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "").trim());
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+// Etiqueta legible del estado de la unidad.
+const STATUS_LABEL = { dentro: "Dentro", fuera: "Fuera", transito: "En tránsito" };
+
+// Días de tránsito: facturación (o transitAt) → entrada. "En tránsito" si no llegó.
+function diasTransito(v) {
+  const entrada = firstEntryDate(v.vin);
+  if (!entrada) return "En tránsito";
+  const ref = parseYmd(v.fechaFactura) || (v.transitAt ? new Date(v.transitAt) : null);
+  if (!ref || isNaN(ref)) return "";
+  return String(Math.max(0, daysBetween(ref, entrada)));
+}
+// Días en inventario: entrada → hoy. "—" si no ha entrado.
+function diasInventario(v) {
+  const entrada = firstEntryDate(v.vin);
+  if (!entrada) return "—";
+  return String(Math.max(0, daysBetween(entrada, new Date())));
+}
+
+// Catálogo de columnas disponibles para el reporte PERSONALIZADO.
+// { key, label, value(v) } — value() devuelve el texto a mostrar/exportar.
+const CUSTOM_COLUMNS = [
+  { key: "vin",             label: "VIN",                 value: v => v.vin || "" },
+  { key: "make",            label: "Marca",               value: v => v.make || "" },
+  { key: "model",           label: "Modelo",              value: v => v.model || "" },
+  { key: "year",            label: "Año modelo",          value: v => v.year || "" },
+  { key: "color",           label: "Color",               value: v => v.color || "" },
+  { key: "engineNo",        label: "No. de motor",        value: v => v.engineNo || "" },
+  { key: "mileage",         label: "Kilometraje",         value: v => (v.mileage != null && v.mileage !== "" ? v.mileage : "") },
+  { key: "vehType",         label: "Tipo",                value: v => v.vehType || v.bodyClass || "" },
+  { key: "powertrain",      label: "Versión/tren",        value: v => v.powertrain || "" },
+  { key: "transmission",    label: "Transmisión",         value: v => v.transmission || "" },
+  { key: "plate",           label: "Placa",               value: v => v.plate || "" },
+  { key: "currentLocation", label: "Ubicación",           value: v => v.currentLocation || "" },
+  { key: "stage",           label: "Etapa",               value: v => v.stage || "" },
+  { key: "condition",       label: "Condición",           value: v => v.condition || "" },
+  { key: "currentAgency",   label: "Agencia",             value: v => v.currentAgency || "" },
+  { key: "status",          label: "Estado",              value: v => STATUS_LABEL[v.status] || v.status || "" },
+  { key: "entryAt",         label: "Ingreso",             value: v => v.entryAt ? new Date(v.entryAt).toLocaleString() : "" },
+  { key: "entryBy",         label: "Registró",            value: v => v.entryBy || v.lastBy || "" },
+  { key: "factura",         label: "Factura",             value: v => v.factura || "" },
+  { key: "numMov",          label: "Núm. movimiento",     value: v => v.numMov || "" },
+  { key: "pedimento",       label: "Pedimento",           value: v => v.pedimento || "" },
+  { key: "aduana",          label: "Aduana",              value: v => v.aduana || "" },
+  { key: "fechaPedimento",  label: "Fecha de pedimento",  value: v => v.fechaPedimento || "" },
+  { key: "fechaFactura",    label: "Fecha de facturación",value: v => v.fechaFactura || "" },
+  { key: "modeloGm",        label: "Modelo GM",           value: v => v.modeloGm || "" },
+  { key: "ov",              label: "O/V",                 value: v => v.ov || "" },
+  { key: "cveVeh",          label: "Cve. Veh.",           value: v => v.cveVeh || "" },
+  { key: "origin",          label: "Origen",              value: v => v.origin || "" },
+  { key: "diasTransito",    label: "Días de tránsito",    value: v => diasTransito(v) },
+  { key: "diasInventario",  label: "Días en inventario",  value: v => diasInventario(v) },
+];
 
 function buildData() {
   const type = document.getElementById("rep-type").value;
@@ -163,6 +231,17 @@ function buildData() {
       .filter(v => !v.model || !v.color)
       .map(v => [v.vin, v.make || "", v.year || "", v.model ? "" : "Sí", v.color ? "" : "Sí", v.currentAgency || ""]);
   }
+  else if (type === "custom") {
+    // Reporte PERSONALIZADO: solo las columnas que eligió el usuario.
+    // Incluye unidades "dentro" y "en tránsito" (excluye las cerradas: "fuera").
+    // Respeta el ORDEN del catálogo para columnas estables.
+    const usar = CUSTOM_COLUMNS.filter(c => customCols.includes(c.key));
+    cols = usar.map(c => c.label);
+    rows = store.listVehicles()
+      .filter(v => v.status !== "fuera")
+      .filter(matchVehicle)
+      .map(v => usar.map(c => c.value(v)));
+  }
 
   return { type, cols, rows };
 }
@@ -214,6 +293,7 @@ function applyFilterVisibility(type) {
     flow:       { agency: 1, condition: 0, stage: 0, from: 1, to: 1, days: 0, search: 1 },
     sold:       { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
     incomplete: { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
+    custom:     { agency: 1, condition: 1, stage: 0, from: 0, to: 0, days: 0, search: 1 },
   };
   const cfg = map[type] || map.inventory;
   const fieldOf = (id) => {
@@ -235,6 +315,48 @@ function applyFilterVisibility(type) {
   toggle("rep-to", cfg.to);
   toggle("rep-days", cfg.days);
   toggle("rep-search", cfg.search);
+
+  // Panel de casillas para elegir columnas (solo en reporte "custom").
+  renderCustomColsPanel(type === "custom");
+}
+
+// Crea/actualiza el panel de casillas para elegir columnas del reporte personalizado.
+// Se inserta una sola vez (justo después del resumen) y se oculta si no aplica.
+function renderCustomColsPanel(show) {
+  let panel = document.getElementById("rep-custom-cols");
+  if (!show) {
+    if (panel) panel.style.display = "none";
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "rep-custom-cols";
+    panel.className = "filters";
+    panel.style.margin = "8px 0";
+    const anchor = document.getElementById("rep-summary");
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(panel, anchor);
+    else document.querySelector("#tab-reports .card")?.appendChild(panel);
+  }
+  panel.style.display = "";
+  // Regenerar las casillas desde el catálogo (marcando las activas).
+  panel.innerHTML =
+    `<div class="field grow"><label>Columnas del reporte (elige las que necesites)</label>
+      <div class="row gap wrap">` +
+    CUSTOM_COLUMNS.map(c =>
+      `<label class="chk" style="display:inline-flex;align-items:center;gap:4px;margin:2px 8px 2px 0">
+        <input type="checkbox" class="rep-col-chk" value="${escapeHtml(c.key)}" ${customCols.includes(c.key) ? "checked" : ""} />
+        ${escapeHtml(c.label)}
+      </label>`).join("") +
+    `</div></div>`;
+
+  panel.querySelectorAll(".rep-col-chk").forEach(chk =>
+    chk.addEventListener("change", () => {
+      const key = chk.value;
+      if (chk.checked) { if (!customCols.includes(key)) customCols.push(key); }
+      else customCols = customCols.filter(k => k !== key);
+      render();
+    })
+  );
 }
 
 function render() {
