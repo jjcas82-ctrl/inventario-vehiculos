@@ -73,6 +73,9 @@ async function handleFile(file) {
   }
 
   prog.textContent = `Analizadas ${result.totalLines} líneas del documento (método: ${result.method}).`;
+  if (result.method === "columnas") {
+    prog.innerHTML += `<br><span style="color:#b45309">ℹ️ Este PDF viene en formato por columnas. Se cargan VIN, factura, color y datos de facturación; el <b>modelo</b> se completará al dar entrada (al decodificar el VIN).</span>`;
+  }
 
   // Clasificar: nuevas / duplicadas (ya existen) / errores (VIN inválido).
   const nuevas = [], duplicadas = [], errores = [];
