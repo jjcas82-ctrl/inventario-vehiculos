@@ -266,6 +266,7 @@ export const store = {
     db.events.push(rec);
     // Actualiza estado del vehículo según el evento
     const v = db.vehicles[ev.vin] || { vin: ev.vin };
+    const wasTransito = v.status === "transito"; // estatus ANTES de este evento
     if (ev.type === "entry" || ev.type === "move") {
       v.currentAgency = ev.agency;
       v.currentArea = ev.area || "";
@@ -275,6 +276,23 @@ export const store = {
         // Fecha de ingreso y usuario del ingreso actual
         v.entryAt = rec.at;
         v.entryBy = by;
+        // FEATURE 3: al ARRIBAR una unidad que venía "en tránsito" (o que trae
+        // fecha de facturación del CDO), persistimos los días de tránsito y la
+        // fecha de arribo. Es solo una conveniencia: la ficha y los reportes
+        // también lo calculan on-the-fly (fechaFactura/transitAt → entrada).
+        if (wasTransito || v.fechaFactura || v.transitAt) {
+          // Fecha de referencia: la facturación del CDO (YYYY-MM-DD, local) o
+          // el momento en que se marcó "en tránsito".
+          let ref = null;
+          const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v.fechaFactura || "").trim());
+          if (m) ref = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+          else if (v.transitAt) ref = new Date(v.transitAt);
+          if (ref && !isNaN(ref)) {
+            const dias = Math.floor((new Date(rec.at) - ref) / (1000 * 60 * 60 * 24));
+            v.transitDays = Math.max(0, dias);
+          }
+          v.arrivedAt = rec.at;
+        }
         // Etapa inicial al ingresar (si no tenía una).
         if (!v.stage) {
           v.stage = "Recepción";

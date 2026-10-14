@@ -206,6 +206,16 @@ function confirmLoad() {
     origin: "CDO",
     transitAt: now,
     transitBy: by,
+    // Campos del encabezado de facturación del CDO (solo lectura en la ficha).
+    ov: u.ov || "",
+    cveVeh: u.cveVeh || "",
+    factura: u.factura || "",
+    numMov: u.numMov || "",
+    aduana: u.aduana || "",
+    pedimento: u.pedimento || "",
+    fechaPedimento: u.fechaPedimento || "",
+    modeloGm: u.modeloGm || "",
+    fechaFactura: u.fechaFactura || "",
   }));
 
   const { added, skipped } = store.bulkUpsertVehicles(toSave, { skipExisting: true });

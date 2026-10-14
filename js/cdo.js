@@ -69,6 +69,15 @@ const YEAR_RE = /\b(19|20)\d{2}\b/;
 const DESC_RE = /^UN\s+(VEHICULO|CAMION)\b/i;
 const DESC_ANY_RE = /UN\s+(VEHICULO|CAMION)\b/i;    // descripción en cualquier parte
 
+// --- Patrones para los campos del ENCABEZADO de facturación del CDO ---
+// (ov, cveVeh, factura, numMov, aduana, pedimento, fechaPedimento, modeloGm, fechaFactura).
+const FECHA_RE = /\b(\d{4}-\d{2}-\d{2})\b/;              // fecha YYYY-MM-DD
+const FACTURA_RE = /^\d{6,8}$/;                          // línea que es solo dígitos (6-8)
+const NUMMOV_RE = /^[A-Z]{2,4}\d{5,}$/;                  // Num. Mov. tipo "CAD56712631"
+const PEDIMENTO_RE = /^\d{4}-\w\d-\d{6,7}$/;             // pedimento "4024-F3-6002272"
+// Línea del modelo GM: "1VC26 1SL/E 2026 N 351,421.31 ..." → primer token = clave GM.
+const MODELO_GM_LINE_RE = /^([0-9A-Z]{4,6})\s+\S+\s+(?:19|20)\d{2}\s+N\b/;
+
 // Marcas conocidas que aparecen en la descripción de GM.
 const MARCAS = ["CHEVROLET", "GMC", "BUICK", "CADILLAC"];
 
@@ -114,17 +123,103 @@ function parseDescription(desc) {
   return { make, model, version };
 }
 
+// Extrae los campos del ENCABEZADO de facturación a partir de las líneas crudas
+// (ventana) de una unidad. Es TOLERANTE: usa regex sobre cada línea y, si un
+// campo no se encuentra, lo deja como "". No rompe la extracción existente.
+//
+// Layout típico por unidad:
+//   FXFPB4 003AM05 LZWRLMGL2TB5   <- ov, cveVeh, VIN(parte1)
+//   71002                          <- VIN(parte2)
+//   5751787                        <- factura (solo dígitos)
+//   CAD56712631                    <- numMov
+//   TOLUCA,EDO. DE MÉXICO          <- aduana
+//   4024-F3-6002272                <- pedimento
+//   2026-07-07                     <- fechaPedimento (primera fecha)
+//   1VC26 1SL/E 2026 N 351,421.31  <- modeloGm (primer token)
+//   UN VEHICULO CHEVROLET GROOVE…  <- descripción
+//   ROJO METALICO                  <- color
+//   2026-10-12                     <- fechaFactura (última fecha)
+function extractHeaderFields(rawLines, vinLine) {
+  const h = {
+    ov: "", cveVeh: "", factura: "", numMov: "", aduana: "",
+    pedimento: "", fechaPedimento: "", modeloGm: "", fechaFactura: "",
+  };
+  const fechas = []; // todas las fechas encontradas, en orden de aparición
+
+  // ov y cveVeh: los 2 primeros tokens de la línea que contiene el VIN (parte1).
+  if (vinLine) {
+    const toks = vinLine.trim().split(/\s+/);
+    if (toks.length >= 2) {
+      // Solo si parecen claves (alfanuméricas) y no el VIN completo mismo.
+      if (/^[A-Z0-9]{3,8}$/i.test(toks[0]) && !VIN_RE.test(toks[0])) h.ov = toks[0];
+      if (/^[A-Z0-9]{3,10}$/i.test(toks[1]) && !VIN_RE.test(toks[1])) h.cveVeh = toks[1];
+    }
+  }
+
+  for (const l of rawLines) {
+    const line = String(l || "").trim();
+    if (!line) continue;
+
+    // Fechas (acumulamos todas: primera = fechaPedimento, última = fechaFactura).
+    const fm = line.match(FECHA_RE);
+    if (fm) fechas.push(fm[1]);
+
+    // Factura: línea que es SOLO dígitos (6-8).
+    if (!h.factura && FACTURA_RE.test(line)) { h.factura = line; continue; }
+
+    // Num. Mov.: letras+dígitos tipo "CAD56712631".
+    if (!h.numMov && NUMMOV_RE.test(line)) { h.numMov = line; continue; }
+
+    // Pedimento: "4024-F3-6002272" (o similar con guiones).
+    if (!h.pedimento) {
+      const pm = line.match(PEDIMENTO_RE) || line.match(/\b\d{4}-\w\d-\d{6,7}\b/);
+      if (pm) { h.pedimento = pm[0] || line; continue; }
+    }
+
+    // Modelo GM: primer token de la línea "clave Pq Año N Precio…".
+    if (!h.modeloGm) {
+      const mm = line.match(MODELO_GM_LINE_RE);
+      if (mm) { h.modeloGm = mm[1]; continue; }
+    }
+
+    // Aduana: línea con texto en mayúsculas que incluye "EDO." o estado/ciudad.
+    // Heurística tolerante: contiene letras + coma y NO es descripción/color simple.
+    if (!h.aduana && /[A-ZÁÉÍÓÚÑ]/.test(line) && /,/.test(line) &&
+        !DESC_ANY_RE.test(line) && !FACTURA_RE.test(line) && !NUMMOV_RE.test(line)) {
+      h.aduana = line.replace(/\s+/g, " ").trim();
+      continue;
+    }
+  }
+
+  if (fechas.length) {
+    h.fechaPedimento = fechas[0];
+    h.fechaFactura = fechas[fechas.length - 1];
+  }
+  return h;
+}
+
 // Parsea las líneas del CDO y devuelve un array de unidades detectadas.
-// Cada unidad: { vin, make, model, version, color, year, raw }.
+// Cada unidad: { vin, make, model, version, color, year, raw } + campos del
+// encabezado de facturación (ov, cveVeh, factura, numMov, aduana, pedimento,
+// fechaPedimento, modeloGm, fechaFactura).
 export function parseCdoLines(lines) {
   const units = [];
   for (let i = 0; i < lines.length; i++) {
     const found = findVinAt(lines, i);
     if (!found) continue;
 
-    const unit = { vin: found.vin, make: "", model: "", version: "", color: "", year: "", raw: [] };
+    const unit = {
+      vin: found.vin, make: "", model: "", version: "", color: "", year: "", raw: [],
+      // Campos del encabezado de facturación (se completan abajo).
+      ov: "", cveVeh: "", factura: "", numMov: "", aduana: "",
+      pedimento: "", fechaPedimento: "", modeloGm: "", fechaFactura: "",
+    };
+    const vinLine = lines[i]; // línea que contiene el VIN (parte1) → ov/cveVeh
     unit.raw.push(lines[i]);
     if (found.consumed) unit.raw.push(lines[i + 1]);
+
+    // Ventana de líneas crudas de ESTA unidad (para extraer el encabezado).
+    const windowLines = [];
 
     // Buscamos hacia adelante (ventana corta) la descripción, el año y el color.
     const windowEnd = Math.min(lines.length, i + 12);
@@ -132,6 +227,7 @@ export function parseCdoLines(lines) {
       const l = lines[j];
       // Si aparece otro VIN, cortamos: empieza otra unidad.
       if (findVinAt(lines, j)) break;
+      windowLines.push(l);
 
       if (!unit.model && DESC_RE.test(l)) {
         const { make, model, version } = parseDescription(l);
@@ -150,6 +246,11 @@ export function parseCdoLines(lines) {
         if (ym) unit.year = ym[0];
       }
     }
+    // Ampliación best-effort: campos del encabezado de facturación.
+    // La ventana incluye la línea del VIN (parte2) para no perder la factura
+    // cuando viene inmediatamente después del VIN partido.
+    const headerWindow = (found.consumed ? [lines[i + 1]] : []).concat(windowLines);
+    Object.assign(unit, extractHeaderFields(headerWindow, vinLine));
     units.push(unit);
     i += found.consumed; // saltar la línea del VIN partido ya consumida
   }
@@ -201,7 +302,12 @@ function parseCdoWhole(lines) {
   while ((dm = descGlobal.exec(flat))) descMatches.push({ idx: dm.index, text: dm[0] });
 
   for (const vin of foundVins) {
-    const unit = { vin, make: "", model: "", version: "", color: "", year: "", raw: [vin] };
+    const unit = {
+      vin, make: "", model: "", version: "", color: "", year: "", raw: [vin],
+      // Campos del encabezado de facturación (best-effort en el método robusto).
+      ov: "", cveVeh: "", factura: "", numMov: "", aduana: "",
+      pedimento: "", fechaPedimento: "", modeloGm: "", fechaFactura: "",
+    };
     // Posición del VIN en el texto plano (para asociar la descripción siguiente).
     const pos = flat.indexOf(vin.slice(0, 8)); // por si el VIN está partido, buscar su cabeza
     const desc = descMatches.find(d => d.idx > (pos >= 0 ? pos : 0)) || descMatches[0];
@@ -215,6 +321,18 @@ function parseCdoWhole(lines) {
     }
     const ym = flat.match(YEAR_RE);
     if (ym) unit.year = ym[0];
+
+    // Ampliación best-effort del encabezado: tomamos la ventana de líneas
+    // crudas cercana a la aparición del VIN y reutilizamos el extractor.
+    // Si no se puede ubicar con claridad, los campos quedan en "".
+    try {
+      const vinIdx = lines.findIndex(l => l.includes(vin.slice(0, 8)) || l.includes(vin));
+      if (vinIdx >= 0) {
+        const win = lines.slice(vinIdx, Math.min(lines.length, vinIdx + 13));
+        Object.assign(unit, extractHeaderFields(win, lines[vinIdx]));
+      }
+    } catch (e) { /* best-effort: no romper el parseo robusto */ }
+
     units.push(unit);
   }
   return dedupeByVin(units);
