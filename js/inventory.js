@@ -282,15 +282,34 @@ export function openVehicle(vin) {
     diasInventarioTxt = (d == null) ? "—" : String(Math.max(0, d));
   }
 
+  // Importes financieros del CDO: visibles SOLO para auditor, capturista y admin.
+  const rolActual = auth.currentUser()?.role;
+  const puedeVerImportes = ["auditor", "capturista", "admin"].includes(rolActual);
+  const importeFields = [
+    ["Paquete (Pq.)", v.pq],
+    ["Precio", v.precio],
+    ["ISAN", v.isan],
+    ["Gastos", v.gastos],
+    ["IVA", v.iva],
+    ["HB (Holdback)", v.hb],
+    ["Total", v.total],
+  ];
+  const tieneImportes = importeFields.some(([, val]) => val != null && String(val).trim() !== "");
+  const importesHtml = (puedeVerImportes && tieneImportes) ? `
+      <dt style="margin-top:6px;border-top:1px dashed var(--border);padding-top:6px"><b>Importes</b></dt><dd></dd>
+      ${importeFields.filter(([, val]) => val != null && String(val).trim() !== "")
+        .map(([label, val]) => `<dt>${escapeHtml(label)}</dt><dd>$ ${escapeHtml(String(val))}</dd>`).join("")}` : "";
+
   const cdoSection = tieneCdo ? `
     <hr />
     <h3>Datos de facturación (CDO)</h3>
-    <p class="hint">Datos cargados desde el CDO de planta. Son de solo lectura y no se editan desde esta ficha.</p>
+    <p class="hint">Datos cargados desde el CDO de planta. Son de solo lectura y no se editan desde esta ficha.${(tieneImportes && !puedeVerImportes) ? " Los importes solo los ven auditor, capturista y administrador." : ""}</p>
     <dl class="vin-result">
       ${cdoFields.filter(([, val]) => val != null && String(val).trim() !== "")
         .map(([label, val]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(val))}</dd>`).join("")}
       <dt>Días de tránsito</dt><dd>${escapeHtml(diasTransitoTxt)}</dd>
       <dt>Días en inventario</dt><dd>${escapeHtml(diasInventarioTxt)}</dd>
+      ${importesHtml}
     </dl>` : "";
 
   // Fila del VIN: editable solo por administrador; para el resto es de solo lectura.

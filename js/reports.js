@@ -117,6 +117,14 @@ const CUSTOM_COLUMNS = [
   { key: "ov",              label: "O/V",                 value: v => v.ov || "" },
   { key: "cveVeh",          label: "Cve. Veh.",           value: v => v.cveVeh || "" },
   { key: "origin",          label: "Origen",              value: v => v.origin || "" },
+  // Importes financieros del CDO (Pq, Precio, ISAN, Gastos, IVA, HB, Total).
+  { key: "pq",              label: "Paquete (Pq.)",       value: v => v.pq || "" },
+  { key: "precio",          label: "Precio",              value: v => v.precio || "" },
+  { key: "isan",            label: "ISAN",                value: v => v.isan || "" },
+  { key: "gastos",          label: "Gastos",              value: v => v.gastos || "" },
+  { key: "iva",             label: "IVA",                 value: v => v.iva || "" },
+  { key: "hb",              label: "HB (Holdback)",       value: v => v.hb || "" },
+  { key: "total",           label: "Total",               value: v => v.total || "" },
   { key: "diasTransito",    label: "Días de tránsito",    value: v => diasTransito(v) },
   { key: "diasInventario",  label: "Días en inventario",  value: v => diasInventario(v) },
 ];
