@@ -112,6 +112,8 @@ async function handleFile(file) {
     return;
   }
 
+  lastParsed.totals = result.totals || null;
+
   summary.innerHTML = `
     <div class="stat"><b>${result.units.length}</b><span>Detectadas</span></div>
     <div class="stat"><b style="color:var(--primary)">${nuevas.length}</b><span>Nuevas a cargar</span></div>
@@ -119,6 +121,7 @@ async function handleFile(file) {
     <div class="stat"><b style="color:var(--danger)">${errores.length}</b><span>Con error</span></div>`;
 
   preview.innerHTML =
+    sectionTotales(result) +
     sectionNuevas(nuevas) +
     sectionDuplicadas(duplicadas) +
     sectionErrores(errores);
@@ -142,18 +145,48 @@ const PAGE = 50;
 function unitRow(u, i) {
   return `<tr><td>${i + 1}</td><td><code>${escapeHtml(u.vin)}</code></td>
     <td>${escapeHtml(u.make)}</td><td>${escapeHtml(u.model)}</td>
-    <td>${escapeHtml(u.version)}</td><td>${escapeHtml(u.color)}</td><td>${escapeHtml(u.year)}</td></tr>`;
+    <td>${escapeHtml(u.color)}</td><td>${escapeHtml(u.year)}</td>
+    <td>${escapeHtml(u.factura)}</td><td style="text-align:right">${escapeHtml(u.total)}</td></tr>`;
 }
 
 function pagedTable(units, headExtra) {
   const shown = units.slice(0, PAGE).map(unitRow).join("");
   const more = units.length > PAGE
-    ? `<tr><td colspan="7" class="muted">… y ${units.length - PAGE} más (se cargarán todas al confirmar).</td></tr>`
+    ? `<tr><td colspan="8" class="muted">… y ${units.length - PAGE} más (se cargarán todas al confirmar).</td></tr>`
     : "";
   return `<div class="table-wrap" style="max-height:300px;overflow:auto">
     <table class="table"><thead><tr>
-      <th>#</th><th>VIN</th><th>Marca</th><th>Modelo</th><th>Versión</th><th>Color</th><th>Año</th>
+      <th>#</th><th>VIN</th><th>Marca</th><th>Modelo</th><th>Color</th><th>Año</th><th>Factura</th><th>Total</th>
     </tr></thead><tbody>${shown}${more}</tbody></table></div>`;
+}
+
+// Resumen de TOTALES del CDO + verificación de que cuadre con lo leído.
+function sectionTotales(result) {
+  const t = result.totals;
+  if (!t) return "";
+  const leido = result.units.length;
+  const esperado = t.totalFacturas;
+  // Verificación del conteo de unidades.
+  let aviso = "";
+  if (esperado != null) {
+    if (leido === esperado) {
+      aviso = `<p class="hint" style="color:#065f46">✓ El conteo cuadra: el CDO indica ${esperado} unidades y se leyeron ${leido}.</p>`;
+    } else {
+      aviso = `<p class="hint" style="color:var(--danger)">⚠️ El conteo NO cuadra: el CDO indica <b>${esperado}</b> unidades pero se leyeron <b>${leido}</b>. Revisa el documento antes de cargar.</p>`;
+    }
+  }
+  const row = (lbl, val) => val ? `<div class="stat"><b>${escapeHtml(val)}</b><span>${lbl}</span></div>` : "";
+  return `<h3>🧾 Totales del CDO</h3>
+    ${aviso}
+    <div class="summary">
+      ${esperado != null ? `<div class="stat"><b>${esperado}</b><span>Total de facturas</span></div>` : ""}
+      ${row("Precio (suma)", t.sumaPrecio)}
+      ${row("ISAN (suma)", t.sumaIsan)}
+      ${row("Gastos (suma)", t.sumaGastos)}
+      ${row("IVA (suma)", t.sumaIva)}
+      ${row("HB/Holdback (suma)", t.sumaHb)}
+      ${row("Total general", t.sumaTotal)}
+    </div>`;
 }
 
 function sectionNuevas(nuevas) {
@@ -220,6 +253,14 @@ function confirmLoad() {
     fechaPedimento: u.fechaPedimento || "",
     modeloGm: u.modeloGm || "",
     fechaFactura: u.fechaFactura || "",
+    // Importes financieros del CDO (visibles solo a auditor/capturista/admin).
+    pq: u.pq || "",
+    precio: u.precio || "",
+    isan: u.isan || "",
+    gastos: u.gastos || "",
+    iva: u.iva || "",
+    hb: u.hb || "",
+    total: u.total || "",
   }));
 
   const { added, skipped } = store.bulkUpsertVehicles(toSave, { skipExisting: true });

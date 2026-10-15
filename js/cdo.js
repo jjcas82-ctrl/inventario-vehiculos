@@ -87,6 +87,49 @@ const NUMMOV_RE = /^[A-Z]{2,4}\d{5,}$/;                  // Num. Mov. tipo "CAD5
 const PEDIMENTO_RE = /^\d{4}-\w\d-\d{6,7}$/;             // pedimento "4024-F3-6002272"
 // Línea del modelo GM: "1VC26 1SL/E 2026 N 351,421.31 ..." → primer token = clave GM.
 const MODELO_GM_LINE_RE = /^([0-9A-Z]{4,6})\s+\S+\s+(?:19|20)\d{2}\s+N\b/;
+// Importe monetario: "351,421.31", "0.00", "10,271.00" (miles con coma, 2 decimales).
+const MONEY_RE = /\d{1,3}(?:,\d{3})*\.\d{2}/g;
+// Línea de precios de una unidad: "1VC26 1SL/E 2026 N 351,421.31 0.00 10,271.00 57,870.77 7,801.55"
+//   = modeloGm Pq Año N/U | Precio ISAN Gastos IVA HB   (el Total va en otra columna)
+const PRECIO_LINE_RE = /^([0-9A-Z]{4,6})\s+(\S+)\s+((?:19|20)\d{2})\s+([NU])\b(.*)$/;
+
+// Convierte "351,421.31" → número 351421.31 (o null si no es importe).
+function parseMoney(s) {
+  if (!s) return null;
+  const m = String(s).match(/\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2}/);
+  if (!m) return null;
+  return parseFloat(m[0].replace(/,/g, ""));
+}
+// Formatea número a importe con comas: 351421.31 → "351,421.31".
+function fmtMoney(n) {
+  if (n == null || isNaN(n)) return "";
+  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Extrae los importes (pq, precio, isan, gastos, iva, hb) de la línea de precios
+// de una unidad. El Total NO viene aquí (es otra columna), se calcula o se toma
+// aparte. Devuelve objeto con strings formateados (o "").
+function extractAmountsFromPriceLine(line) {
+  const out = { pq: "", precio: "", isan: "", gastos: "", iva: "", hb: "" };
+  const m = String(line || "").match(PRECIO_LINE_RE);
+  if (!m) return out;
+  out.pq = m[2] || "";
+  const nums = (m[5] || "").match(MONEY_RE) || [];
+  // Orden esperado tras "N": Precio, ISAN, Gastos, IVA, HB.
+  if (nums[0] != null) out.precio = nums[0];
+  if (nums[1] != null) out.isan = nums[1];
+  if (nums[2] != null) out.gastos = nums[2];
+  if (nums[3] != null) out.iva = nums[3];
+  if (nums[4] != null) out.hb = nums[4];
+  return out;
+}
+
+// Calcula el Total de una unidad = Precio + ISAN + Gastos + IVA + HB (si hay datos).
+function computeTotal(a) {
+  const n = ["precio", "isan", "gastos", "iva", "hb"].map(k => parseMoney(a[k]) || 0);
+  const sum = n.reduce((x, y) => x + y, 0);
+  return sum > 0 ? fmtMoney(sum) : "";
+}
 
 // Marcas conocidas que aparecen en la descripción de GM.
 const MARCAS = ["CHEVROLET", "GMC", "BUICK", "CADILLAC"];
@@ -223,6 +266,8 @@ export function parseCdoLines(lines) {
       // Campos del encabezado de facturación (se completan abajo).
       ov: "", cveVeh: "", factura: "", numMov: "", aduana: "",
       pedimento: "", fechaPedimento: "", modeloGm: "", fechaFactura: "",
+      // Importes financieros (Pq, Precio, ISAN, Gastos, IVA, HB/Holdback, Total).
+      pq: "", precio: "", isan: "", gastos: "", iva: "", hb: "", total: "",
     };
     const vinLine = lines[i]; // línea que contiene el VIN (parte1) → ov/cveVeh
     unit.raw.push(lines[i]);
@@ -255,7 +300,15 @@ export function parseCdoLines(lines) {
         const ym = l.match(YEAR_RE);
         if (ym) unit.year = ym[0];
       }
+      // Importes: la línea de precios "clave Pq Año N Precio ISAN Gastos IVA HB".
+      if (!unit.precio && PRECIO_LINE_RE.test(l)) {
+        const a = extractAmountsFromPriceLine(l);
+        unit.pq = a.pq; unit.precio = a.precio; unit.isan = a.isan;
+        unit.gastos = a.gastos; unit.iva = a.iva; unit.hb = a.hb;
+      }
     }
+    // El Total por unidad = suma de los importes (si se leyeron).
+    unit.total = computeTotal(unit);
     // Ampliación best-effort: campos del encabezado de facturación.
     // La ventana incluye la línea del VIN (parte2) para no perder la factura
     // cuando viene inmediatamente después del VIN partido.
@@ -385,6 +438,9 @@ export function parseCdoColumns(lines) {
   const ovs = pickColumnValues(txt, /^O\.?\/?V\.?$/i, v => /^[A-Z0-9]{5,7}$/.test(v), n);
   const cves = pickColumnValues(txt, /Cve\.?Veh/i, v => /^[0-9A-Z]{6,8}$/.test(v), n);
   const nummovs = reconstructNumMovs(txt, n);
+  // Importes: buscamos las líneas de precios "clave Pq Año N Precio ISAN ..." y
+  // las emparejamos por el modeloGm (que SÍ está bien emparejado por columna).
+  const amountsByModelo = extractAmountsByModelo(txt);
 
   const units = [];
   for (let k = 0; k < n; k++) {
@@ -394,7 +450,15 @@ export function parseCdoColumns(lines) {
       numMov: nummovs[k] || "", aduana: "", pedimento: pedimentos[k] || "",
       fechaPedimento: fechasPedi[k] || "", modeloGm: modelosGm[k] || "",
       fechaFactura: fechasFact[k] || "",
+      pq: "", precio: "", isan: "", gastos: "", iva: "", hb: "", total: "",
     };
+    // Importes emparejados por la clave de modelo GM (si se encontró su línea).
+    const amt = amountsByModelo[modelosGm[k]];
+    if (amt) {
+      unit.pq = amt.pq; unit.precio = amt.precio; unit.isan = amt.isan;
+      unit.gastos = amt.gastos; unit.iva = amt.iva; unit.hb = amt.hb;
+      unit.total = computeTotal(unit);
+    }
     // En el CDO de GM la marca es siempre Chevrolet/GMC/etc.
     // NOTA: en PDFs "transpuestos" muy desordenados, los NOMBRES de modelo no se
     // pueden emparejar de forma fiable por posición (riesgo de asignar el modelo
@@ -578,6 +642,45 @@ function pickPedimentos(txt, n) {
   return padTo([], n);
 }
 
+// Busca las líneas de precios "clave Pq Año N Precio ISAN Gastos IVA HB" y
+// devuelve un mapa { modeloGm → {pq, precio, isan, gastos, iva, hb} }.
+// En el formato por columnas estas líneas pueden seguir viniendo "fila por fila"
+// (es la parte numérica que pdf.js suele mantener junta).
+function extractAmountsByModelo(txt) {
+  const map = {};
+  for (const l of txt) {
+    const m = String(l).match(PRECIO_LINE_RE);
+    if (!m) continue;
+    const clave = m[1];
+    const a = extractAmountsFromPriceLine(l);
+    if (a.precio) map[clave] = a;
+  }
+  return map;
+}
+
+// Extrae los TOTALES del pie del CDO: "Total de facturas 3 1,531,820.17 0.00
+// 29,583.00 249,824.51 34,006.40 1,845,234.08" → conteo + sumas.
+// Orden de sumas: Precio, ISAN, Gastos, IVA, HB, Total.
+export function extractCdoTotals(lines) {
+  for (const l of lines) {
+    const line = String(l || "");
+    if (!/Total\s+de\s+facturas/i.test(line)) continue;
+    // Conteo: el primer entero tras "Total de facturas".
+    const cnt = line.match(/Total\s+de\s+facturas\D*(\d{1,5})/i);
+    const nums = line.match(MONEY_RE) || [];
+    return {
+      totalFacturas: cnt ? parseInt(cnt[1], 10) : null,
+      sumaPrecio: nums[0] || "",
+      sumaIsan: nums[1] || "",
+      sumaGastos: nums[2] || "",
+      sumaIva: nums[3] || "",
+      sumaHb: nums[4] || "",
+      sumaTotal: nums[5] || (nums.length ? nums[nums.length - 1] : ""),
+    };
+  }
+  return null;
+}
+
 function padTo(arr, n) {
   const out = arr.slice(0, n);
   while (out.length < n) out.push("");
@@ -610,5 +713,6 @@ export async function parseCdoFile(file, onProgress) {
     method = "columnas";
   }
 
-  return { units, totalLines: lines.length, lines, method, pageCount: pages.length };
+  const totals = extractCdoTotals(lines);
+  return { units, totalLines: lines.length, lines, method, pageCount: pages.length, totals };
 }
