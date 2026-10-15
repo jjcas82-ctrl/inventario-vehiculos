@@ -35,32 +35,42 @@ async function loadPdfjs() {
 // Extrae TODO el texto del PDF, línea por línea, respetando el orden de lectura.
 // onProgress(pageActual, totalPaginas) para feedback con archivos grandes.
 export async function extractPdfLines(file, onProgress) {
+  const { lines } = await extractPdfPages(file, onProgress);
+  return lines;
+}
+
+// Extrae el texto devolviendo TAMBIÉN las líneas agrupadas por página. Esto es
+// clave para CDO de varias hojas: cada página tiene su propio bloque de columnas,
+// así que hay que parsear página por página (si se concatenan todas, el método
+// por columnas solo "ve" el primer bloque y pierde las demás hojas).
+export async function extractPdfPages(file, onProgress) {
   const pdfjs = await loadPdfjs();
   const buf = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: buf }).promise;
-  const lines = [];
+  const lines = [];     // todas las líneas (compat.)
+  const pages = [];     // array de arrays de líneas, una entrada por página
   for (let p = 1; p <= pdf.numPages; p++) {
     if (onProgress) onProgress(p, pdf.numPages);
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    // Agrupamos los fragmentos de texto por su coordenada Y (misma línea visual).
     const byLine = new Map();
     for (const item of content.items) {
       if (!item.str) continue;
-      const y = Math.round(item.transform[5]); // posición vertical
+      const y = Math.round(item.transform[5]);
       const x = item.transform[4];
       if (!byLine.has(y)) byLine.set(y, []);
       byLine.get(y).push({ x, s: item.str });
     }
-    // Ordenamos: líneas de arriba hacia abajo (Y desc), y dentro, de izq. a der. (X asc).
     const ys = [...byLine.keys()].sort((a, b) => b - a);
+    const pageLines = [];
     for (const y of ys) {
       const parts = byLine.get(y).sort((a, b) => a.x - b.x);
-      const text = parts.map(p => p.s).join(" ").replace(/\s+/g, " ").trim();
-      if (text) lines.push(text);
+      const text = parts.map(pp => pp.s).join(" ").replace(/\s+/g, " ").trim();
+      if (text) { pageLines.push(text); lines.push(text); }
     }
+    pages.push(pageLines);
   }
-  return lines;
+  return { lines, pages };
 }
 
 const VIN_RE = /\b[A-HJ-NPR-Z0-9]{17}\b/;          // VIN completo en una línea
@@ -400,13 +410,24 @@ export function parseCdoColumns(lines) {
   return dedupeByVin(units);
 }
 
-// Encuentra la línea que contiene la columna de VIN (varios VIN partidos juntos).
+// Encuentra la línea que contiene la columna de VIN. Cuenta tanto VINs COMPLETOS
+// (17 chars) como "cabezas" de VIN partido (10-13 chars). Una línea Serie puede
+// mezclar ambos (unos VIN vienen enteros y otros partidos). Reconstruye y verifica
+// que de verdad salgan ≥1 VIN válidos para elegir la mejor línea.
 function findVinColumnLine(txt) {
   let best = -1, bestCount = 0;
   for (let i = 0; i < txt.length; i++) {
-    // Cuenta cuántas "cabezas de VIN" (≥10 chars alfanuméricos sin IOQ) hay.
-    const heads = (txt[i].match(/\b[A-HJ-NPR-Z0-9]{10,13}\b/g) || []).length;
-    if (heads >= 2 && heads > bestCount) { bestCount = heads; best = i; }
+    const completos = (txt[i].match(/\b[A-HJ-NPR-Z0-9]{17}\b/g) || []).length;
+    const cabezas = (txt[i].match(/\b[A-HJ-NPR-Z0-9]{10,14}\b/g) || []).length;
+    // "Señal" de línea de VINs: hay varias cabezas, o al menos un VIN completo + algo.
+    const score = completos * 2 + cabezas;
+    if (score < 2) continue;
+    // Confirmar reconstruyendo: debe producir al menos 1 VIN válido.
+    const vins = reconstructVinsFromColumn(txt[i]);
+    if (vins.length && vins.length >= bestCount) {
+      // Preferimos la línea que produce MÁS VINs válidos.
+      if (vins.length > bestCount || best < 0) { bestCount = vins.length; best = i; }
+    }
   }
   return best;
 }
@@ -565,12 +586,29 @@ function padTo(arr, n) {
 
 // Orquesta: lee el PDF y devuelve las unidades parseadas.
 // Prueba 3 métodos en orden: por líneas → robusto → por columnas (PDF transpuesto).
+// IMPORTANTE: para CDO de varias hojas, el método por columnas se aplica PÁGINA
+// POR PÁGINA y se acumulan todas las unidades (cada hoja es un bloque de columnas).
 // Devuelve también las líneas crudas (diagnóstico) y el método que funcionó.
 export async function parseCdoFile(file, onProgress) {
-  const lines = await extractPdfLines(file, onProgress);
+  const { lines, pages } = await extractPdfPages(file, onProgress);
+
+  // 1) Método por líneas sobre todo el documento (formato "fila por fila").
   let units = parseCdoLines(lines);
   let method = "lineas";
+
+  // 2) Robusto sobre todo el documento.
   if (!units.length) { units = parseCdoWhole(lines); method = "robusto"; }
-  if (!units.length) { units = parseCdoColumns(lines); method = "columnas"; }
-  return { units, totalLines: lines.length, lines, method };
+
+  // 3) Por columnas: se procesa CADA PÁGINA por separado y se acumula.
+  if (!units.length) {
+    const all = [];
+    for (const pageLines of pages) {
+      const u = parseCdoColumns(pageLines);
+      if (u.length) all.push(...u);
+    }
+    units = dedupeByVin(all);
+    method = "columnas";
+  }
+
+  return { units, totalLines: lines.length, lines, method, pageCount: pages.length };
 }
