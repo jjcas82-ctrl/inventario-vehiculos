@@ -50,6 +50,7 @@
     <button class="tab" data-tab="map" role="tab" data-perm="map.view">Mapa</button>
     <button class="tab" data-tab="reports" role="tab" data-perm="reports.view">Reportes</button>
     <button class="tab" data-tab="labels" role="tab" data-perm="inventory.view">Etiquetas</button>
+    <button class="tab" data-tab="zonamove" role="tab" data-perm="event.register">Mover por zona</button>
     <button class="tab" data-tab="audit" role="tab" data-perm="audit.run">Auditoría</button>
     <button class="tab" data-tab="settings" role="tab" data-perm="agencies.manage">Agencias</button>
     <button class="tab" data-tab="users" role="tab" data-perm="users.manage">Usuarios</button>
@@ -446,6 +447,43 @@
           </table>
         </div>
         <p id="lbl-empty" class="muted">No hay unidades registradas.</p>
+      </div>
+    </section>
+
+    <!-- ================= MOVER POR ZONA (QR de zona) ================= -->
+    <section id="tab-zonamove" class="tab-panel" role="tabpanel">
+      <div class="card">
+        <h2>Mover por zona</h2>
+        <p class="hint">1) Escanea el <b>QR de la zona</b> (pegado en el área). 2) Escanea el QR de cada <b>unidad</b> que dejas en esa zona: su ubicación se actualiza automáticamente.</p>
+
+        <div id="zona-actual" class="summary">
+          <div class="stat stat-wide"><b id="zona-nombre">— sin zona —</b><span>Zona activa (escanea su QR)</span></div>
+          <div class="stat"><b id="zona-contador">0</b><span>Unidades movidas</span></div>
+        </div>
+
+        <div class="row gap wrap" style="margin:8px 0">
+          <button id="zona-scan" class="btn btn-primary">📷 Escanear</button>
+          <button id="zona-scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
+          <button id="zona-reset" class="btn btn-ghost">Cambiar de zona</button>
+        </div>
+        <div class="scanner" id="zona-scanner-wrap" hidden style="max-width:420px">
+          <video id="zona-video" playsinline muted></video>
+          <div class="scanner-overlay"><div class="scanner-frame"></div></div>
+        </div>
+        <div class="field" style="margin-top:8px">
+          <label for="zona-manual">O captura el VIN manualmente (con la zona ya activa)</label>
+          <div class="row gap">
+            <input id="zona-manual" type="text" maxlength="17" autocapitalize="characters" placeholder="VIN de 17 caracteres" />
+            <button id="zona-manual-btn" class="btn">Mover a la zona</button>
+          </div>
+        </div>
+        <p id="zona-status" class="hint"></p>
+        <div class="table-wrap" style="max-height:320px;overflow:auto">
+          <table class="table" id="zona-table">
+            <thead><tr><th>Hora</th><th>VIN</th><th>Unidad</th><th>Movida a</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
 

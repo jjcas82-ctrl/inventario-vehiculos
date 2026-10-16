@@ -3,6 +3,72 @@ import { store } from "./storage.js";
 import { getPosition } from "./events.js";
 import { notify, confirmDialog } from "./ui.js";
 import { geocode } from "./geo.js";
+import { qrDataUrl } from "./qrgen.js";
+
+// Formato del QR de zona: "ZONA|<agencia>|<area>". Lo lee la pantalla "Mover por zona".
+export function zonaQrPayload(agency, area) {
+  return `ZONA|${agency}|${area}`;
+}
+// Parsea un QR de zona. Devuelve {agency, area} o null si no es un QR de zona.
+export function parseZonaQr(text) {
+  const t = String(text || "").trim();
+  if (!t.startsWith("ZONA|")) return null;
+  const parts = t.split("|");
+  if (parts.length < 3) return null;
+  return { agency: parts[1], area: parts.slice(2).join("|") };
+}
+
+// Lista plana de áreas (incluyendo sububicaciones) de una agencia.
+function flatAreas(agency) {
+  const a = store.listAgencies().find(x => x.name === agency);
+  if (!a || !a.areas) return [];
+  const out = [];
+  for (const ar of a.areas) {
+    out.push(ar.name);
+    for (const s of (ar.subs || [])) out.push(s);
+  }
+  return out;
+}
+
+// Abre una ventana imprimible con un QR por cada zona de la agencia.
+async function printZoneQrs(agencyId) {
+  const a = store.listAgencies().find(x => x.id === agencyId);
+  if (!a) return;
+  const zonas = flatAreas(a.name);
+  if (!zonas.length) { notify("Esta agencia no tiene áreas definidas.", { type: "warn" }); return; }
+
+  const cards = [];
+  for (const zona of zonas) {
+    const url = await qrDataUrl(zonaQrPayload(a.name, zona), { size: 320, margin: 2 });
+    cards.push(`<figure class="zq">
+      <img src="${url}" alt="QR ${escapeHtml(zona)}">
+      <figcaption><b>${escapeHtml(zona)}</b><br><span>${escapeHtml(a.name)}</span></figcaption>
+    </figure>`);
+  }
+  const win = window.open("", "_blank", "width=820,height=900");
+  if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "error" }); return; }
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>QR de zonas · ${escapeHtml(a.name)}</title>
+    <style>
+      *{box-sizing:border-box} @page{size:letter;margin:12mm}
+      body{font-family:system-ui,sans-serif;margin:0;color:#0f172a}
+      h1{font-size:18px;color:#0f204a}
+      .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+      .zq{margin:0;border:1px solid #cbd5e1;border-radius:10px;padding:12px;text-align:center;page-break-inside:avoid}
+      .zq img{width:260px;height:260px}
+      .zq figcaption{margin-top:6px;font-size:15px} .zq figcaption span{color:#475569;font-size:12px}
+      .no-print{text-align:center;margin:14px 0}
+      .no-print button{padding:10px 18px;border:1px solid #0f204a;background:#0f204a;color:#fff;border-radius:8px;cursor:pointer}
+      @media print{.no-print{display:none}}
+    </style></head><body>
+    <h1>QR de zonas · ${escapeHtml(a.name)}</h1>
+    <p style="font-size:12px;color:#475569">Pega cada QR en su área. Escanéalo en "Mover por zona" para ubicar unidades.</p>
+    <div class="grid">${cards.join("")}</div>
+    <div class="no-print"><button onclick="window.print()">🖨️ Imprimir</button></div>
+    <script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script>
+    </body></html>`);
+  win.document.close();
+}
 
 let onChange = () => {};
 
@@ -78,7 +144,11 @@ function render() {
         <p class="hint" style="margin-top:0">Escribe el <b>Área</b> pegada al margen y sus <b>sububicaciones</b> con sangría (2 espacios o tabulador). Un área sin sububicaciones se usa tal cual.</p>
         <textarea class="loc-edit" data-id="${a.id}" rows="10"
           style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:ui-monospace,monospace;">${escapeHtml(areasToText(a.areas))}</textarea>
-        <button class="btn btn-primary save-loc" data-id="${a.id}" style="margin-top:6px;">Guardar ubicaciones internas</button>
+        <div class="row gap wrap" style="margin-top:6px">
+          <button class="btn btn-primary save-loc" data-id="${a.id}">Guardar ubicaciones internas</button>
+          <button class="btn print-zone-qr" data-id="${a.id}">🏷️ Imprimir QR de zonas</button>
+        </div>
+        <p class="hint">Pega el QR de cada zona en su área física. En la pantalla "Mover por zona", el operador escanea el QR de la zona y luego las unidades para ubicarlas ahí.</p>
       </div>
     `;
     wrap.appendChild(el);
@@ -153,6 +223,8 @@ function render() {
       notify("Ubicaciones guardadas.", { type: "success" });
     })
   );
+  wrap.querySelectorAll(".print-zone-qr").forEach(btn =>
+    btn.addEventListener("click", () => printZoneQrs(btn.dataset.id)));
 }
 
 // Convierte la estructura de áreas a texto editable (áreas al margen, subs con sangría).
