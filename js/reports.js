@@ -194,7 +194,7 @@ function buildData() {
     }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
   }
   else if (type === "flow") {
-    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Entregó/Recibió", "Tipo persona", "Contacto", "Registró", "GPS"];
+    cols = ["Fecha", "Tipo", "VIN", "Agencia", "Ubicación", "Método", "Entregó/Recibió", "Tipo persona", "Contacto", "Registró", "GPS"];
     rows = store.listEvents().filter(e => {
       const d = new Date(e.at);
       if (from && d < from) return false;
@@ -203,11 +203,14 @@ function buildData() {
       const pname = e.person && e.person.name ? e.person.name : "";
       if (q && ![e.vin, e.location, e.agency, e.by, pname].filter(Boolean).some(f => String(f).toLowerCase().includes(q))) return false;
       return true;
-    }).sort((a, b) => b.at.localeCompare(a.at)).map(e => [
+    }).sort((a, b) => b.at.localeCompare(a.at)).map(e => {
+      const srcMap = { "gps": "GPS", "qr-zona": "QR de zona", "manual": "Manual" };
+      return [
       new Date(e.at).toLocaleString(), EVENT_LABELS[e.type] || e.type, e.vin, e.agency || "", e.location || "",
+      srcMap[e.locationSource] || (e.locationSource || ""),
       e.person?.name || "", e.person?.type || "", e.person?.contact || "", e.by || "—",
       e.sinGps ? "⚠️ Sin GPS" : "OK",
-    ]);
+    ]; });
   }
   else if (type === "sold") {
     // Vendidas / Entregadas (solo consulta). Incluye las vendidas aún dentro y las

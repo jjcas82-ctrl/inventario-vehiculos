@@ -233,8 +233,11 @@ export function openVehicle(vin) {
       const extra = [e.person.type, e.person.contact].filter(Boolean).join(" · ");
       person = `<br><span class="muted">🤝 ${verbo}: <b>${escapeHtml(e.person.name)}</b>${extra ? " (" + escapeHtml(extra) + ")" : ""}</span>`;
     }
+    // Método de ubicación (cómo se detectó): GPS / QR de zona / manual.
+    const srcMap = { "gps": "📍 GPS", "qr-zona": "🏷️ QR de zona", "manual": "✍️ manual" };
+    const src = e.locationSource ? ` <span class="tag" style="font-size:11px">${srcMap[e.locationSource] || e.locationSource}</span>` : "";
     return `<li><b>${EVENT_LABELS[e.type] || e.type}</b> — ${escapeHtml(e.location || "")}
-      <span class="muted">(${escapeHtml(e.agency || "")})</span>${cont}<br>
+      <span class="muted">(${escapeHtml(e.agency || "")})</span>${cont}${src}<br>
       <span class="muted">${new Date(e.at).toLocaleString()}${who}${gps}</span>${person}</li>`;
   }).join("");
 

@@ -22,6 +22,7 @@ import { initUsers, renderUsers } from "./users.js";
 import { initLabels, renderLabels } from "./labels.js";
 import { initCatalogAdmin } from "./catalogadmin.js";
 import { initCdoUpload } from "./cdoui.js";
+import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
@@ -219,6 +220,8 @@ function setupTabs() {
       if (name === "syslog") renderSyslog();
       if (name === "labels") renderLabels();
       if (name === "audit") window.__initAudit && window.__initAudit();
+      if (name === "zonamove") { initZonaMove(); }
+      else { try { stopZonaMove(); } catch (e) {} } // apaga la cámara al salir
     })
   );
 }
