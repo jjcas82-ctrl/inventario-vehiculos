@@ -523,6 +523,13 @@
               <label for="audit-count">Cantidad de unidades a auditar</label>
               <input id="audit-count" type="number" min="1" value="10" />
             </div>
+            <!-- MEJORA 2: auditar solo una zona/área de la agencia -->
+            <div class="field" id="audit-area-field">
+              <label for="audit-area">Área a auditar</label>
+              <select id="audit-area">
+                <option value="">(Toda la agencia)</option>
+              </select>
+            </div>
           </div>
           <label class="check-row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
             <input type="checkbox" id="audit-freeze" />
@@ -584,6 +591,8 @@
 
         <!-- ===== ETAPA 4 · REPORTE DE DIFERENCIAS ===== -->
         <div class="audit-stage" data-stage="4" hidden>
+          <!-- MEJORA 3: resumen ejecutivo (exactitud, tiempos, comparativa) -->
+          <div id="audit-exec-summary"></div>
           <div class="summary" id="audit-diff-summary"></div>
           <div id="audit-diff-lists"></div>
           <div class="row gap wrap" style="margin-top:10px">
