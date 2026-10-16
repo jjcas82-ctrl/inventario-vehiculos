@@ -32,21 +32,31 @@ export function initAudit() {
 
   const modeSel = document.getElementById("audit-mode");
   const countField = document.getElementById("audit-count-field");
+  const areaSel = document.getElementById("audit-area");
+  let lastAgency = null;  // para repoblar áreas solo cuando cambie la agencia
   const updateScope = () => {
     countField.style.display = modeSel.value === "random" ? "" : "none";
     const agency = agSel.value;
-    const dentro = unitsInAgency(agency);
+    // MEJORA 2: repuebla las áreas cuando cambia la agencia (conserva opción si existe).
+    if (areaSel && agency !== lastAgency) {
+      populateAreaSelect(areaSel, agency);
+      lastAgency = agency;
+    }
+    const area = areaSel ? areaSel.value : "";
+    const dentro = unitsInAgency(agency, area);
     const scope = document.getElementById("audit-scope");
+    const enArea = area ? ` del área ${area}` : "";
     if (modeSel.value === "full") {
-      scope.textContent = `Se auditarán las ${dentro.length} unidades que figuran DENTRO de ${agency}.`;
+      scope.textContent = `Se auditarán las ${dentro.length} unidades${enArea} de ${agency}.`;
     } else {
       const n = Math.min(parseInt(document.getElementById("audit-count").value, 10) || 0, dentro.length);
-      scope.textContent = `Se elegirán ${n} unidades al azar de las ${dentro.length} que figuran DENTRO de ${agency}.`;
+      scope.textContent = `Se elegirán ${n} unidades al azar de las ${dentro.length}${enArea} que figuran DENTRO de ${agency}.`;
     }
     showResumeNote(agency);
   };
   agSel.onchange = updateScope;
   modeSel.onchange = updateScope;
+  if (areaSel) areaSel.onchange = updateScope;
   document.getElementById("audit-count").oninput = updateScope;
 
   // --- Botones de navegación entre etapas ---
@@ -195,8 +205,39 @@ function startFromSchedule(id) {
 }
 
 // --- Helpers de datos ---
-function unitsInAgency(agency) {
-  return store.listVehicles().filter(v => v.status === "dentro" && v.currentAgency === agency);
+// Unidades DENTRO de una agencia. Si se pasa `area` (MEJORA 2), filtra a las que
+// estén en esa área interna (por currentArea o currentLocation).
+function unitsInAgency(agency, area) {
+  let list = store.listVehicles().filter(v => v.status === "dentro" && v.currentAgency === agency);
+  if (area) {
+    list = list.filter(v => v.currentArea === area || v.currentLocation === area);
+  }
+  return list;
+}
+
+// Devuelve la lista plana de nombres de áreas (incluyendo subs) de una agencia.
+function areaNames(agency) {
+  const ag = store.listAgencies().find(a => a.name === agency);
+  if (!ag || !Array.isArray(ag.areas)) return [];
+  const out = [];
+  for (const area of ag.areas) {
+    if (!area || !area.name) continue;
+    out.push(area.name);
+    for (const sub of (area.subs || [])) {
+      if (sub) out.push(sub);
+    }
+  }
+  return out;
+}
+
+// Rellena un <select> de áreas para la agencia dada, con la opción "(Toda la agencia)".
+function populateAreaSelect(sel, agency) {
+  const prev = sel.value;
+  const names = areaNames(agency);
+  sel.innerHTML = '<option value="">(Toda la agencia)</option>' +
+    names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  // Conserva la selección previa si sigue existiendo entre las nuevas áreas.
+  if (prev && names.includes(prev)) sel.value = prev;
 }
 
 function showResumeNote(agency) {
@@ -231,9 +272,10 @@ function gotoStage(n) {
 }
 
 // --- Construcción / persistencia de la sesión ---
-function buildSession(agency, mode, frozen, expectedVehicles, seenObj) {
+function buildSession(agency, mode, frozen, expectedVehicles, seenObj, area) {
   return {
     agency, mode, frozen,
+    area: area || "",   // MEJORA 2: área auditada ("" = toda la agencia)
     startedAt: new Date().toISOString(),
     by: auth.currentUser()?.name || "—",
     expected: new Map(expectedVehicles.map(v => [v.vin, v])),
@@ -246,6 +288,7 @@ function persist() {
   store.saveOpenAudit(session.agency, {
     mode: session.mode,
     frozen: session.frozen,
+    area: session.area || "",   // MEJORA 2: persistir área auditada
     by: session.by,
     startedAt: session.startedAt,
     expected: [...session.expected.keys()],
@@ -258,23 +301,27 @@ function startAudit() {
   const agency = document.getElementById("audit-agency").value;
   const mode = document.getElementById("audit-mode").value;
   const freeze = document.getElementById("audit-freeze").checked;
+  const areaEl = document.getElementById("audit-area");
+  const area = areaEl ? areaEl.value : "";   // MEJORA 2: área a auditar ("" = toda)
 
   // Si ya había una auditoría abierta en esta agencia, la retomamos.
   const existing = store.getOpenAudit(agency);
   if (existing) { resumeSession(existing); return; }
 
-  const dentro = unitsInAgency(agency);
+  const dentro = unitsInAgency(agency, area);
   let expectedVehicles = dentro;
   if (mode === "random") {
     const n = Math.max(1, Math.min(parseInt(document.getElementById("audit-count").value, 10) || 1, dentro.length));
     expectedVehicles = shuffle([...dentro]).slice(0, n);
   }
   if (!expectedVehicles.length) {
-    notify("No hay unidades dentro de esta agencia para auditar.", { type: "warn" });
+    notify(area
+      ? `No hay unidades en el área ${area} de ${agency} para auditar.`
+      : "No hay unidades dentro de esta agencia para auditar.", { type: "warn" });
     return;
   }
 
-  session = buildSession(agency, mode, freeze, expectedVehicles, {});
+  session = buildSession(agency, mode, freeze, expectedVehicles, {}, area);
   persist();
   if (freeze) notify(`🔒 Inventario de ${agency} congelado durante el conteo.`, { type: "info", timeout: 5000 });
   renderList();
@@ -286,7 +333,7 @@ function resumeSession(open) {
   // Reconstruye la lista esperada a partir de los VIN guardados.
   const expectedVehicles = (open.expected || [])
     .map(vin => store.getVehicle(vin) || { vin, make: "", model: "", currentLocation: "" });
-  session = buildSession(open.agency, open.mode, open.frozen, expectedVehicles, open.seen);
+  session = buildSession(open.agency, open.mode, open.frozen, expectedVehicles, open.seen, open.area);
   session.startedAt = open.startedAt || session.startedAt;
   session.by = open.by || session.by;
   notify(`↩️ Auditoría retomada en ${open.agency}.`, { type: "info", timeout: 4000 });
@@ -371,11 +418,17 @@ function renderRun() {
 
   const rows = [];
   for (const [vin, v] of session.expected) {
-    const st = session.seen.get(vin) === "presente"
+    const presente = session.seen.get(vin) === "presente";
+    const st = presente
       ? '<span class="tag tag-in">Presente</span>'
       : '<span class="tag tag-out">Faltante</span>';
-    rows.push(`<tr><td><code>${escapeHtml(vin)}</code></td><td>${escapeHtml(v.make || "")}</td>
-      <td>${escapeHtml(v.currentLocation || "")}</td><td>${st}</td></tr>`);
+    // MEJORA 1: botón para corregir la ubicación de la unidad (esperada/presente).
+    const fixBtn = `<button class="btn btn-sm audit-fix-loc" data-vin="${escapeHtml(vin)}">📍 Corregir ubicación</button>`;
+    // Ubicación actual (puede haber cambiado por una corrección previa).
+    const cur = store.getVehicle(vin) || v;
+    rows.push(`<tr><td><code>${escapeHtml(vin)}</code></td><td>${escapeHtml(cur.make || v.make || "")}</td>
+      <td>${escapeHtml(cur.currentLocation || cur.currentArea || v.currentLocation || "")}</td>
+      <td>${st}<div style="margin-top:4px">${fixBtn}</div></td></tr>`);
   }
   for (const [vin, status] of session.seen) {
     if (status !== "sobrante") continue;
@@ -384,13 +437,239 @@ function renderRun() {
       <td class="muted">${escapeHtml(v?.currentAgency || "no registrada")}</td>
       <td><span class="tag" style="background:#fef3c7;color:#92400e">Sobrante</span></td></tr>`);
   }
-  document.querySelector("#audit-table tbody").innerHTML = rows.join("");
+  const tbody = document.querySelector("#audit-table tbody");
+  tbody.innerHTML = rows.join("");
+  // Conectar botones de corrección (MEJORA 1).
+  tbody.querySelectorAll(".audit-fix-loc").forEach(btn =>
+    btn.addEventListener("click", () => corregirUbicacion(btn.dataset.vin)));
+}
+
+// --- MEJORA 1: corrección de ubicación de una unidad (reutilizable) ---
+// Abre un diálogo propio (overlay con clases .modal) que permite:
+//   (a) cambiar el ÁREA INTERNA dentro de la misma agencia,
+//   (b) marcar que la unidad "está en otra agencia" (reasignar currentAgency),
+//   (c) registrar la SALIDA de la unidad (status "fuera").
+// Al confirmar, registra el evento correspondiente y re-renderiza las tablas.
+async function corregirUbicacion(vin) {
+  if (!session) return;
+  const v = store.getVehicle(vin);
+  if (!v) { notify("La unidad no está registrada.", { type: "warn" }); return; }
+
+  const areas = areaNames(session.agency);
+  // Otras agencias (para la opción "está en otra agencia").
+  const otrasAgencias = store.listAgencies()
+    .map(a => a.name).filter(n => n !== session.agency);
+
+  const choice = await locationFixDialog({
+    vin,
+    label: `${v.make || ""} ${v.model || ""}`.trim(),
+    agency: session.agency,
+    areaActual: v.currentArea || v.currentLocation || "",
+    areas,
+    otrasAgencias,
+  });
+  if (!choice) return;  // cancelado
+
+  if (choice.accion === "area") {
+    // (a) Mover a otra área interna de la MISMA agencia.
+    const nuevaArea = choice.area;
+    store.addEvent({
+      vin, type: "move", agency: session.agency,
+      area: nuevaArea, location: nuevaArea,
+      by: session.by, locationSource: "manual", nota: "Corregido en auditoría",
+    });
+    notify(`📍 ${vin} movida a ${nuevaArea} en ${session.agency}.`, { type: "success" });
+  } else if (choice.accion === "otra") {
+    // (b) Está en otra agencia: reasignar currentAgency.
+    store.upsertVehicle({ vin, currentAgency: choice.agencia, status: "dentro" });
+    store.addEvent({
+      vin, type: "move", agency: choice.agencia, area: "", location: choice.agencia,
+      by: session.by, locationSource: "manual", nota: "Reubicada en otra agencia (auditoría)",
+    });
+    notify(`${vin} reasignada a ${choice.agencia}.`, { type: "info" });
+  } else if (choice.accion === "salida") {
+    // (c) Registrar salida (fuera).
+    store.addEvent({
+      vin, type: "exit", agency: session.agency,
+      by: session.by, locationSource: "manual", nota: "Salida registrada en auditoría",
+    });
+    notify(`${vin} marcada como SALIDA (fuera).`, { type: "info" });
+  }
+
+  // Si la unidad estaba contada como presente, conservamos ese estado.
+  // (session.seen no se toca; solo cambia la ubicación/estatus del vehículo.)
+  persist();
+  // Re-render inmediato de la etapa activa.
+  if (currentStage === 5) renderFix();
+  else renderRun();
+}
+
+// Construye un overlay con <select> de áreas + opciones y resuelve con la elección.
+// Devuelve: { accion:"area", area } | { accion:"otra", agencia } | { accion:"salida" } | null.
+function locationFixDialog({ vin, label, agency, areaActual, areas, otrasAgencias }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    overlay.style.zIndex = "60";
+
+    const areaOpts = areas.length
+      ? areas.map(a => `<option value="${escapeHtml(a)}"${a === areaActual ? " selected" : ""}>${escapeHtml(a)}</option>`).join("")
+      : '<option value="">(Esta agencia no tiene áreas definidas)</option>';
+
+    const otrasOpts = otrasAgencias.length
+      ? otrasAgencias.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("")
+      : "";
+
+    overlay.innerHTML = `
+      <div class="modal-card" style="max-width:460px">
+        <div class="row between">
+          <h2 style="margin:0">📍 Corregir ubicación</h2>
+        </div>
+        <p class="hint"><code>${escapeHtml(vin)}</code>${label ? " · " + escapeHtml(label) : ""} ·
+          figura en <b>${escapeHtml(agency)}</b>${areaActual ? " / " + escapeHtml(areaActual) : ""}</p>
+
+        <div class="field" style="margin-top:8px">
+          <label>¿Qué deseas hacer?</label>
+          <select id="loc-fix-accion">
+            <option value="area">Cambiar el área interna (misma agencia)</option>
+            <option value="otra"${otrasOpts ? "" : " disabled"}>Está en otra agencia</option>
+            <option value="salida">Registrar salida (fuera)</option>
+          </select>
+        </div>
+
+        <div class="field" id="loc-fix-area-field" style="margin-top:8px">
+          <label for="loc-fix-area">Área interna de ${escapeHtml(agency)}</label>
+          <select id="loc-fix-area"${areas.length ? "" : " disabled"}>${areaOpts}</select>
+        </div>
+
+        <div class="field" id="loc-fix-otra-field" style="margin-top:8px;display:none">
+          <label for="loc-fix-otra">Agencia donde está realmente</label>
+          <select id="loc-fix-otra">${otrasOpts}</select>
+        </div>
+
+        <div class="row gap wrap" style="margin-top:14px;justify-content:flex-end">
+          <button id="loc-fix-cancel" class="btn btn-ghost">Cancelar</button>
+          <button id="loc-fix-save" class="btn btn-primary">Guardar</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    const accionSel = overlay.querySelector("#loc-fix-accion");
+    const areaField = overlay.querySelector("#loc-fix-area-field");
+    const otraField = overlay.querySelector("#loc-fix-otra-field");
+    const syncFields = () => {
+      const a = accionSel.value;
+      areaField.style.display = a === "area" ? "" : "none";
+      otraField.style.display = a === "otra" ? "" : "none";
+    };
+    accionSel.addEventListener("change", syncFields);
+    syncFields();
+
+    const close = (result) => { overlay.remove(); resolve(result); };
+    overlay.querySelector("#loc-fix-cancel").addEventListener("click", () => close(null));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(null); });
+    overlay.querySelector("#loc-fix-save").addEventListener("click", () => {
+      const accion = accionSel.value;
+      if (accion === "area") {
+        const area = overlay.querySelector("#loc-fix-area").value;
+        if (!area) { notify("Selecciona un área válida.", { type: "warn" }); return; }
+        close({ accion: "area", area });
+      } else if (accion === "otra") {
+        const agencia = overlay.querySelector("#loc-fix-otra").value;
+        if (!agencia) { notify("Selecciona la agencia destino.", { type: "warn" }); return; }
+        close({ accion: "otra", agencia });
+      } else {
+        close({ accion: "salida" });
+      }
+    });
+  });
+}
+
+// --- MEJORA 3: métricas y resumen ejecutivo ---
+// Calcula las métricas de la sesión actual: exactitud (%), faltantes, sobrantes,
+// duración (ms) y comparación con la auditoría ANTERIOR de la misma agencia.
+function computeMetrics() {
+  const { presentes, faltantes, sobrantes } = computeResults();
+  const total = session.expected.size;
+  const exactitud = total ? (presentes.length / total) * 100 : 0;
+  const duracionMs = Math.max(0, Date.now() - new Date(session.startedAt).getTime());
+
+  // Auditoría anterior de la MISMA agencia (la última por finishedAt).
+  const previas = store.listAudits()
+    .filter(a => a.agency === session.agency && (a.finishedAt || a.createdAt))
+    .sort((a, b) => (a.finishedAt || a.createdAt).localeCompare(b.finishedAt || b.createdAt));
+  const anterior = previas.length ? previas[previas.length - 1] : null;
+
+  let exactitudAnterior = null;
+  if (anterior) {
+    if (typeof anterior.exactitud === "number") {
+      exactitudAnterior = anterior.exactitud;
+    } else if (anterior.totalExpected) {
+      // Compatibilidad: calcular desde los conteos guardados.
+      const pres = Array.isArray(anterior.presentes) ? anterior.presentes.length : 0;
+      exactitudAnterior = (pres / anterior.totalExpected) * 100;
+    }
+  }
+
+  return {
+    total,
+    presentes: presentes.length,
+    faltantes: faltantes.length,
+    sobrantes: sobrantes.length,
+    exactitud,
+    duracionMs,
+    anterior,
+    exactitudAnterior,
+  };
+}
+
+// Formatea una duración (ms) como "Xm Ys" o "Xh Ym".
+function formatDuration(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${s}s`;
+}
+
+function renderExecSummary() {
+  const el = document.getElementById("audit-exec-summary");
+  if (!el || !session) return;
+  const mx = computeMetrics();
+
+  // Comparativa de exactitud vs. auditoría anterior.
+  let comparativa;
+  if (mx.exactitudAnterior == null) {
+    comparativa = '<span class="tag">Primera auditoría de esta agencia</span>';
+  } else {
+    const diff = mx.exactitud - mx.exactitudAnterior;
+    const sign = diff >= 0 ? "▲ +" : "▼ ";
+    const color = diff >= 0 ? "var(--primary)" : "var(--danger)";
+    comparativa = `<span class="tag" style="color:${color}">${sign}${diff.toFixed(1)}% vs anterior</span>`;
+  }
+
+  const areaTxt = session.area ? ` · área ${escapeHtml(session.area)}` : "";
+  el.innerHTML = `
+    <h3 style="margin-bottom:6px">📊 Resumen ejecutivo</h3>
+    <p class="hint" style="margin-top:0">${escapeHtml(session.agency)}${areaTxt}</p>
+    <div class="summary">
+      <div class="stat stat-wide"><b>${mx.exactitud.toFixed(1)}%</b><span>Exactitud (${mx.presentes}/${mx.total})</span></div>
+      <div class="stat"><b style="color:var(--danger)">${mx.faltantes}</b><span>Faltantes</span></div>
+      <div class="stat"><b style="color:#b45309">${mx.sobrantes}</b><span>Sobrantes</span></div>
+      <div class="stat"><b>${formatDuration(mx.duracionMs)}</b><span>Tiempo de conteo</span></div>
+      <div class="stat"><b>${comparativa}</b><span>Comparativa</span></div>
+    </div>`;
 }
 
 // --- Etapa 4: diferencias ---
 function computeAndRenderDiff() {
   if (!session) return;
   const { presentes, faltantes, sobrantes } = computeResults();
+
+  renderExecSummary();   // MEJORA 3: resumen ejecutivo arriba del detalle
+
   document.getElementById("audit-diff-summary").innerHTML = `
     <div class="stat"><b style="color:var(--primary)">${presentes.length}</b><span>Presentes</span></div>
     <div class="stat"><b style="color:var(--danger)">${faltantes.length}</b><span>Faltantes</span></div>
@@ -446,7 +725,20 @@ function reportCSV() {
 // --- Etapa 5: corrección de ubicaciones ---
 function renderFix() {
   if (!session) return;
-  const { faltantes, sobrantes } = computeResults();
+  const { presentes, faltantes, sobrantes } = computeResults();
+
+  // MEJORA 1: acceso para corregir la ubicación interna de las unidades PRESENTES.
+  const presBlock = presentes.length ? `
+    <h3>✅ Presentes — corregir ubicación interna</h3>
+    <ul class="audit-difflist">${presentes.map(vin => {
+      const v = store.getVehicle(vin);
+      const loc = v ? (v.currentLocation || v.currentArea || "") : "";
+      return `<li>
+        <code>${escapeHtml(vin)}</code> · ${escapeHtml(vehLabel(vin) || "")}
+        ${loc ? `<span class="muted">— ${escapeHtml(loc)}</span>` : ""}
+        <button class="btn btn-sm audit-fix-loc" data-vin="${escapeHtml(vin)}">📍 Corregir ubicación</button>
+      </li>`;
+    }).join("")}</ul>` : "<h3>✅ Presentes (0)</h3><p class='muted'>Ninguna.</p>";
 
   const sobBlock = sobrantes.length ? `
     <h3>⚠️ Sobrantes — reasignar a ${escapeHtml(session.agency)}</h3>
@@ -468,7 +760,11 @@ function renderFix() {
       </li>`).join("")}</ul>` : "<h3>❌ Faltantes (0)</h3><p class='muted'>Ninguno.</p>";
 
   const wrap = document.getElementById("audit-fix-lists");
-  wrap.innerHTML = sobBlock + falBlock;
+  wrap.innerHTML = presBlock + sobBlock + falBlock;
+
+  // MEJORA 1: botones de corrección de ubicación de presentes.
+  wrap.querySelectorAll(".audit-fix-loc").forEach(btn =>
+    btn.addEventListener("click", () => corregirUbicacion(btn.dataset.vin)));
 
   wrap.querySelectorAll(".fix-reassign").forEach(btn =>
     btn.addEventListener("click", () => {
@@ -507,12 +803,20 @@ async function closeAudit() {
   });
   if (choice !== "save") return;
 
+  // MEJORA 3: guardar métricas en el registro de la auditoría.
+  const total = session.expected.size;
+  const exactitud = total ? (presentes.length / total) * 100 : 0;
+  const duracionMs = Math.max(0, Date.now() - new Date(session.startedAt).getTime());
+
   store.addAudit({
     agency: session.agency, mode: session.mode, by: session.by,
     startedAt: session.startedAt, finishedAt: new Date().toISOString(),
     frozen: session.frozen,
-    totalExpected: session.expected.size,
+    totalExpected: total,
     presentes, faltantes, sobrantes,
+    exactitud,                      // número (% exactitud)
+    duracionMs,                     // número (duración del conteo en ms)
+    area: session.area || "",       // área auditada ("" = toda la agencia)
   });
   store.clearOpenAudit(session.agency); // descongela
   stopScanner();
