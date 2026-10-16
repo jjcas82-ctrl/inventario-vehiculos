@@ -4,6 +4,7 @@
 
 import { store } from "./storage.js";
 import { parseCdoFile } from "./cdo.js";
+import { parseFacturaXml, detectFacturaType, readTextFile } from "./factura.js";
 import { notify } from "./ui.js";
 import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
@@ -61,14 +62,30 @@ async function handleFile(file) {
   prog.textContent = "Leyendo el PDF…";
 
   let result;
+  const tipo = detectFacturaType(file);
   try {
-    result = await parseCdoFile(file, (p, total) => {
-      prog.textContent = `Leyendo página ${p} de ${total}…`;
-    });
+    if (tipo === "xml") {
+      // Factura de traspaso en XML (CFDI). Una unidad por archivo.
+      prog.textContent = "Leyendo factura XML…";
+      const xmlText = await readTextFile(file);
+      const unidad = parseFacturaXml(xmlText);
+      if (!unidad || unidad.error) {
+        prog.textContent = "";
+        preview.innerHTML = `<p style="color:var(--danger)">No se pudo leer la factura XML: ${escapeHtml(unidad?.error || "formato no reconocido")}.</p>`;
+        return;
+      }
+      result = { units: [unidad], totalLines: 0, lines: [], method: "xml-factura", pageCount: 1, totals: null };
+    } else {
+      // PDF: puede ser el CDO de GM o una factura PDF de traspaso. El parser CDO
+      // maneja ambos (si no detecta CDO, intenta sus métodos). 
+      result = await parseCdoFile(file, (p, total) => {
+        prog.textContent = `Leyendo página ${p} de ${total}…`;
+      });
+    }
   } catch (e) {
     prog.textContent = "";
-    preview.innerHTML = `<p style="color:var(--danger)">No se pudo leer el PDF: ${escapeHtml(e.message || String(e))}.
-      Verifica que sea el archivo CDO de GM. Si el problema persiste, puede que el formato haya cambiado.</p>`;
+    preview.innerHTML = `<p style="color:var(--danger)">No se pudo leer el archivo: ${escapeHtml(e.message || String(e))}.
+      Acepta XML (factura de traspaso), o PDF del CDO. Si el problema persiste, el formato pudo cambiar.</p>`;
     return;
   }
 
@@ -235,14 +252,20 @@ function confirmLoad() {
     vin: u.vin,
     make: u.make || "",
     model: u.model || "",
-    powertrain: u.version || "",
+    powertrain: u.version || u.powertrain || "",
     color: u.color || "",
     year: u.year || "",
-    status: "transito",       // ← estatus inicial: en tránsito (facturada por planta)
+    status: "transito",       // ← estatus inicial: en tránsito
     condition: "nuevo",
-    origin: "CDO",
+    origin: u.origin || "CDO", // "CDO" (planta) o "Traspaso" (otra agencia)
     transitAt: now,
     transitBy: by,
+    // Datos propios del TRASPASO (si vinieron de una factura XML/PDF).
+    emisor: u.emisor || "",
+    emisorRfc: u.emisorRfc || "",
+    folioFiscal: u.folioFiscal || "",
+    claveVehicular: u.claveVehicular || "",
+    transmission: u.transmission || "",
     // Campos del encabezado de facturación del CDO (solo lectura en la ficha).
     ov: u.ov || "",
     cveVeh: u.cveVeh || "",
@@ -264,7 +287,8 @@ function confirmLoad() {
   }));
 
   const { added, skipped } = store.bulkUpsertVehicles(toSave, { skipExisting: true });
-  logAction("cdo.load", `Cargadas ${added.length} unidades en tránsito (CDO)` +
+  const origenTxt = lastParsed.nuevas[0]?.origin === "Traspaso" ? "traspaso" : "CDO";
+  logAction("cdo.load", `Cargadas ${added.length} unidades en tránsito (${origenTxt})` +
     (skipped.length ? ` · ${skipped.length} omitidas por existir` : ""), by);
 
   notify(`Se cargaron ${added.length} unidades en tránsito.` +

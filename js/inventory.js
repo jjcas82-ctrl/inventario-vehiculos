@@ -249,6 +249,9 @@ export function openVehicle(vin) {
   // Se muestra únicamente si al menos uno de los campos del CDO tiene valor,
   // para no ensuciar fichas de unidades antiguas sin estos datos.
   const cdoFields = [
+    ["Origen", v.origin],
+    ["Agencia que traspasa", v.emisor],   // solo en traspasos
+    ["Folio fiscal (UUID)", v.folioFiscal], // solo en traspasos
     ["Factura", v.factura],
     ["Núm. movimiento", v.numMov],
     ["Pedimento", v.pedimento],
@@ -256,9 +259,9 @@ export function openVehicle(vin) {
     ["Fecha de pedimento", v.fechaPedimento],
     ["Fecha de facturación", v.fechaFactura],
     ["Modelo GM", v.modeloGm],
+    ["Clave vehicular", v.claveVehicular],
     ["O/V", v.ov],
     ["Cve. Veh.", v.cveVeh],
-    ["Origen", v.origin],
   ];
   const tieneCdo = cdoFields.some(([, val]) => val != null && String(val).trim() !== "");
 
