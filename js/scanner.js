@@ -17,8 +17,15 @@
 //     vendor/README.md y colócalos en vendor/. (opción A)
 const ZXING_LOCAL = "../vendor/zxing-browser.js";
 const ZXING_LIB_LOCAL = "../vendor/zxing-library.js";
-const ZXING_CDN = "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
-const ZXING_LIB_CDN = "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/+esm";
+// CDNs de respaldo (se prueban en orden si no está la copia local).
+const ZXING_CDNS = [
+  { b: "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm",
+    l: "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/+esm" },
+  { b: "https://unpkg.com/@zxing/browser@0.1.5/esm/index.js",
+    l: "https://unpkg.com/@zxing/library@0.20.0/esm/index.js" },
+  { b: "https://esm.sh/@zxing/browser@0.1.5",
+    l: "https://esm.sh/@zxing/library@0.20.0" },
+];
 
 // Formatos que nos interesan (QR + los códigos de barras usados en etiquetas de VIN)
 const FORMATS = ["qr_code", "code_128", "code_39", "data_matrix", "pdf417", "codabar", "ean_13", "itf"];
@@ -165,7 +172,7 @@ export class Scanner {
 
   async _startZxing() {
     let browserMod, libMod;
-    // 1º intento: copia LOCAL (offline). 2º intento: CDN (respaldo).
+    // 1º intento: copia LOCAL (offline).
     try {
       [browserMod, libMod] = await Promise.all([
         import(/* @vite-ignore */ ZXING_LOCAL),
@@ -173,14 +180,20 @@ export class Scanner {
       ]);
       this.onDetect("ZXing cargado LOCAL (offline) ✓", "info");
     } catch (eLocal) {
-      try {
-        [browserMod, libMod] = await Promise.all([
-          import(/* @vite-ignore */ ZXING_CDN),
-          import(/* @vite-ignore */ ZXING_LIB_CDN).catch(() => null),
-        ]);
-        this.onDetect("ZXing cargado desde CDN (respaldo)", "info");
-      } catch (e) {
-        this.onDetect("no se pudo cargar ZXing (sin copia local y sin internet)", "info");
+      // 2º…N: CDNs de respaldo, probados en orden hasta que uno cargue.
+      for (const cdn of ZXING_CDNS) {
+        try {
+          const [b, l] = await Promise.all([
+            import(/* @vite-ignore */ cdn.b),
+            import(/* @vite-ignore */ cdn.l).catch(() => null),
+          ]);
+          browserMod = b; libMod = l;
+          this.onDetect("ZXing cargado desde CDN de respaldo", "info");
+          break;
+        } catch (e) { /* probar el siguiente CDN */ }
+      }
+      if (!browserMod) {
+        this.onStatus("No se pudo cargar el lector de códigos. Usa la captura manual del VIN. (Para que funcione sin internet, sube los archivos de vendor/.)", "error");
         return;
       }
     }
