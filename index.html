@@ -735,7 +735,11 @@
       <div id="cdo-progress" class="hint"></div>
       <div class="summary" id="cdo-summary"></div>
       <div id="cdo-preview"></div>
-      <div class="row gap wrap" style="margin-top:12px">
+      <label class="chk-inline" style="display:block;margin-top:10px">
+        <input type="checkbox" id="cdo-update-existing" />
+        Actualizar datos de las unidades que ya existen (rellena campos del CDO sin cambiar su ubicación/estado)
+      </label>
+      <div class="row gap wrap" style="margin-top:8px">
         <button id="cdo-confirm" class="btn btn-primary" hidden>✓ Cargar unidades nuevas</button>
         <button id="cdo-cancel" class="btn btn-ghost">Cerrar</button>
       </div>
