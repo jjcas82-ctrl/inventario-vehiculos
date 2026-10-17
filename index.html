@@ -601,13 +601,15 @@
           <div class="summary" id="audit-progress"></div>
           <div class="audit-progressbar"><span id="audit-progress-fill"></span></div>
           <div class="row gap wrap" style="margin-top:8px">
-            <button id="audit-scan" class="btn btn-primary">📷 Escanear unidad</button>
+            <button id="audit-scan" class="btn btn-primary">📷 Escanear QR / código de barras</button>
+            <button id="audit-ocr" class="btn" hidden>🔎 Leer VIN de texto (nube)</button>
             <button id="audit-scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
           </div>
           <div class="scanner" id="audit-scanner-wrap" hidden style="max-width:420px">
             <video id="audit-video" playsinline muted></video>
             <div class="scanner-overlay"><div class="scanner-frame"></div></div>
           </div>
+          <p class="hint" id="audit-ocr-hint" hidden>Apunta al VIN impreso/grabado y pulsa «Leer VIN de texto». Requiere internet y la API key de OCR configurada (pestaña Escanear).</p>
           <div class="field" style="margin-top:8px;padding:10px;border:1px dashed var(--border);border-radius:8px;background:#f8fafc">
             <label for="audit-manual"><b>¿La cámara no lee?</b> Captura el VIN a mano (o con lector USB):</label>
             <div class="row gap">

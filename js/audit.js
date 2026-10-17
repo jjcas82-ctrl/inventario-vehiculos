@@ -16,6 +16,7 @@ import { normalizeVin } from "./vin.js";
 import { escapeHtml } from "./agencies.js";
 import { notify, confirmDialog } from "./ui.js";
 import { printReport, printCountList } from "./pdf.js";
+import { readVinCloud, hasCloudOcr } from "./ocr.js";
 import * as auth from "./auth.js";
 
 let session = null;   // sesión viva en memoria (ver buildSession)
@@ -876,13 +877,45 @@ function setupAuditScanner() {
     onStatus: (msg, kind) => setStatus(msg, kind),
   });
 
+  const ocrBtn = document.getElementById("audit-ocr");
+  const ocrHint = document.getElementById("audit-ocr-hint");
+
   startBtn.onclick = async () => {
     try {
       await scanner.start();
       wrap.hidden = false; startBtn.hidden = true; stopBtn.hidden = false;
+      // Mostrar el botón de OCR de nube solo si hay API key configurada.
+      if (ocrBtn) ocrBtn.hidden = !hasCloudOcr();
+      if (ocrHint) ocrHint.hidden = !hasCloudOcr();
+      if (!hasCloudOcr() && ocrHint) {
+        ocrHint.hidden = false;
+        ocrHint.textContent = "Sugerencia: configura la API key de OCR en la nube (pestaña Escanear) para poder leer el VIN de texto aquí también.";
+      }
     } catch (e) {}
   };
   stopBtn.onclick = stopScanner;
+
+  // Lectura del VIN de TEXTO con OCR en la nube (cuando el QR/código no se puede leer).
+  if (ocrBtn) ocrBtn.onclick = async () => {
+    const video = document.getElementById("audit-video");
+    if (!video || !video.videoWidth) { setStatus("Primero abre la cámara.", "warn"); return; }
+    ocrBtn.disabled = true;
+    const prev = ocrBtn.textContent;
+    ocrBtn.textContent = "Leyendo…";
+    try {
+      const r = await readVinCloud(video, { onProgress: (m) => setStatus(m, "info") });
+      if (r && r.vin) {
+        setStatus(`VIN leído (nube): ${r.vin}${r.verified ? " ✓" : ""}`, "ok");
+        markPresent(r.vin);
+      } else {
+        setStatus("No se pudo leer el VIN de texto: " + (r?.error || "sin resultado") + ". Intenta de nuevo o captúralo a mano.", "error");
+      }
+    } catch (e) {
+      setStatus("Error al leer en la nube: " + (e.message || e), "error");
+    } finally {
+      ocrBtn.disabled = false; ocrBtn.textContent = prev;
+    }
+  };
 }
 
 function stopScanner() {
@@ -893,6 +926,10 @@ function stopScanner() {
   const stopBtn = document.getElementById("audit-scan-stop");
   if (startBtn) startBtn.hidden = false;
   if (stopBtn) stopBtn.hidden = true;
+  const ocrBtn = document.getElementById("audit-ocr");
+  const ocrHint = document.getElementById("audit-ocr-hint");
+  if (ocrBtn) ocrBtn.hidden = true;
+  if (ocrHint) ocrHint.hidden = true;
 }
 
 function setStatus(msg, kind) {
