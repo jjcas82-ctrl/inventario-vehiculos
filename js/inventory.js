@@ -39,7 +39,37 @@ const INV_COLUMNS = [
   { key: "entryBy",  label: "Registró",    filter: "text",   value: v => v.entryBy || v.lastBy || "" },
   { key: "status",   label: "Estado",      filter: "select",
                      value: v => ({ dentro: "Dentro", fuera: "Fuera", transito: "En tránsito" }[v.status] || v.status || "") },
+  // --- Columnas del CDO / factura (no financieras: visibles para todos) ---
+  { key: "origin",         label: "Origen",             filter: "select", value: v => v.origin || "" },
+  { key: "ov",             label: "O/V",                filter: "text",   value: v => v.ov || "" },
+  { key: "cveVeh",         label: "Cve. Veh.",          filter: "text",   value: v => v.cveVeh || "" },
+  { key: "modeloGm",       label: "Modelo GM",          filter: "text",   value: v => v.modeloGm || v.claveVehicular || "" },
+  { key: "factura",        label: "Factura",            filter: "text",   value: v => v.factura || "" },
+  { key: "numMov",         label: "Núm. Mov.",          filter: "text",   value: v => v.numMov || "" },
+  { key: "aduana",         label: "Aduana",             filter: "select", value: v => v.aduana || "" },
+  { key: "pedimento",      label: "Pedimento",          filter: "text",   value: v => v.pedimento || "" },
+  { key: "fechaPedimento", label: "Fecha Pedi.",        filter: "text",   value: v => v.fechaPedimento || "" },
+  { key: "fechaFactura",   label: "Fecha Factura",      filter: "text",   value: v => v.fechaFactura || "" },
+  { key: "emisor",         label: "Agencia traspasa",   filter: "select", value: v => v.emisor || "" },
 ];
+
+// Columnas financieras del CDO: SOLO visibles para auditor, capturista y admin.
+const INV_COLUMNS_FINANCIERAS = [
+  { key: "pq",       label: "Pq.",     filter: "text", value: v => v.pq || "" },
+  { key: "precio",   label: "Precio",  filter: "text", value: v => v.precio || "" },
+  { key: "isan",     label: "ISAN",    filter: "text", value: v => v.isan || "" },
+  { key: "gastos",   label: "Gastos",  filter: "text", value: v => v.gastos || "" },
+  { key: "iva",      label: "IVA",     filter: "text", value: v => v.iva || "" },
+  { key: "hb",       label: "HB",      filter: "text", value: v => v.hb || "" },
+  { key: "total",    label: "Total",   filter: "text", value: v => v.total || "" },
+];
+
+// Devuelve las columnas visibles según el rol (añade las financieras si aplica).
+function visibleColumns() {
+  const rol = auth.currentUser()?.role;
+  const puedeFinanzas = ["auditor", "capturista", "admin"].includes(rol);
+  return puedeFinanzas ? INV_COLUMNS.concat(INV_COLUMNS_FINANCIERAS) : INV_COLUMNS;
+}
 
 // Estado de los filtros por columna: { [key]: "texto" }
 let colFilters = {};
@@ -82,7 +112,7 @@ function filteredVehicles() {
     );
   }
   // Filtros por columna (estilo Excel).
-  for (const col of INV_COLUMNS) {
+  for (const col of visibleColumns()) {
     const f = (colFilters[col.key] || "").toLowerCase().trim();
     if (!f) continue;
     list = list.filter(v => String(col.value(v)).toLowerCase().includes(f));
@@ -104,10 +134,11 @@ export function renderInventory() {
   const empty = document.getElementById("inv-empty");
   const list = filteredVehicles();
 
+  const COLS = visibleColumns();
   // --- Encabezado + fila de filtros por columna (estilo Excel) ---
   if (thead) {
-    const ths = INV_COLUMNS.map(c => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
-    const filterCells = INV_COLUMNS.map(c => {
+    const ths = COLS.map(c => `<th>${escapeHtml(c.label)}</th>`).join("") + "<th></th>";
+    const filterCells = COLS.map(c => {
       const cur = colFilters[c.key] || "";
       if (c.filter === "select") {
         const opts = uniqueValues(c).map(o =>
@@ -145,7 +176,7 @@ export function renderInventory() {
         semaforo = ` <span title="${ag.days} día(s) sin movimiento">${dot}</span>`;
       }
     }
-    const cells = INV_COLUMNS.map(c => {
+    const cells = COLS.map(c => {
       if (c.key === "vin") return `<td><code>${escapeHtml(v.vin)}</code></td>`;
       if (c.key === "stage") return `<td>${v.stage ? `<span class="tag" style="background:#dbeafe;color:#1e40af">${escapeHtml(v.stage)}</span>` : ""}</td>`;
       if (c.key === "status") return `<td>${statusTag}${semaforo}</td>`;
@@ -158,6 +189,9 @@ export function renderInventory() {
   tbody.querySelectorAll(".open-veh").forEach(btn =>
     btn.addEventListener("click", () => openVehicle(btn.dataset.vin))
   );
+
+  // Panel de valor del inventario (total + por agencia), según lo filtrado.
+  renderValorInventario(list);
 
   // Contador: total de existencias (sin cerradas) y, si hay filtros, cuántas se muestran.
   const count = document.getElementById("inv-count");
@@ -173,13 +207,50 @@ export function renderInventory() {
   }
 }
 
+// Suma del VALOR del inventario (campo `total` del CDO) — total y por agencia.
+// Solo se muestra a roles con permiso financiero (auditor/capturista/admin).
+// Incluye TODAS las agencias: matrices, puntos de venta y bodegas.
+function renderValorInventario(list) {
+  const box = document.getElementById("inv-valor");
+  if (!box) return;
+  const rol = auth.currentUser()?.role;
+  if (!["auditor", "capturista", "admin"].includes(rol)) { box.innerHTML = ""; return; }
+
+  const parseMoney = (s) => {
+    const n = parseFloat(String(s || "").replace(/,/g, ""));
+    return isNaN(n) ? 0 : n;
+  };
+  const fmt = (n) => "$ " + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  let totalGeneral = 0;
+  const porAgencia = {};
+  let conValor = 0;
+  for (const v of list) {
+    const val = parseMoney(v.total);
+    if (val <= 0) continue;
+    conValor++;
+    totalGeneral += val;
+    const ag = v.currentAgency || "—";
+    porAgencia[ag] = (porAgencia[ag] || 0) + val;
+  }
+
+  if (!conValor) { box.innerHTML = ""; return; } // sin datos de valor, no mostrar nada
+
+  const agencias = Object.entries(porAgencia).sort((a, b) => b[1] - a[1]);
+  box.innerHTML =
+    `<div class="stat stat-wide"><b>${fmt(totalGeneral)}</b><span>Valor total del inventario (${conValor} unid.)</span></div>` +
+    agencias.map(([ag, val]) =>
+      `<div class="stat"><b>${fmt(val)}</b><span>${escapeHtml(ag)}</span></div>`).join("");
+}
+
 // Exporta a CSV exactamente lo que está filtrado en pantalla (sin la columna de acciones).
 function exportInventoryCsv() {
   const list = filteredVehicles();
   if (!list.length) { notify("No hay unidades que coincidan con los filtros.", { type: "warn" }); return; }
   const esc = (s) => { const t = String(s ?? ""); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-  const header = INV_COLUMNS.map(c => esc(c.label)).join(",");
-  const rows = list.map(v => INV_COLUMNS.map(c => esc(c.display ? c.display(v) : c.value(v))).join(","));
+  const COLS = visibleColumns();
+  const header = COLS.map(c => esc(c.label)).join(",");
+  const rows = list.map(v => COLS.map(c => esc(c.display ? c.display(v) : c.value(v))).join(","));
   const csv = "\uFEFF" + [header, ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);

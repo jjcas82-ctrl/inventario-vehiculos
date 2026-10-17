@@ -1,5 +1,5 @@
 // sw.js — Service worker: cache básico para funcionar sin conexión (app shell).
-const CACHE = "inv-vehiculos-v93";
+const CACHE = "inv-vehiculos-v94";
 const ASSETS = [
   "./",
   "./index.html",
@@ -67,6 +67,13 @@ self.addEventListener("activate", (e) => {
     )
   );
   self.clients.claim();
+});
+
+// Responde a la app cuando pide su versión (para mostrarla en el badge).
+self.addEventListener("message", (e) => {
+  if (e.data === "get-version" && e.source) {
+    e.source.postMessage({ type: "sw-version", version: CACHE });
+  }
 });
 
 self.addEventListener("fetch", (e) => {
