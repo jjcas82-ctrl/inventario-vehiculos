@@ -152,8 +152,23 @@ async function handleFile(file) {
       if (window.__openVehicle) window.__openVehicle(a.dataset.vin);
     }));
 
-  confirmBtn.hidden = nuevas.length === 0;
-  confirmBtn.textContent = `✓ Cargar ${nuevas.length} unidad${nuevas.length === 1 ? "" : "es"} nueva${nuevas.length === 1 ? "" : "s"}`;
+  // Mostrar/ocultar el checkbox de "actualizar existentes" según haya duplicadas.
+  const updChk = document.getElementById("cdo-update-existing");
+  const updLabel = updChk ? updChk.closest("label") : null;
+  if (updLabel) updLabel.style.display = duplicadas.length ? "block" : "none";
+  if (updChk) updChk.checked = false;
+
+  const refreshConfirm = () => {
+    const quiereActualizar = !!(updChk && updChk.checked);
+    const hayQueHacer = nuevas.length > 0 || (quiereActualizar && duplicadas.length > 0);
+    confirmBtn.hidden = !hayQueHacer;
+    const partes = [];
+    if (nuevas.length) partes.push(`Cargar ${nuevas.length} nueva${nuevas.length === 1 ? "" : "s"}`);
+    if (quiereActualizar && duplicadas.length) partes.push(`actualizar ${duplicadas.length}`);
+    confirmBtn.textContent = "✓ " + (partes.join(" y ") || "Cargar");
+  };
+  if (updChk) updChk.onchange = refreshConfirm;
+  refreshConfirm();
 }
 
 // --- Secciones de la vista previa (con paginación para volúmenes grandes) ---
@@ -242,31 +257,40 @@ function sectionErrores(errs) {
       <tbody>${rows}</tbody></table></div>`;
 }
 
-// --- Guardado masivo ---
-function confirmLoad() {
-  if (!lastParsed || !lastParsed.nuevas.length) return;
-  const by = auth.currentUser()?.name || "—";
-  const now = new Date().toISOString();
+// Tabla de equivalencias CLAVE GM → modelo (se completa el modelo al cargar).
+// Se irá ampliando con las claves que aparezcan en los CDO. Las que no estén aquí
+// quedan con modelo vacío y se completan al dar entrada (NHTSA decodifica el VIN).
+const CLAVE_GM_MODELO = {
+  "1VC26": "Groove",
+  "14H43": "Colorado",
+  "1VD48": "Aveo",
+};
+function modeloDesdeClave(clave) {
+  if (!clave) return "";
+  return CLAVE_GM_MODELO[String(clave).toUpperCase().trim()] || "";
+}
 
-  const toSave = lastParsed.nuevas.map(u => ({
+// Convierte una unidad parseada (CDO/factura) al objeto de vehículo a guardar.
+// `now`/`by` para los campos de tránsito. NO fuerza status si es actualización.
+function vehicleFromUnit(u, now, by) {
+  const modelo = u.model || modeloDesdeClave(u.modeloGm) || "";
+  return {
     vin: u.vin,
     make: u.make || "",
-    model: u.model || "",
+    model: modelo,
     powertrain: u.version || u.powertrain || "",
     color: u.color || "",
     year: u.year || "",
-    status: "transito",       // ← estatus inicial: en tránsito
+    status: "transito",
     condition: "nuevo",
-    origin: u.origin || "CDO", // "CDO" (planta) o "Traspaso" (otra agencia)
+    origin: u.origin || "CDO",
     transitAt: now,
     transitBy: by,
-    // Datos propios del TRASPASO (si vinieron de una factura XML/PDF).
     emisor: u.emisor || "",
     emisorRfc: u.emisorRfc || "",
     folioFiscal: u.folioFiscal || "",
     claveVehicular: u.claveVehicular || "",
     transmission: u.transmission || "",
-    // Campos del encabezado de facturación del CDO (solo lectura en la ficha).
     ov: u.ov || "",
     cveVeh: u.cveVeh || "",
     factura: u.factura || "",
@@ -276,7 +300,6 @@ function confirmLoad() {
     fechaPedimento: u.fechaPedimento || "",
     modeloGm: u.modeloGm || "",
     fechaFactura: u.fechaFactura || "",
-    // Importes financieros del CDO (visibles solo a auditor/capturista/admin).
     pq: u.pq || "",
     precio: u.precio || "",
     isan: u.isan || "",
@@ -284,16 +307,58 @@ function confirmLoad() {
     iva: u.iva || "",
     hb: u.hb || "",
     total: u.total || "",
-  }));
+  };
+}
 
-  const { added, skipped } = store.bulkUpsertVehicles(toSave, { skipExisting: true });
-  const origenTxt = lastParsed.nuevas[0]?.origin === "Traspaso" ? "traspaso" : "CDO";
-  logAction("cdo.load", `Cargadas ${added.length} unidades en tránsito (${origenTxt})` +
-    (skipped.length ? ` · ${skipped.length} omitidas por existir` : ""), by);
+// Solo los campos de datos del CDO (sin tocar status/ubicación/etapa) — para
+// ACTUALIZAR unidades existentes rellenando lo que les falte, sin alterar su
+// estado actual (p. ej. si ya entraron, siguen "dentro").
+function cdoDataOnly(u) {
+  const base = vehicleFromUnit(u, null, null);
+  const { status, condition, transitAt, transitBy, ...datos } = base;
+  // Si el modelo quedó vacío, no lo mandamos (para no borrar uno ya capturado).
+  if (!datos.model) delete datos.model;
+  return datos;
+}
 
-  notify(`Se cargaron ${added.length} unidades en tránsito.` +
-    (skipped.length ? ` ${skipped.length} ya existían y se omitieron.` : ""),
-    { type: "success", timeout: 6000 });
+// --- Guardado masivo ---
+function confirmLoad() {
+  if (!lastParsed) return;
+  const by = auth.currentUser()?.name || "—";
+  const now = new Date().toISOString();
+  const actualizarExistentes = !!document.getElementById("cdo-update-existing")?.checked;
+
+  let added = [], skipped = [], updated = 0;
+
+  // 1) Altas de unidades nuevas (en tránsito).
+  if (lastParsed.nuevas.length) {
+    const toSave = lastParsed.nuevas.map(u => vehicleFromUnit(u, now, by));
+    const res = store.bulkUpsertVehicles(toSave, { skipExisting: true });
+    added = res.added; skipped = res.skipped;
+  }
+
+  // 2) (Opcional) Actualizar datos de las unidades que YA existen, rellenando los
+  //    campos del CDO sin cambiar su estado/ubicación.
+  if (actualizarExistentes && lastParsed.duplicadas.length) {
+    for (const u of lastParsed.duplicadas) {
+      const prev = store.getVehicle(u.vin);
+      if (!prev) continue;
+      store.upsertVehicle({ ...cdoDataOnly(u), vin: u.vin });
+      updated++;
+    }
+  }
+
+  const origenTxt = (lastParsed.nuevas[0]?.origin || lastParsed.duplicadas[0]?.origin) === "Traspaso" ? "traspaso" : "CDO";
+  logAction("cdo.load",
+    `${added.length} nuevas en tránsito (${origenTxt})` +
+    (updated ? ` · ${updated} actualizadas` : "") +
+    (skipped.length && !actualizarExistentes ? ` · ${skipped.length} ya existían (omitidas)` : ""), by);
+
+  notify(
+    `Se cargaron ${added.length} unidades nuevas.` +
+    (updated ? ` Se actualizaron ${updated} existentes.` : "") +
+    (skipped.length && !actualizarExistentes ? ` ${skipped.length} ya existían (no se tocaron).` : ""),
+    { type: "success", timeout: 7000 });
 
   closeModal();
   onLoaded();

@@ -438,9 +438,10 @@ export function parseCdoColumns(lines) {
   const ovs = pickColumnValues(txt, /^O\.?\/?V\.?$/i, v => /^[A-Z0-9]{5,7}$/.test(v), n);
   const cves = pickColumnValues(txt, /Cve\.?Veh/i, v => /^[0-9A-Z]{6,8}$/.test(v), n);
   const nummovs = reconstructNumMovs(txt, n);
-  // Importes: buscamos las líneas de precios "clave Pq Año N Precio ISAN ..." y
-  // las emparejamos por el modeloGm (que SÍ está bien emparejado por columna).
+  // Importes: 1º por línea de precios emparejada por modeloGm; 2º respaldo por
+  // columnas (Precio/ISAN/Gastos/IVA/HB como bloques de n valores cada uno).
   const amountsByModelo = extractAmountsByModelo(txt);
+  const amountCols = extractAmountColumns(txt, n);
 
   const units = [];
   for (let k = 0; k < n; k++) {
@@ -452,13 +453,20 @@ export function parseCdoColumns(lines) {
       fechaFactura: fechasFact[k] || "",
       pq: "", precio: "", isan: "", gastos: "", iva: "", hb: "", total: "",
     };
-    // Importes emparejados por la clave de modelo GM (si se encontró su línea).
+    // Importes: 1º por clave de modelo GM (línea de precios); 2º respaldo por
+    // columnas emparejadas por posición.
     const amt = amountsByModelo[modelosGm[k]];
     if (amt) {
       unit.pq = amt.pq; unit.precio = amt.precio; unit.isan = amt.isan;
       unit.gastos = amt.gastos; unit.iva = amt.iva; unit.hb = amt.hb;
-      unit.total = computeTotal(unit);
+    } else if (amountCols) {
+      unit.precio = amountCols.precio[k] || "";
+      unit.isan = amountCols.isan[k] || "";
+      unit.gastos = amountCols.gastos[k] || "";
+      unit.iva = amountCols.iva[k] || "";
+      unit.hb = amountCols.hb[k] || "";
     }
+    unit.total = computeTotal(unit);
     // En el CDO de GM la marca es siempre Chevrolet/GMC/etc.
     // NOTA: en PDFs "transpuestos" muy desordenados, los NOMBRES de modelo no se
     // pueden emparejar de forma fiable por posición (riesgo de asignar el modelo
@@ -656,6 +664,34 @@ function extractAmountsByModelo(txt) {
     if (a.precio) map[clave] = a;
   }
   return map;
+}
+
+// RESPALDO de importes por COLUMNAS: busca las líneas de encabezado Precio/ISAN/
+// Gastos/IVA/HB y toma los n valores monetarios de cada columna, emparejados por
+// posición. Devuelve {precio:[],isan:[],gastos:[],iva:[],hb:[]} o null si no hay.
+function extractAmountColumns(txt, n) {
+  const money = (l) => (String(l).match(MONEY_RE) || []);
+  // Localiza, para un encabezado dado, la línea con >= n importes cercana.
+  const colFor = (headerRe) => {
+    for (let i = 0; i < txt.length; i++) {
+      if (!headerRe.test(txt[i])) continue;
+      for (let j = i; j < Math.min(txt.length, i + 5); j++) {
+        const nums = money(txt[j]);
+        if (nums.length >= n) return nums.slice(0, n);
+      }
+    }
+    return null;
+  };
+  const precio = colFor(/^Precio$/i);
+  // Si ni siquiera hay columna de Precio clara, no usamos este respaldo.
+  if (!precio) return null;
+  return {
+    precio,
+    isan: colFor(/^ISAN$/i) || padTo([], n),
+    gastos: colFor(/^Gastos$/i) || padTo([], n),
+    iva: colFor(/^IVA$/i) || padTo([], n),
+    hb: colFor(/^HB$/i) || padTo([], n),
+  };
 }
 
 // Extrae los TOTALES del pie del CDO: "Total de facturas 3 1,531,820.17 0.00
