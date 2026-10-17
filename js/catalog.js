@@ -97,3 +97,68 @@ export function resetCatalog(name) {
 export function learnValue(name, value) {
   return addToCatalog(name, value);
 }
+
+// ---- Claves de modelo del fabricante (ej. GM: 1VC26→Groove) ----
+// Es un MAPA clave→modelo (no una lista). Sirve para completar el modelo al
+// cargar un CDO/factura usando la clave vehicular. Autoaprendizaje: cuando se
+// captura el modelo de una unidad que tenía clave, se guarda la equivalencia.
+// Funciona para cualquier marca (la clave es única por versión).
+const CLAVES_KEY = "inv_claves_modelo_v1";
+
+// Semilla con las claves GM ya conocidas (clave en MAYÚSCULAS → modelo).
+const CLAVES_SEED = {
+  "1VC26": "Groove",
+  "14H43": "Colorado",
+  "1VD48": "Aveo",
+  "1VC69": "Aveo",
+};
+
+let _claves = null;
+function readClaves() {
+  if (_claves) return _claves;
+  try {
+    const raw = localStorage.getItem(CLAVES_KEY);
+    _claves = raw ? JSON.parse(raw) : {};
+  } catch (e) { _claves = {}; }
+  // Sembrar las conocidas si no están (sin pisar lo que el usuario haya editado).
+  for (const [k, v] of Object.entries(CLAVES_SEED)) {
+    if (!_claves[k]) _claves[k] = v;
+  }
+  return _claves;
+}
+function writeClaves(data) {
+  _claves = data;
+  try { localStorage.setItem(CLAVES_KEY, JSON.stringify(data)); } catch (e) {}
+}
+function normClave(c) { return String(c || "").toUpperCase().trim(); }
+
+// Devuelve el modelo para una clave (o "" si no se conoce).
+export function modeloPorClave(clave) {
+  const k = normClave(clave);
+  return k ? (readClaves()[k] || "") : "";
+}
+
+// Aprende/actualiza la equivalencia clave→modelo (autoaprendizaje).
+// Devuelve true si guardó algo nuevo o cambió.
+export function aprenderClave(clave, modelo) {
+  const k = normClave(clave);
+  const m = String(modelo || "").trim();
+  if (!k || !m) return false;
+  const db = readClaves();
+  if (db[k] === m) return false;
+  db[k] = m;
+  writeClaves(db);
+  return true;
+}
+
+// Lista todas las equivalencias (para la pantalla de administración).
+export function listClaves() {
+  return Object.entries(readClaves())
+    .map(([clave, modelo]) => ({ clave, modelo }))
+    .sort((a, b) => a.clave.localeCompare(b.clave));
+}
+export function removeClave(clave) {
+  const db = readClaves();
+  delete db[normClave(clave)];
+  writeClaves(db);
+}

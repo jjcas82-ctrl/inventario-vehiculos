@@ -5,6 +5,7 @@
 import { store } from "./storage.js";
 import { parseCdoFile } from "./cdo.js";
 import { parseFacturaXml, detectFacturaType, readTextFile } from "./factura.js";
+import { modeloPorClave } from "./catalog.js";
 import { notify } from "./ui.js";
 import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
@@ -257,17 +258,10 @@ function sectionErrores(errs) {
       <tbody>${rows}</tbody></table></div>`;
 }
 
-// Tabla de equivalencias CLAVE GM → modelo (se completa el modelo al cargar).
-// Se irá ampliando con las claves que aparezcan en los CDO. Las que no estén aquí
-// quedan con modelo vacío y se completan al dar entrada (NHTSA decodifica el VIN).
-const CLAVE_GM_MODELO = {
-  "1VC26": "Groove",
-  "14H43": "Colorado",
-  "1VD48": "Aveo",
-};
+// El modelo se completa desde la clave vehicular usando el catálogo de claves
+// (con autoaprendizaje). Ver js/catalog.js → modeloPorClave / aprenderClave.
 function modeloDesdeClave(clave) {
-  if (!clave) return "";
-  return CLAVE_GM_MODELO[String(clave).toUpperCase().trim()] || "";
+  return modeloPorClave(clave);
 }
 
 // Convierte una unidad parseada (CDO/factura) al objeto de vehículo a guardar.
