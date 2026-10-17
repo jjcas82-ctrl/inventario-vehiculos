@@ -608,12 +608,13 @@
             <video id="audit-video" playsinline muted></video>
             <div class="scanner-overlay"><div class="scanner-frame"></div></div>
           </div>
-          <div class="field" style="margin-top:8px">
-            <label for="audit-manual">O captura el VIN manualmente</label>
+          <div class="field" style="margin-top:8px;padding:10px;border:1px dashed var(--border);border-radius:8px;background:#f8fafc">
+            <label for="audit-manual"><b>¿La cámara no lee?</b> Captura el VIN a mano (o con lector USB):</label>
             <div class="row gap">
-              <input id="audit-manual" type="text" maxlength="17" autocapitalize="characters" placeholder="VIN de 17 caracteres" />
-              <button id="audit-manual-btn" class="btn">Marcar presente</button>
+              <input id="audit-manual" type="text" maxlength="17" autocapitalize="characters" placeholder="VIN de 17 caracteres" style="flex:1" />
+              <button id="audit-manual-btn" class="btn btn-primary">Marcar presente</button>
             </div>
+            <p class="hint" style="margin:4px 0 0">Puedes pegar el VIN o teclearlo. Así el conteo nunca se detiene si falla el escáner.</p>
           </div>
           <p id="audit-status" class="hint"></p>
           <div class="table-wrap" style="max-height:300px;overflow:auto">
