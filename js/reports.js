@@ -178,11 +178,12 @@ function buildData() {
     rows = Object.entries(byStage).map(([s, c]) => [s, c.total, c.nuevo, c.usado]);
   }
   else if (type === "aging") {
-    cols = ["VIN", "Marca", "Modelo", "Agencia", "Ubicación", "Días en inventario"];
+    // Antigüedad en inventario + días de tránsito (facturación → llegada).
+    cols = ["VIN", "Marca", "Modelo", "Agencia", "Ubicación", "Días de tránsito", "Días en inventario"];
     rows = store.listVehicles().filter(v => v.status !== "fuera").filter(matchVehicle).map(v => {
       const entry = lastEntryDate(v.vin);
       const d = entry ? daysBetween(entry, now) : 0;
-      return { d, row: [v.vin, v.make || "", v.model || "", v.currentAgency || "", v.currentLocation || "", d] };
+      return { d, row: [v.vin, v.make || "", v.model || "", v.currentAgency || "", v.currentLocation || "", diasTransito(v), d] };
     }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
   }
   else if (type === "idle") {
@@ -191,6 +192,21 @@ function buildData() {
       const last = lastMoveDate(v.vin);
       const d = last ? daysBetween(last, now) : 0;
       return { d, row: [v.vin, v.make || "", v.model || "", v.currentAgency || "", v.currentLocation || "", d] };
+    }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
+  }
+  else if (type === "noloc") {
+    // Antigüedad SIN CAMBIO DE UBICACIÓN: días desde el último MOVIMIENTO de
+    // ubicación (entrada o movimiento interno). Unidades que llevan mucho tiempo
+    // sin que se registre un cambio de lugar.
+    cols = ["VIN", "Marca", "Modelo", "Agencia", "Ubicación", "Días sin cambio de ubicación", "Método último mov."];
+    const srcMap = { "gps": "GPS", "qr-zona": "QR de zona", "manual": "Manual" };
+    rows = store.listVehicles().filter(v => v.status !== "fuera").filter(matchVehicle).map(v => {
+      // Último evento de entrada o movimiento (los que fijan ubicación).
+      const locEvs = store.eventsForVin(v.vin).filter(e => e.type === "entry" || e.type === "move");
+      const ult = locEvs.length ? locEvs[locEvs.length - 1] : null;
+      const d = ult ? daysBetween(new Date(ult.at), now) : 0;
+      const met = ult ? (srcMap[ult.locationSource] || ult.locationSource || "—") : "—";
+      return { d, row: [v.vin, v.make || "", v.model || "", v.currentAgency || "", v.currentLocation || "", d, met] };
     }).filter(x => x.d >= minDays).sort((a, b) => b.d - a.d).map(x => x.row);
   }
   else if (type === "flow") {
@@ -303,6 +319,7 @@ function applyFilterVisibility(type) {
     stages:     { agency: 1, condition: 1, stage: 0, from: 0, to: 0, days: 0, search: 1 },
     aging:      { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
     idle:       { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
+    noloc:      { agency: 1, condition: 1, stage: 1, from: 0, to: 0, days: 1, search: 1 },
     flow:       { agency: 1, condition: 0, stage: 0, from: 1, to: 1, days: 0, search: 1 },
     sold:       { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
     incomplete: { agency: 1, condition: 0, stage: 0, from: 0, to: 0, days: 0, search: 1 },
