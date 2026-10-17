@@ -1604,6 +1604,24 @@ function setupServiceWorker() {
     }).catch(() => {});
     // Busca actualizaciones al abrir.
     navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+
+    // Pide al service worker su versión real y la muestra en el badge (así el
+    // número visible SIEMPRE coincide con la versión instalada, sin editarlo a mano).
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data && e.data.type === "sw-version") {
+        const badge = document.getElementById("app-version");
+        if (badge) {
+          const m = String(e.data.version).match(/v\d+/);
+          badge.textContent = m ? m[0] : e.data.version;
+        }
+      }
+    });
+    const askVersion = () => {
+      const c = navigator.serviceWorker.controller;
+      if (c) c.postMessage("get-version");
+    };
+    askVersion();
+    navigator.serviceWorker.addEventListener("controllerchange", askVersion);
   });
 }
 
