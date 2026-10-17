@@ -1,6 +1,7 @@
 // catalogadmin.js — Panel (solo admin) para administrar los catálogos de
 // autocompletar: ver, agregar y quitar valores de cada lista.
-import { catalogNames, getCatalog, addToCatalog, removeFromCatalog, resetCatalog, CATALOG_LABELS } from "./catalog.js";
+import { catalogNames, getCatalog, addToCatalog, removeFromCatalog, resetCatalog, CATALOG_LABELS,
+         listClaves, aprenderClave, removeClave } from "./catalog.js";
 import { escapeHtml } from "./agencies.js";
 import { notify, confirmDialog } from "./ui.js";
 
@@ -77,6 +78,46 @@ function render() {
       notify("Catálogo restaurado.", { type: "info" });
     })
   );
+
+  renderClaves(cont);
+}
+
+// --- Sección: claves del fabricante → modelo (autoaprendidas) ---
+function renderClaves(cont) {
+  const claves = listClaves();
+  const rows = claves.map(({ clave, modelo }) => `
+    <tr>
+      <td><code>${escapeHtml(clave)}</code></td>
+      <td>${escapeHtml(modelo)}</td>
+      <td><button class="btn btn-sm clave-del" data-clave="${escapeHtml(clave)}">Quitar</button></td>
+    </tr>`).join("");
+
+  const block = document.createElement("div");
+  block.className = "cat-group";
+  block.innerHTML = `
+    <b>Claves de modelo del fabricante (ej. GM 1VC69 → Aveo)</b>
+    <p class="hint" style="margin-top:2px">Se aprenden solas: al capturar el modelo de una unidad con clave vehicular, se guarda la equivalencia. Al cargar un CDO/factura, el modelo se completa desde la clave.</p>
+    <div class="table-wrap" style="max-height:260px;overflow:auto">
+      <table class="table"><thead><tr><th>Clave</th><th>Modelo</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" class="muted">Aún no hay claves aprendidas.</td></tr>'}</tbody></table>
+    </div>
+    <div class="row gap wrap" style="margin-top:6px">
+      <input type="text" id="clave-new-k" placeholder="Clave (ej. 1VC69)" maxlength="10" style="flex:1;min-width:120px" />
+      <input type="text" id="clave-new-m" placeholder="Modelo (ej. Aveo)" maxlength="40" style="flex:1;min-width:120px" />
+      <button class="btn" id="clave-add">Agregar / actualizar</button>
+    </div>`;
+  cont.appendChild(block);
+
+  block.querySelector("#clave-add").addEventListener("click", () => {
+    const k = block.querySelector("#clave-new-k").value.trim();
+    const m = block.querySelector("#clave-new-m").value.trim();
+    if (!k || !m) { notify("Escribe la clave y el modelo.", { type: "warn" }); return; }
+    aprenderClave(k, m);
+    notify(`Clave ${k.toUpperCase()} → ${m} guardada.`, { type: "success" });
+    render();
+  });
+  block.querySelectorAll(".clave-del").forEach(btn =>
+    btn.addEventListener("click", () => { removeClave(btn.dataset.clave); render(); }));
 }
 
 // Escapa un valor para usarlo dentro de un selector CSS [data-cat="..."].

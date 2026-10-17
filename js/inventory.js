@@ -10,7 +10,7 @@ import { logAction } from "./syslog.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
 import { printVehicleSheet } from "./pdf.js";
 import * as photos from "./photos.js";
-import { getCatalog, learnValue } from "./catalog.js";
+import { getCatalog, learnValue, aprenderClave } from "./catalog.js";
 import { agingLevel } from "./alerts.js";
 import { attachAutocomplete } from "./autocomplete.js";
 import { attachModelAutocomplete } from "./models.js";
@@ -530,6 +530,10 @@ export function openVehicle(vin) {
     const modelV = body.querySelector("#f-model").value.trim();
     if (makeV) learnValue("make", makeV);
     if (modelV) learnValue("model", modelV);
+    // Autoaprendizaje de clave del fabricante → modelo (p. ej. GM 1VC69→Aveo).
+    // Si esta unidad tiene clave vehicular y se capturó el modelo, lo aprende.
+    const claveVeh = v.modeloGm || v.claveVehicular || "";
+    if (claveVeh && modelV) aprenderClave(claveVeh, modelV);
     if (color) learnValue("color", color);
     if (vehType) learnValue("vehType", vehType);
     if (powertrain) learnValue("powertrain", powertrain);
