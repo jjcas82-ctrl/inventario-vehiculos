@@ -372,8 +372,21 @@ function printList() {
 // --- Etapa 3: conteo físico ---
 function markPresent(raw) {
   if (!session) return;
-  const vin = normalizeVin(raw);
-  if (vin.length !== 17) { setStatus("VIN inválido (deben ser 17 caracteres).", "error"); beep(false); return; }
+  let vin = normalizeVin(raw);
+
+  // Si no son 17 caracteres, puede ser un código de barras PARCIAL del fabricante
+  // (muchos traen solo los últimos dígitos del VIN). Intentamos emparejar por el
+  // final del VIN contra las unidades esperadas / registradas.
+  if (vin.length !== 17) {
+    const parcial = matchVinParcial(vin);
+    if (parcial) {
+      vin = parcial; // ¡encontrado! usamos el VIN completo correspondiente.
+    } else {
+      setStatus(`Lectura: "${normalizeVin(raw)}" (${vin.length} caract.). No es un VIN de 17 ni coincide con una unidad. Escanea el QR del sistema o captura el VIN a mano.`, "error");
+      beep(false);
+      return;
+    }
+  }
   if (session.seen.has(vin)) { setStatus("Esa unidad ya fue contada.", "info"); return; }
 
   if (session.expected.has(vin)) {
@@ -389,6 +402,28 @@ function markPresent(raw) {
   }
   persist();
   renderRun();
+}
+
+// Intenta emparejar un código PARCIAL (p. ej. los últimos dígitos del VIN que
+// trae el código de barras del fabricante) con un VIN completo. Busca primero en
+// las unidades ESPERADAS de la auditoría y luego en todo el inventario.
+// Requiere al menos 6 caracteres para evitar falsos positivos, y que el match
+// sea único (si varios VIN terminan igual, no adivina).
+function matchVinParcial(fragmento) {
+  const frag = normalizeVin(fragmento);
+  if (frag.length < 6) return null;
+
+  const matchEn = (vins) => {
+    const hits = vins.filter(v => v.endsWith(frag) || v.includes(frag));
+    return hits.length === 1 ? hits[0] : null;
+  };
+  // 1) Entre las esperadas de esta auditoría (lo más probable).
+  const esperadas = [...session.expected.keys()];
+  const m1 = matchEn(esperadas);
+  if (m1) return m1;
+  // 2) En todo el inventario (por si es sobrante).
+  const todas = store.listVehicles().map(v => v.vin);
+  return matchEn(todas);
 }
 
 function computeResults() {
