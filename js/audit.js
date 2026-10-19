@@ -381,8 +381,13 @@ function markPresent(raw) {
     const parcial = matchVinParcial(vin);
     if (parcial) {
       vin = parcial; // ¡encontrado! usamos el VIN completo correspondiente.
+    } else if (vin.length === 0) {
+      // No se detectó ningún código: probablemente apuntó al VIN de TEXTO.
+      setStatus('No se detectó un QR ni código de barras. Si estás viendo el VIN en TEXTO, pulsa «🔎 Leer VIN de texto (nube)». O captúralo a mano abajo.', "warn");
+      beep(false);
+      return;
     } else {
-      setStatus(`Lectura: "${normalizeVin(raw)}" (${vin.length} caract.). No es un VIN de 17 ni coincide con una unidad. Escanea el QR del sistema o captura el VIN a mano.`, "error");
+      setStatus(`Se leyó "${normalizeVin(raw)}" (${vin.length} caract.), que no es un VIN completo ni coincide con una unidad. Usa «Leer VIN de texto», el QR del sistema, o captúralo a mano.`, "error");
       beep(false);
       return;
     }
@@ -919,12 +924,16 @@ function setupAuditScanner() {
     try {
       await scanner.start();
       wrap.hidden = false; startBtn.hidden = true; stopBtn.hidden = false;
-      // Mostrar el botón de OCR de nube solo si hay API key configurada.
-      if (ocrBtn) ocrBtn.hidden = !hasCloudOcr();
-      if (ocrHint) ocrHint.hidden = !hasCloudOcr();
-      if (!hasCloudOcr() && ocrHint) {
+      // Mostrar el botón de OCR de nube (resaltado) si hay API key configurada.
+      if (ocrBtn) {
+        ocrBtn.hidden = !hasCloudOcr();
+        ocrBtn.classList.toggle("btn-primary", hasCloudOcr());
+      }
+      if (ocrHint) {
         ocrHint.hidden = false;
-        ocrHint.textContent = "Sugerencia: configura la API key de OCR en la nube (pestaña Escanear) para poder leer el VIN de texto aquí también.";
+        ocrHint.textContent = hasCloudOcr()
+          ? "📷 Para QR/código de barras: apúntalo y se lee solo. 🔎 Para el VIN en TEXTO: apúntalo y pulsa «Leer VIN de texto (nube)»."
+          : "Para leer el VIN de TEXTO, configura la API key de OCR en la nube (pestaña Escanear).";
       }
     } catch (e) {}
   };
