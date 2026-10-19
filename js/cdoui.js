@@ -275,6 +275,8 @@ function vehicleFromUnit(u, now, by) {
     powertrain: u.version || u.powertrain || "",
     color: u.color || "",
     year: u.year || "",
+    vehType: u.vehType || "",          // tipo de carrocería (de la descripción)
+    descripcion: u.descripcion || "",  // descripción completa del CDO
     status: "transito",
     condition: "nuevo",
     origin: u.origin || "CDO",

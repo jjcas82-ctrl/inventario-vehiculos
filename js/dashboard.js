@@ -22,6 +22,7 @@ function renderStats() {
   const vehicles = store.listVehicles();
   const dentro = vehicles.filter(v => v.status === "dentro");
   const fuera = vehicles.filter(v => v.status === "fuera");
+  const transito = vehicles.filter(v => v.status === "transito");
   const nuevos = dentro.filter(v => v.condition === "nuevo").length;
   const usados = dentro.filter(v => v.condition === "usado").length;
 
@@ -38,6 +39,7 @@ function renderStats() {
 
   el.innerHTML =
     stat(dentro.length, "Unidades dentro", "stat-wide") +
+    stat(transito.length, "En tránsito (por llegar)") +
     stat(nuevos, "Nuevos") +
     stat(usados, "Seminuevos / usados") +
     stat(fuera.length, "Fuera (salidas)") +
