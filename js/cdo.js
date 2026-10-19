@@ -485,6 +485,7 @@ export function parseCdoColumns(lines) {
       unit.pq = amt.pq; unit.precio = amt.precio; unit.isan = amt.isan;
       unit.gastos = amt.gastos; unit.iva = amt.iva; unit.hb = amt.hb;
     } else if (amountCols) {
+      unit.pq = (amountCols.pq && amountCols.pq[k]) || "";
       unit.precio = amountCols.precio[k] || "";
       unit.isan = amountCols.isan[k] || "";
       unit.gastos = amountCols.gastos[k] || "";
@@ -626,12 +627,25 @@ function pickAduanas(txt, n) {
   return padTo(Array(n).fill(aduana), n); // misma aduana para todas (caso típico)
 }
 
-// Descripciones: todas las "UN VEHICULO/CAMION ..." en orden.
+// Descripciones: todas las "UN VEHICULO/CAMION ..." en orden. Si no vienen con
+// ese prefijo (PDF transpuesto), usa como respaldo las LÍNEAS que contengan una
+// marca conocida (CHEVROLET/GMC/...), que son las descripciones de cada unidad.
 function pickDescriptions(txt, n) {
   const flat = txt.join(" ");
-  const out = (flat.match(/UN\s+(?:VEHICULO|CAMION)\b[^]*?(?=UN\s+(?:VEHICULO|CAMION)\b|$)/gi) || [])
+  let out = (flat.match(/UN\s+(?:VEHICULO|CAMION)\b[^]*?(?=UN\s+(?:VEHICULO|CAMION)\b|$)/gi) || [])
     .map(s => s.replace(/\s+/g, " ").trim());
-  return padTo(out, n);
+  if (out.length >= n) return out.slice(0, n);
+
+  // Respaldo: líneas individuales que parecen una descripción (traen la marca y
+  // algo más). Evita encabezados sueltos como "Descripcion" o "CHEVROLET" solo.
+  const porLinea = txt
+    .map(l => l.replace(/\s+/g, " ").trim())
+    .filter(l => MARCAS.some(m => l.toUpperCase().includes(m)) && l.split(" ").length >= 2
+                 && !/^O\.?\/?V|^Cve|^Serie|^Factura|^Aduana|^Pedimento/i.test(l));
+  // Unimos lo hallado con el método principal, preservando orden y sin duplicar.
+  const combinado = [...out];
+  for (const l of porLinea) if (!combinado.includes(l)) combinado.push(l);
+  return padTo(combinado, n);
 }
 
 // Num. Mov.: suele venir partido "CAD5671 2631". Reunir y re-emparejar.
@@ -739,7 +753,25 @@ function extractAmountColumns(txt, n) {
   const precio = colFor(/^Precio$/i);
   // Si ni siquiera hay columna de Precio clara, no usamos este respaldo.
   if (!precio) return null;
+  // Pq. (paquete): tokens tipo "1SL/E", "4ZR/D", "1SB/B" bajo el encabezado "Pq".
+  const pqCol = (() => {
+    const PQ_RE = /^[0-9A-Z]{1,4}\/[0-9A-Z]{1,3}$/;
+    for (let i = 0; i < txt.length; i++) {
+      if (!/^Pq\.?$/i.test(txt[i].trim())) continue;
+      const pool = [];
+      for (let j = i; j < Math.min(txt.length, i + 6); j++) {
+        for (const t of txt[j].split(/\s+/)) if (PQ_RE.test(t)) pool.push(t);
+        if (pool.length >= n) break;
+      }
+      if (pool.length >= n) return pool.slice(0, n);
+    }
+    // Respaldo: buscar en todo el texto tokens con forma de paquete.
+    const all = [];
+    for (const l of txt) for (const t of l.split(/\s+/)) if (PQ_RE.test(t)) all.push(t);
+    return all.length >= n ? all.slice(0, n) : padTo([], n);
+  })();
   return {
+    pq: pqCol,
     precio,
     isan: colFor(/^ISAN$/i) || padTo([], n),
     gastos: colFor(/^Gastos$/i) || padTo([], n),
