@@ -230,7 +230,9 @@ function renderValorInventario(list) {
     if (val <= 0) continue;
     conValor++;
     totalGeneral += val;
-    const ag = v.currentAgency || "—";
+    // Agrupación por agencia. Las unidades sin agencia asignada se etiquetan según
+    // su estatus: "En tránsito" (aún no llegan) o "Sin agencia asignada".
+    const ag = v.currentAgency || (v.status === "transito" ? "En tránsito" : "Sin agencia asignada");
     porAgencia[ag] = (porAgencia[ag] || 0) + val;
   }
 
