@@ -44,6 +44,7 @@ const INV_COLUMNS = [
   { key: "ov",             label: "O/V",                filter: "text",   value: v => v.ov || "" },
   { key: "cveVeh",         label: "Cve. Veh.",          filter: "text",   value: v => v.cveVeh || "" },
   { key: "modeloGm",       label: "Modelo GM",          filter: "text",   value: v => v.modeloGm || v.claveVehicular || "" },
+  { key: "descripcion",    label: "Descripción",        filter: "text",   value: v => v.descripcion || "" },
   { key: "factura",        label: "Factura",            filter: "text",   value: v => v.factura || "" },
   { key: "numMov",         label: "Núm. Mov.",          filter: "text",   value: v => v.numMov || "" },
   { key: "aduana",         label: "Aduana",             filter: "select", value: v => v.aduana || "" },

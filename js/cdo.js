@@ -156,8 +156,26 @@ function findVinAt(lines, i) {
   return null;
 }
 
+// Tipos de carrocería reconocibles en la descripción del CDO.
+const CARROCERIAS = [
+  ["SEDAN", "Sedán"], ["HATCHBACK", "Hatchback"], ["HB", "Hatchback"],
+  ["SUV", "SUV"], ["CROSSOVER", "Crossover"], ["PICKUP", "Pickup"], ["PICK UP", "Pickup"],
+  ["DOBLE CABINA", "Pickup Doble Cabina"], ["CABINA", "Pickup"],
+  ["VAN", "Van"], ["MINIVAN", "Minivan"], ["COUPE", "Coupé"], ["CONVERTIBLE", "Convertible"],
+  ["CAMION", "Camión"], ["CHASIS", "Chasis"],
+];
+// Detecta el tipo de carrocería a partir del texto de la descripción.
+export function tipoCarroceriaDesde(texto) {
+  const up = String(texto || "").toUpperCase();
+  for (const [kw, label] of CARROCERIAS) {
+    if (up.includes(kw)) return label;
+  }
+  return "";
+}
+
 // De una línea de descripción ("UN VEHICULO CHEVROLET GROOVE SUV PAQ. E LT ...")
-// separa marca, modelo y versión.
+// separa marca, modelo, versión y tipo de carrocería. Devuelve también la
+// descripción "limpia" (sin el "UN VEHICULO/CAMION" inicial).
 function parseDescription(desc) {
   let make = "", model = "", version = "";
   const up = desc.toUpperCase();
@@ -173,7 +191,9 @@ function parseDescription(desc) {
     // Sin marca reconocida: dejamos todo como versión para no perder el dato.
     version = desc.replace(/^UN\s+(VEHICULO|CAMION)\s*/i, "").trim();
   }
-  return { make, model, version };
+  const descripcion = desc.replace(/^UN\s+(VEHICULO|CAMION)\s*/i, "").replace(/\s+/g, " ").trim();
+  const vehType = tipoCarroceriaDesde(desc);
+  return { make, model, version, vehType, descripcion };
 }
 
 // Extrae los campos del ENCABEZADO de facturación a partir de las líneas crudas
@@ -263,6 +283,7 @@ export function parseCdoLines(lines) {
 
     const unit = {
       vin: found.vin, make: "", model: "", version: "", color: "", year: "", raw: [],
+      vehType: "", descripcion: "",
       // Campos del encabezado de facturación (se completan abajo).
       ov: "", cveVeh: "", factura: "", numMov: "", aduana: "",
       pedimento: "", fechaPedimento: "", modeloGm: "", fechaFactura: "",
@@ -285,8 +306,9 @@ export function parseCdoLines(lines) {
       windowLines.push(l);
 
       if (!unit.model && DESC_RE.test(l)) {
-        const { make, model, version } = parseDescription(l);
+        const { make, model, version, vehType, descripcion } = parseDescription(l);
         unit.make = make; unit.model = model; unit.version = version;
+        unit.vehType = vehType; unit.descripcion = descripcion;
         unit.raw.push(l);
         // El color suele venir en la MISMA zona (línea siguiente a la descripción).
         const next = lines[j + 1] || "";
@@ -438,6 +460,8 @@ export function parseCdoColumns(lines) {
   const ovs = pickColumnValues(txt, /^O\.?\/?V\.?$/i, v => /^[A-Z0-9]{5,7}$/.test(v), n);
   const cves = pickColumnValues(txt, /Cve\.?Veh/i, v => /^[0-9A-Z]{6,8}$/.test(v), n);
   const nummovs = reconstructNumMovs(txt, n);
+  const aduanas = pickAduanas(txt, n);
+  const descripciones = pickDescriptions(txt, n);
   // Importes: 1º por línea de precios emparejada por modeloGm; 2º respaldo por
   // columnas (Precio/ISAN/Gastos/IVA/HB como bloques de n valores cada uno).
   const amountsByModelo = extractAmountsByModelo(txt);
@@ -447,8 +471,9 @@ export function parseCdoColumns(lines) {
   for (let k = 0; k < n; k++) {
     const unit = {
       vin: vins[k], make: "", model: "", version: "", color: "", year: "", raw: [vins[k]],
+      vehType: "", descripcion: "",
       ov: ovs[k] || "", cveVeh: cves[k] || "", factura: facturas[k] || "",
-      numMov: nummovs[k] || "", aduana: "", pedimento: pedimentos[k] || "",
+      numMov: nummovs[k] || "", aduana: aduanas[k] || "", pedimento: pedimentos[k] || "",
       fechaPedimento: fechasPedi[k] || "", modeloGm: modelosGm[k] || "",
       fechaFactura: fechasFact[k] || "",
       pq: "", precio: "", isan: "", gastos: "", iva: "", hb: "", total: "",
@@ -474,7 +499,15 @@ export function parseCdoColumns(lines) {
     // al dar entrada o editando la ficha). El modeloGm (clave) SÍ queda bien
     // emparejado por columna y permite identificar el modelo con certeza.
     unit.make = "Chevrolet";
-    unit.model = ""; // se completa al dar entrada (NHTSA decodifica el VIN); evita emparejado erróneo
+    unit.model = ""; // el modelo se completa por la CLAVE GM al cargar (ver cdoui) o al dar entrada.
+    // Descripción (si se emparejó) → guarda texto y deduce el tipo de carrocería.
+    if (descripciones[k]) {
+      const parsed = parseDescription(descripciones[k]);
+      unit.descripcion = parsed.descripcion || descripciones[k];
+      unit.vehType = parsed.vehType || "";
+      // Si la descripción trae un modelo reconocible, lo usamos como respaldo.
+      if (!unit.model && parsed.model) unit.model = parsed.model;
+    }
     if (colores[k]) unit.color = toTitle(colores[k]);
     if (anios[k]) unit.year = anios[k];
     units.push(unit);
@@ -570,6 +603,27 @@ function pickColorColumn(txt, n) {
     }
   }
   return padTo([], n);
+}
+
+// Aduana: columna con texto tipo "TOLUCA, EDO. DE MÉXICO" (se repite por unidad).
+// Como suele ser la misma para todo el CDO, si hay una sola distinta la usamos
+// para todas; si hay varias, emparejamos por posición.
+function pickAduanas(txt, n) {
+  // Reconstruye el nombre de la aduana. En el CDO suele ser la MISMA para todas
+  // las unidades (ej. "TOLUCA, EDO. DE MÉXICO"), pero viene partida: una línea con
+  // la ciudad repetida ("TOLUCA, TOLUCA, TOLUCA,") y otra con el estado repetido
+  // ("EDO. DE MÉXICO EDO. DE MÉXICO ..."). Las combinamos en un solo valor.
+  let ciudad = "", estado = "";
+  for (let i = 0; i < txt.length; i++) {
+    const l = txt[i];
+    const m = l.match(/\b(TOLUCA|MANZANILLO|VERACRUZ|NUEVO LAREDO|L[ÁA]ZARO C[ÁA]RDENAS|ALTAMIRA|PROGRESO|GUAYMAS|ENSENADA|MEXICO|MÉXICO)\b/i);
+    if (m && !ciudad && !/EDO\.?\s*DE/i.test(l)) ciudad = toTitle(m[1]);
+    const e = l.match(/EDO\.?\s*DE\s+(M[ÉE]XICO|[A-ZÁÉÍÓÚ]+)/i);
+    if (e && !estado) estado = ("EDO. DE " + e[1]).replace(/\s+/g, " ").trim();
+  }
+  const aduana = [ciudad, estado].filter(Boolean).join(", ").replace(/,\s*$/, "");
+  if (!aduana) return padTo([], n);
+  return padTo(Array(n).fill(aduana), n); // misma aduana para todas (caso típico)
 }
 
 // Descripciones: todas las "UN VEHICULO/CAMION ..." en orden.
