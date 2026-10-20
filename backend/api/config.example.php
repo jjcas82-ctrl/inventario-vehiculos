@@ -18,6 +18,8 @@ return [
   // Agrega aquí la URL desde donde se sirve la PWA (GitHub Pages, Synology, etc.)
   'cors_origins' => [
     'https://jjcas82-ctrl.github.io',
+    // Si abres la app desde el propio Synology por DDNS, agrega también su dominio:
+    // 'https://backup-aero.synology.me',
     'http://localhost:8000',
   ],
 ];
