@@ -64,7 +64,7 @@
     <button class="tab" data-tab="zonamove" data-type="veh" role="tab" data-perm="event.register">Mover por zona</button>
     <button class="tab" data-tab="audit" data-type="veh" role="tab" data-perm="audit.run">Auditoría</button>
     <!-- Pestaña de REFACCIONES (data-type="ref") -->
-    <button class="tab" data-tab="refacciones" data-type="ref" role="tab" data-perm="inventory.view">🔧 Refacciones</button>
+    <button class="tab" data-tab="refacciones" data-type="ref" role="tab" data-perm="refacciones.view">🔧 Refacciones</button>
     <!-- Comunes a ambos tipos (data-type="both") -->
     <button class="tab" data-tab="settings" data-type="both" role="tab" data-perm="agencies.manage">Agencias</button>
     <button class="tab" data-tab="users" data-type="both" role="tab" data-perm="users.manage">Usuarios</button>
@@ -683,9 +683,9 @@
         <h2>🔧 Inventario de refacciones · Carga</h2>
         <p class="hint">Sube el archivo de <b>existencias</b> (CSV exportado del sistema interno) y el <b>PDF de marbetes</b> (listado para conteo físico). El sistema cruza ambos por <b>número de parte</b>.</p>
         <div class="row gap wrap" style="margin:8px 0">
-          <button id="ref-existencias-btn" class="btn btn-primary" data-perm="inventory.view">📄 Subir existencias (CSV)</button>
+          <button id="ref-existencias-btn" class="btn btn-primary" data-perm="refacciones.edit">📄 Subir existencias (CSV)</button>
           <input id="ref-existencias-file" type="file" accept=".csv,text/csv,.txt,text/plain" hidden />
-          <button id="ref-marbetes-btn" class="btn" data-perm="inventory.view">📑 Subir marbetes (PDF)</button>
+          <button id="ref-marbetes-btn" class="btn" data-perm="refacciones.edit">📑 Subir marbetes (PDF)</button>
           <input id="ref-marbetes-file" type="file" accept="application/pdf,.pdf" hidden />
           <button id="ref-cruzar" class="btn btn-primary">🔗 Cruzar</button>
           <button id="ref-limpiar" class="btn btn-ghost">Limpiar</button>
@@ -771,7 +771,7 @@
         <p class="hint">El rol define qué puede hacer cada usuario. Solo el administrador gestiona esta lista.</p>
         <div class="table-wrap">
           <table class="table" id="users-table">
-            <thead><tr><th>Nombre completo</th><th>Usuario</th><th>Correo</th><th>Rol</th><th></th></tr></thead>
+            <thead><tr><th>Nombre completo</th><th>Usuario</th><th>Correo</th><th>Rol</th><th>🔧 Refacc.</th><th>✏️ Edita</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -785,11 +785,21 @@
           <div class="field"><label for="nu-pass">Contraseña</label><input id="nu-pass" type="password" placeholder="mínimo 4 caracteres" /></div>
           <div class="field"><label for="nu-role">Rol</label>
             <select id="nu-role">
-              <option value="operador">Operador</option>
-              <option value="consultor">Consultor</option>
-              <option value="capturista">Capturista</option>
               <option value="admin">Administrador</option>
+              <option value="gerente">Gerente / Director</option>
+              <option value="auditor">Auditor</option>
+              <option value="contabilidad">Administrativo de contabilidad</option>
+              <option value="ventas_admin">Administrativo de ventas</option>
+              <option value="capturista" selected>Capturista</option>
+              <option value="consultor">Consultor</option>
+              <option value="asesor">Asesor de ventas</option>
+              <option value="operador">Operador</option>
+              <option value="refacciones">Refacciones</option>
             </select>
+          </div>
+          <div class="field" id="nu-access-box" style="align-self:end">
+            <label class="chk-inline"><input type="checkbox" id="nu-access-parts" /> 🔧 Acceso a refacciones</label>
+            <label class="chk-inline" id="nu-canedit-label" style="display:none"><input type="checkbox" id="nu-can-edit" /> ✏️ Puede editar</label>
           </div>
         </div>
         <button id="add-user" class="btn btn-primary">Registrar usuario</button>

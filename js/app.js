@@ -233,6 +233,14 @@ function setupInvTypeSwitch() {
   applyInvType();
 }
 
+// ¿Qué tipos de inventario puede ver el usuario actual?
+function canSeeVeh() {
+  // Ve vehículos si tiene alguna de las capacidades de vehículos.
+  return ["inventory.view", "event.register", "reports.view", "map.view", "audit.run"]
+    .some(p => auth.can(p));
+}
+function canSeeRef() { return auth.can("refacciones.view"); }
+
 function setInvType(type) {
   if (type !== "veh" && type !== "ref") return;
   _invType = type;
@@ -244,11 +252,27 @@ function setInvType(type) {
 }
 
 // Aplica la visibilidad de pestañas según el tipo activo Y los permisos del rol.
+// También ajusta la barra de tipo: oculta el botón de un tipo que el usuario no
+// puede ver, y si solo puede ver uno, oculta la barra completa.
 function applyInvType() {
-  document.querySelectorAll(".inv-type-btn").forEach(b =>
-    b.classList.toggle("is-active", b.dataset.invtype === _invType));
-
   const loggedIn = !!auth.currentUser();
+  const verVeh = loggedIn && canSeeVeh();
+  const verRef = loggedIn && canSeeRef();
+
+  // Si el tipo activo ya no es accesible, mover al que sí lo sea.
+  if (_invType === "ref" && !verRef && verVeh) _invType = "veh";
+  if (_invType === "veh" && !verVeh && verRef) _invType = "ref";
+
+  // Botones de la barra de tipo: mostrar solo los tipos accesibles.
+  const bar = document.querySelector(".inv-type-bar");
+  document.querySelectorAll(".inv-type-btn").forEach(b => {
+    const show = (b.dataset.invtype === "veh" && verVeh) || (b.dataset.invtype === "ref" && verRef);
+    b.style.display = show ? "" : "none";
+    b.classList.toggle("is-active", b.dataset.invtype === _invType);
+  });
+  // Oculta la barra si el usuario solo tiene acceso a un tipo (no hay qué elegir).
+  if (bar) bar.style.display = (verVeh && verRef) ? "" : "none";
+
   document.querySelectorAll(".tab").forEach(tab => {
     const tipoOk = tab.dataset.type === "both" || tab.dataset.type === _invType || !tab.dataset.type;
     const permOk = !tab.dataset.perm || (loggedIn && auth.can(tab.dataset.perm));

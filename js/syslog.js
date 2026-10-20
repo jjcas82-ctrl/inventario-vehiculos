@@ -15,6 +15,7 @@ export const SYSLOG_ACTIONS = {
   "session.expire": "⏱️ Sesión expirada (inactividad)",
   "vehicle.create": "➕ Alta de unidad",
   "vehicle.edit":   "✏️ Edición de ficha",
+  "vehicle.stage":  "🏷️ Cambio de etapa",
   "vehicle.vin":    "🔑 Cambio de VIN",
   "vehicle.sold":   "🏷️ Marcada como Vendida",
   "vehicle.deliver":"📤 Entrega / baja de inventario",
@@ -28,6 +29,10 @@ export const SYSLOG_ACTIONS = {
   "user.password":  "🔒 Cambio de contraseña",
   "data.wipe":      "💥 Borrado total de datos",
   "data.import":    "📥 Importación de respaldo",
+  "parts.load":          "🔧 Carga de refacciones",
+  "parts.count":         "🔧 Conteo de refacción",
+  "parts.count.reset":   "🔧 Conteo reiniciado",
+  "parts.diff.report":   "🔧 Reporte de diferencias",
 };
 
 let _cache = null;

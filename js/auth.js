@@ -1,12 +1,14 @@
 // auth.js — Roles, permisos, usuarios y sesión con login usuario+contraseña (local).
 //
 // Modelo de usuario:
-//   { id, firstName, lastName, email, username, role, passHash, salt, createdAt }
+//   { id, firstName, lastName, email, username, role, passHash, salt, createdAt,
+//     accessParts (bool|undefined), canEdit (bool|undefined) }
 //
-// Roles:
-//   operador   → solo registrar entradas/salidas/movimientos.
-//   capturista → operador + inventario/reportes/mapa + editar ficha (SIN cambiar VIN, SIN borrar).
-//   admin      → acceso total (VIN, agencias, usuarios, borrar, auditorías).
+// Dos AJUSTES por usuario (los controla el Administrador en la pestaña Usuarios):
+//   - accessParts: acceso al inventario de REFACCIONES (anula/activa por usuario,
+//       sin cambiar el rol). Si es undefined, se usa el valor por defecto del rol.
+//   - canEdit: edición OPCIONAL para roles cuya edición es opcional
+//       (gerente/director y administrativo de contabilidad). No aplica a otros.
 //
 // Seguridad: sin servidor todavía, la validación es LOCAL. Las contraseñas se
 // guardan como HASH SHA-256 + salt (nunca en texto plano). En la Fase 2 el login
@@ -16,23 +18,66 @@ import { store } from "./storage.js";
 import { logAction } from "./syslog.js";
 
 export const ROLES = {
-  operador:   { label: "Operador",      desc: "Registra entradas, salidas y movimientos." },
-  consultor:  { label: "Consultor",     desc: "Solo consulta inventario/mapa y emite reportes (sin editar)." },
-  capturista: { label: "Capturista",    desc: "Registra y edita fichas; ve inventario y reportes." },
-  auditor:    { label: "Auditor",       desc: "Solo realiza auditorías / conteo físico (una sola pestaña)." },
-  admin:      { label: "Administrador", desc: "Acceso total, incluye VIN, agencias y usuarios." },
+  admin:       { label: "Administrador",               desc: "Acceso total: VIN, agencias, usuarios, refacciones y auditorías." },
+  gerente:     { label: "Gerente / Director",          desc: "Ve todas las pestañas (veh. y refacciones). Edición opcional." },
+  auditor:     { label: "Auditor",                     desc: "Ve inventario de unidades y refacciones; realiza auditorías." },
+  contabilidad:{ label: "Administrativo de contabilidad", desc: "Ve vehículos y refacciones. Edición opcional." },
+  ventas_admin:{ label: "Administrativo de ventas",    desc: "Pestañas de vehículos; puede editar fichas." },
+  capturista:  { label: "Capturista",                  desc: "Inventario de vehículos; registra y edita fichas." },
+  consultor:   { label: "Consultor",                   desc: "Consulta inventario, mapa y reportes (sin editar)." },
+  asesor:      { label: "Asesor de ventas",            desc: "Solo Inventario y Reportes (sin montos $, sin editar)." },
+  operador:    { label: "Operador",                    desc: "Solo entradas, salidas y movimiento interno (Escanear)." },
+  refacciones: { label: "Refacciones",                 desc: "Solo acceso al inventario de refacciones." },
 };
 
+// Permisos BASE por rol. Los ajustes por usuario (accessParts/canEdit) se aplican
+// encima en can() — ver más abajo.
+//   inventory.view      → ver inventario de vehículos (pestañas Inicio/Inventario).
+//   inventory.viewValue → ver los MONTOS $ (valor del inventario).
+//   refacciones.view    → ver el inventario de refacciones.
+//   refacciones.edit    → cargar/contar/editar refacciones.
+//   vehicle.edit        → editar fichas de vehículos.
 const PERMISSIONS = {
-  operador:   ["event.register"],
-  consultor:  ["inventory.view", "reports.view", "map.view"],
-  capturista: ["event.register", "inventory.view", "reports.view", "map.view", "vehicle.edit"],
-  // El auditor SOLO ve/usa la pestaña Auditoría (sin registrar eventos ni ver inventario).
-  auditor:    ["audit.run", "audit.schedule"],
-  admin:      ["event.register", "inventory.view", "reports.view", "map.view", "vehicle.edit",
-               "vehicle.editVin", "agencies.manage", "users.manage", "data.wipe", "audit.run",
-               "audit.override", "audit.schedule"],
+  operador:    ["event.register"],
+  consultor:   ["inventory.view", "inventory.viewValue", "reports.view", "map.view"],
+  asesor:      ["inventory.view", "reports.view"],                 // SIN inventory.viewValue (montos ocultos)
+  capturista:  ["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view", "vehicle.edit"],
+  ventas_admin:["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view", "vehicle.edit"],
+  // El auditor ve ambos inventarios (solo lectura) y corre auditorías.
+  auditor:     ["inventory.view", "inventory.viewValue", "reports.view", "map.view",
+                "refacciones.view", "audit.run", "audit.schedule"],
+  // Contabilidad ve ambos inventarios; edición OPCIONAL (se concede con canEdit).
+  contabilidad:["inventory.view", "inventory.viewValue", "reports.view", "map.view", "refacciones.view"],
+  // Gerente/Director ve TODO; edición OPCIONAL (se concede con canEdit).
+  gerente:     ["inventory.view", "inventory.viewValue", "reports.view", "map.view",
+                "event.register", "refacciones.view", "audit.run", "audit.schedule"],
+  // Rol dedicado a refacciones: solo el inventario de partes (ver + editar).
+  refacciones: ["refacciones.view", "refacciones.edit"],
+  admin:       ["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view",
+                "vehicle.edit", "vehicle.editVin", "agencies.manage", "users.manage", "data.wipe",
+                "audit.run", "audit.override", "audit.schedule", "refacciones.view", "refacciones.edit"],
 };
+
+// Roles cuya EDICIÓN es opcional (se activa con el switch canEdit por usuario).
+// Al activarse, obtienen permiso de editar fichas de vehículos (como capturista),
+// pero NUNCA VIN/agencias/usuarios (eso es exclusivo de admin).
+const OPTIONAL_EDIT_ROLES = ["gerente", "contabilidad"];
+
+// Valor POR DEFECTO del acceso a refacciones según el rol (si el usuario no tiene
+// un ajuste explícito accessParts). El Administrador puede activarlo/quitarlo por
+// usuario desde la pestaña Usuarios.
+const PARTS_DEFAULT = {
+  admin: true, auditor: true, contabilidad: true, gerente: true, refacciones: true,
+  // El resto, por defecto, SIN refacciones.
+};
+
+// ¿Un rol puede, en principio, tener acceso a refacciones? (para mostrar el switch).
+export function roleCanHaveParts(role) {
+  // Cualquiera puede recibir acceso a refacciones por decisión del admin, salvo
+  // el rol "refacciones" (que ya es exclusivo de refacciones).
+  return role !== "refacciones";
+}
+export function roleHasOptionalEdit(role) { return OPTIONAL_EDIT_ROLES.includes(role); }
 
 let _session = null; // { id, username, name, role }
 
@@ -90,10 +135,50 @@ export async function login(username, password) {
 }
 
 // ---- Permisos ----
-export function can(permission) {
-  const u = currentUser();
+// Devuelve el registro COMPLETO del usuario actual (con accessParts/canEdit).
+function currentFullUser() {
+  const s = currentUser();
+  if (!s) return null;
+  return store.listUsers().find(x => x.id === s.id) || null;
+}
+
+// ¿El usuario tiene acceso a refacciones? Usa el ajuste explícito accessParts si
+// existe; si no, el valor por defecto del rol.
+export function hasPartsAccess(user) {
+  const u = user || currentFullUser();
   if (!u) return false;
-  return (PERMISSIONS[u.role] || []).includes(permission);
+  if (typeof u.accessParts === "boolean") return u.accessParts;
+  return !!PARTS_DEFAULT[u.role];
+}
+
+// ¿El usuario puede editar (para roles de edición opcional)?
+export function hasOptionalEdit(user) {
+  const u = user || currentFullUser();
+  if (!u) return false;
+  return roleHasOptionalEdit(u.role) && u.canEdit === true;
+}
+
+export function can(permission) {
+  const u = currentFullUser() || currentUser();
+  if (!u) return false;
+  const base = PERMISSIONS[u.role] || [];
+
+  // Refacciones: ver/editar depende del switch accessParts (o el valor por rol).
+  if (permission === "refacciones.view" || permission === "refacciones.edit") {
+    if (!hasPartsAccess(u)) return false;
+    // Si tiene acceso: 'view' siempre; 'edit' según el permiso base del rol
+    // (p. ej. admin y rol refacciones editan; auditor/contabilidad solo ven),
+    // o si el rol tiene edición opcional activada.
+    if (permission === "refacciones.view") return true;
+    return base.includes("refacciones.edit") || hasOptionalEdit(u);
+  }
+
+  // Edición de fichas de vehículos: permiso base O edición opcional concedida.
+  if (permission === "vehicle.edit") {
+    return base.includes("vehicle.edit") || hasOptionalEdit(u);
+  }
+
+  return base.includes(permission);
 }
 export function isAdmin() { return currentUser()?.role === "admin"; }
 
@@ -111,11 +196,16 @@ export async function createUser(data) {
 
   const salt = randomSalt();
   const passHash = await hashPassword(data.password, salt);
+  const role = data.role || "operador";
   const user = store.addUser({
     firstName: (data.firstName || "").trim(),
     lastName: (data.lastName || "").trim(),
     email: (data.email || "").trim(),
-    username, role: data.role || "operador",
+    username, role,
+    // Ajustes por usuario: acceso a refacciones y edición opcional.
+    // Si no se indica accessParts, se deja undefined (usa el valor por defecto del rol).
+    accessParts: typeof data.accessParts === "boolean" ? data.accessParts : undefined,
+    canEdit: roleHasOptionalEdit(role) ? !!data.canEdit : undefined,
     salt, passHash,
   });
   logAction("user.create", `${username} (${user.role})`, currentUser()?.name || "—");
