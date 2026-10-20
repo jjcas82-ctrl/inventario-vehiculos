@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '', username TEXT NOT NULL UNIQUE,
   pass_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'operador',
+  access_parts INTEGER DEFAULT NULL, can_edit INTEGER NOT NULL DEFAULT 0,
   activo INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -44,6 +45,16 @@ CREATE TABLE IF NOT EXISTS auditorias (
   modo TEXT NOT NULL DEFAULT 'full', usuario TEXT NOT NULL DEFAULT '',
   total_esperado INTEGER NOT NULL DEFAULT 0, presentes TEXT, faltantes TEXT, sobrantes TEXT,
   started_at TEXT, finished_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS refacciones (
+  num_parte TEXT PRIMARY KEY, descripcion TEXT NOT NULL DEFAULT '',
+  ubicacion TEXT NOT NULL DEFAULT '', grupo TEXT NOT NULL DEFAULT '',
+  marbete TEXT NOT NULL DEFAULT '', existencia INTEGER, conteo INTEGER,
+  conteo_by TEXT NOT NULL DEFAULT '', conteo_at TEXT,
+  en_marbetes INTEGER NOT NULL DEFAULT 0, en_existencias INTEGER NOT NULL DEFAULT 0,
+  origin TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS bitacora (
   id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT NOT NULL DEFAULT '',

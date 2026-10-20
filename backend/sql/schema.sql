@@ -24,14 +24,25 @@ CREATE TABLE IF NOT EXISTS usuarios (
   username      VARCHAR(60)  NOT NULL,
   -- Contraseña con hash (password_hash de PHP, bcrypt).
   pass_hash     VARCHAR(255) NOT NULL,
-  -- Roles: operador | consultor | capturista | admin
+  -- Roles: admin | gerente | auditor | contabilidad | ventas_admin | capturista
+  --        | consultor | asesor | operador | refacciones
   role          VARCHAR(20)  NOT NULL DEFAULT 'operador',
+  -- Ajustes por usuario (el admin los controla en la pestaña Usuarios):
+  --   access_parts: NULL = usar valor por defecto del rol; 0/1 = forzar.
+  --   can_edit: edición opcional para gerente/contabilidad.
+  access_parts  TINYINT(1)   NULL DEFAULT NULL,
+  can_edit      TINYINT(1)   NOT NULL DEFAULT 0,
   activo        TINYINT(1)   NOT NULL DEFAULT 1,
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_usuarios_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migración para instalaciones existentes: agrega los ajustes por usuario si
+-- la tabla ya existía sin estas columnas (MariaDB 10.x soporta IF NOT EXISTS).
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS access_parts TINYINT(1) NULL DEFAULT NULL;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS can_edit TINYINT(1) NOT NULL DEFAULT 0;
 
 -- ---------------------------------------------------------------------------
 -- Tokens de sesión (autenticación por token, se validan en cada petición)
@@ -146,6 +157,32 @@ CREATE TABLE IF NOT EXISTS auditorias (
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_auditorias_agency (agency)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- Refacciones (inventario de partes; clave = num_parte)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS refacciones (
+  num_parte    VARCHAR(60)  NOT NULL,
+  descripcion  VARCHAR(255) NOT NULL DEFAULT '',
+  ubicacion    VARCHAR(80)  NOT NULL DEFAULT '',
+  grupo        VARCHAR(20)  NOT NULL DEFAULT '',
+  marbete      VARCHAR(20)  NOT NULL DEFAULT '',
+  -- Existencia del sistema interno (puede ser NULL si la parte solo viene en marbetes).
+  existencia   INT          NULL,
+  -- Conteo físico (NULL = aún sin contar).
+  conteo       INT          NULL,
+  conteo_by    VARCHAR(120) NOT NULL DEFAULT '',
+  conteo_at    DATETIME     NULL,
+  -- Banderas del cruce y procedencia.
+  en_marbetes  TINYINT(1)   NOT NULL DEFAULT 0,
+  en_existencias TINYINT(1) NOT NULL DEFAULT 0,
+  origin       VARCHAR(20)  NOT NULL DEFAULT '',   -- cruce | existencias | conteo
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (num_parte),
+  KEY idx_refacciones_ubic (ubicacion),
+  KEY idx_refacciones_marbete (marbete)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------

@@ -19,6 +19,12 @@
 //   DELETE /users/{id}                             [users.manage]
 //   GET    /audits                                 [audit.run]
 //   POST   /audits                                 [audit.run]
+//   GET    /parts                 (listar refacc.) [refacciones.view]
+//   GET    /parts/{numParte}                        [refacciones.view]
+//   PUT    /parts/{numParte}      (crear/editar)   [refacciones.edit]
+//   POST   /parts/bulk            (carga masiva)   [refacciones.edit]
+//   POST   /parts/{numParte}/conteo (conteo)       [refacciones.count]
+//   DELETE /parts                 (vaciar)         [refacciones.edit]
 //   GET    /ping                  (prueba de vida)
 
 require __DIR__ . '/lib/db.php';
@@ -60,6 +66,7 @@ try {
     case 'events':    require __DIR__ . '/handlers/events.php';    handle_events($user, $method, $parts);    break;
     case 'users':     require __DIR__ . '/handlers/users.php';     handle_users($user, $method, $parts);     break;
     case 'audits':    require __DIR__ . '/handlers/audits.php';    handle_audits($user, $method, $parts);    break;
+    case 'parts':     require __DIR__ . '/handlers/parts.php';     handle_parts($user, $method, $parts);     break;
     default:          json_error(404, 'Ruta no encontrada: ' . $route);
   }
 } catch (Throwable $e) {
