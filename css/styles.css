@@ -367,3 +367,21 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 .audit-agenda { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: #f8fafc; margin-bottom: 4px; }
 .audit-agenda > summary { cursor: pointer; font-weight: 700; color: var(--primary); font-size: 14px; }
 .audit-agenda > summary::-webkit-details-marker { color: var(--primary); }
+
+
+/* ===== Selector de tipo de inventario (Vehículos / Refacciones) ===== */
+.inv-type-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 16px; background: var(--primary-dark);
+  position: sticky; top: 52px; z-index: 16;
+}
+.inv-type-label { color: rgba(255,255,255,.85); font-size: 13px; font-weight: 600; }
+.inv-type-switch { display: inline-flex; background: rgba(255,255,255,.12); border-radius: 999px; padding: 3px; }
+.inv-type-btn {
+  border: none; background: none; color: rgba(255,255,255,.85);
+  font-size: 14px; font-weight: 600; padding: 6px 16px; border-radius: 999px; cursor: pointer;
+}
+.inv-type-btn.is-active { background: #fff; color: var(--primary); }
+body.locked .inv-type-bar { display: none !important; }
+/* Cuando existe la barra de tipo, las pestañas quedan debajo de ella. */
+.inv-type-bar ~ .tabs { top: 96px; }
