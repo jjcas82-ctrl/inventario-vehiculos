@@ -17,12 +17,29 @@ Datos de tu equipo (confirmados):
 
 ## PARTE 1 — Instalar los paquetes necesarios
 
-En **DSM → Centro de paquetes**, instala (si no los tienes):
+En **DSM → Centro de paquetes**, instala (si no los tienes) **en este orden**:
 
 1. **MariaDB 10** — la base de datos.
-2. **Web Station** — el servidor web para la API PHP.
-3. **PHP 8.x** (aparece con Web Station o como paquete aparte). Elige **PHP 8.0 o superior**.
-4. **phpMyAdmin** — para administrar la base de datos desde el navegador.
+2. **Web Station** — el administrador del servidor web.
+3. **Apache HTTP Server 2.4** — el servidor web que ejecutará la API.
+   > ⚠️ Instálalo ANTES de crear el servicio web. Si no, al crear el servicio el
+   > desplegable "Servidor back-end HTTP" **solo mostrará Nginx**. (Nginx también
+   > sirve, pero la guía usa Apache para que coincida con el `.htaccess` incluido.)
+4. **PHP 8.x** — **obligatorio** para ejecutar la API. Elige **PHP 8.0 o superior**
+   (p. ej. PHP 8.1). Apache sin PHP no puede correr la API.
+5. **phpMyAdmin** — para administrar la base de datos desde el navegador.
+
+---
+
+## PARTE 1.5 — Crear el PERFIL de PHP (DSM 7) y activar pdo_mysql
+
+En DSM 7, Web Station separa el PHP en un "perfil" que luego se asocia al servicio web.
+
+1. **Web Station → PHP** (o "Configuración de PHP") → **Crear**.
+2. Elige la versión **PHP 8.x** instalada.
+3. En **Extensiones**, **activa `pdo_mysql`** (es la que la API usa para MariaDB).
+   Activa también `mysqli` por si acaso.
+4. Guarda el perfil. Lo asociarás al servicio web en la PARTE 3.
 
 ---
 
@@ -68,11 +85,16 @@ En **DSM → Centro de paquetes**, instala (si no los tienes):
    (`https://jjcas82-ctrl.github.io`). Si algún día sirves la app desde el propio
    Synology, agrega también `https://backup-aero.synology.me`.
 
-### Configurar el "Portal web" en Web Station
-- **Web Station → Portal web** → crea un portal:
-  - **Servicio back-end:** Apache HTTP Server + **PHP 8.x**.
-  - **Documento raíz:** la carpeta `web` (o donde pusiste `api`).
-- Verifica que **PHP** tenga activa la extensión **pdo_mysql**.
+### Crear el "Servicio web" en Web Station (DSM 7)
+- **Web Station → Servicio web → Crear**:
+  - **Nombre:** p. ej. `inventario-api`.
+  - **Raíz del documento:** la carpeta `web` (usa **Examinar** para seleccionarla).
+  - **Servidor back-end HTTP:** **Apache HTTP Server 2.4** (aparece tras instalarlo en la
+    PARTE 1; si solo ves "Nginx", es que falta instalar Apache).
+  - **Perfil de PHP:** selecciona el perfil que creaste en la PARTE 1.5 (con `pdo_mysql`).
+  - Siguiente → Finalizar.
+- Nuestra API **no depende del `.htaccess`** (usa rutas `?r=ping`, `?r=parts`, etc.), así
+  que funciona igual en Apache o Nginx mientras el perfil de PHP tenga **pdo_mysql**.
 
 ---
 
