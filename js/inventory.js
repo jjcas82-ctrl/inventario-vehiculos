@@ -214,8 +214,9 @@ export function renderInventory() {
 function renderValorInventario(list) {
   const box = document.getElementById("inv-valor");
   if (!box) return;
-  const rol = auth.currentUser()?.role;
-  if (!["auditor", "capturista", "admin"].includes(rol)) { box.innerHTML = ""; return; }
+  // Los MONTOS $ del inventario solo se muestran a roles con permiso financiero.
+  // El Asesor de ventas NO lo tiene (montos ocultos).
+  if (!auth.can("inventory.viewValue")) { box.innerHTML = ""; return; }
 
   const parseMoney = (s) => {
     const n = parseFloat(String(s || "").replace(/,/g, ""));
@@ -541,8 +542,8 @@ export function openVehicle(vin) {
     if (vehType) learnValue("vehType", vehType);
     if (powertrain) learnValue("powertrain", powertrain);
     if (transmission) learnValue("transmission", transmission);
-    store.upsertVehicle({
-      vin,
+    // Nuevos valores capturados en la ficha.
+    const nuevos = {
       make: body.querySelector("#f-make").value.trim(),
       model: body.querySelector("#f-model").value.trim(),
       color,
@@ -554,16 +555,51 @@ export function openVehicle(vin) {
       plate: body.querySelector("#f-plate").value.trim(),
       condition: body.querySelector("#f-condition").value,
       notes: body.querySelector("#f-notes").value.trim(),
-    });
+    };
+
+    // HISTORIAL DE MODIFICACIONES: calculamos un diff campo-a-campo (antes → después)
+    // comparando el vehículo previo con los valores capturados. Así la bitácora
+    // guarda QUÉ cambió, no solo "Edición de ficha".
+    const LABELS = {
+      make: "Marca", model: "Modelo", color: "Color", engineNo: "No. motor",
+      mileage: "Kilometraje", vehType: "Tipo", powertrain: "Versión",
+      transmission: "Transmisión", plate: "Placa", condition: "Condición", notes: "Notas",
+    };
+    const norm = (x) => (x === null || x === undefined) ? "" : String(x).trim();
+    const cambios = [];
+    for (const k of Object.keys(nuevos)) {
+      const antes = norm(v[k]);
+      const despues = norm(nuevos[k]);
+      if (antes !== despues) {
+        cambios.push(`${LABELS[k] || k}: "${antes || "—"}" → "${despues || "—"}"`);
+      }
+    }
+
+    store.upsertVehicle({ vin, ...nuevos });
+
     // La etapa se guarda aparte para llevar bitácora de quién/cuándo la cambió.
-    const nuevaEtapa = body.querySelector("#f-stage").value;
     const quien = auth.currentUser()?.name || "—";
+    const etapaPrevia = v.stage || "";
+    const nuevaEtapa = body.querySelector("#f-stage").value;
     store.setStage(vin, nuevaEtapa, quien);
+
     closeModal();
     renderInventory();
     onChange();
-    logAction("vehicle.edit", "Edición de ficha", auth.currentUser()?.name || "—", vin);
-    notify("Ficha guardada.", { type: "success" });
+
+    // Bitácora: solo si HUBO cambios (evita asientos vacíos). Se detalla el diff.
+    if (cambios.length) {
+      logAction("vehicle.edit", cambios.join(" · "), quien, vin);
+    }
+    // Cambio de etapa: asiento dedicado con origen → destino.
+    if (etapaPrevia !== nuevaEtapa) {
+      logAction("vehicle.stage", `Etapa: "${etapaPrevia || "—"}" → "${nuevaEtapa}"`, quien, vin);
+    }
+    if (!cambios.length && etapaPrevia === nuevaEtapa) {
+      notify("No hubo cambios que guardar.", { type: "info" });
+    } else {
+      notify("Ficha guardada.", { type: "success" });
+    }
   });
 
   // Cambio de VIN (solo admin), con validación ISO 3779 y confirmación.

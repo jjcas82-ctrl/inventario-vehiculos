@@ -153,7 +153,7 @@ function hacerCruce() {
 
 function confirmarCarga() {
   if (!lastCruce) return;
-  if (!auth.can || !puedeEditar()) {
+  if (!puedeEditar()) {
     notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" });
     return;
   }
@@ -344,6 +344,8 @@ function registrarConteoManual() {
   if (cantRaw === "") { notify("Teclea la cantidad contada.", { type: "warn" }); cantEl?.focus(); return; }
   const conteo = Number(cantRaw);
   if (!Number.isFinite(conteo) || conteo < 0) { notify("La cantidad debe ser un número válido (0 o más).", { type: "warn" }); cantEl?.focus(); return; }
+
+  if (!puedeContar()) { notify("Tu rol no permite registrar conteos de refacciones.", { type: "warn" }); return; }
 
   const by = auth.currentUser()?.name || "—";
   let p = store.getPart(numParte);
@@ -554,9 +556,15 @@ function exportarDiferenciasCsv() {
 // ======================= HELPERS =======================
 
 function puedeEditar() {
-  // Reutiliza el permiso de edición de vehículos (mismo perfil operativo).
-  try { return auth.can("vehicle.edit") || auth.can("inventory.view"); }
-  catch (e) { return true; }
+  // Cargar/editar el catálogo de refacciones requiere refacciones.edit.
+  try { return auth.can("refacciones.edit"); }
+  catch (e) { return false; }
+}
+// Registrar conteo físico: lo puede hacer quien edita refacciones O el auditor
+// (contar es la tarea central de la auditoría de refacciones).
+function puedeContar() {
+  try { return auth.can("refacciones.edit") || auth.can("audit.run"); }
+  catch (e) { return false; }
 }
 
 function readTextFile(file) {
