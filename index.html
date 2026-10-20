@@ -43,18 +43,32 @@
     </div>
   </header>
 
+  <!-- Selector de TIPO DE INVENTARIO: alterna entre el módulo de vehículos y el
+       de refacciones. Mantiene todo en un mismo sistema. -->
+  <div class="inv-type-bar">
+    <span class="inv-type-label">Tipo de inventario:</span>
+    <div class="inv-type-switch" role="group" aria-label="Tipo de inventario">
+      <button class="inv-type-btn is-active" data-invtype="veh">🚗 Vehículos</button>
+      <button class="inv-type-btn" data-invtype="ref">🔧 Refacciones</button>
+    </div>
+  </div>
+
   <nav class="tabs" role="tablist">
-    <button class="tab is-active" data-tab="dashboard" role="tab" data-perm="inventory.view">🏠 Inicio</button>
-    <button class="tab" data-tab="scan" role="tab" data-perm="event.register">Escanear</button>
-    <button class="tab" data-tab="inventory" role="tab" data-perm="inventory.view">Inventario</button>
-    <button class="tab" data-tab="map" role="tab" data-perm="map.view">Mapa</button>
-    <button class="tab" data-tab="reports" role="tab" data-perm="reports.view">Reportes</button>
-    <button class="tab" data-tab="labels" role="tab" data-perm="inventory.view">Etiquetas</button>
-    <button class="tab" data-tab="zonamove" role="tab" data-perm="event.register">Mover por zona</button>
-    <button class="tab" data-tab="audit" role="tab" data-perm="audit.run">Auditoría</button>
-    <button class="tab" data-tab="settings" role="tab" data-perm="agencies.manage">Agencias</button>
-    <button class="tab" data-tab="users" role="tab" data-perm="users.manage">Usuarios</button>
-    <button class="tab" data-tab="syslog" role="tab" data-perm="users.manage">Bitácora</button>
+    <!-- Pestañas de VEHÍCULOS (data-type="veh") -->
+    <button class="tab is-active" data-tab="dashboard" data-type="veh" role="tab" data-perm="inventory.view">🏠 Inicio</button>
+    <button class="tab" data-tab="scan" data-type="veh" role="tab" data-perm="event.register">Escanear</button>
+    <button class="tab" data-tab="inventory" data-type="veh" role="tab" data-perm="inventory.view">Inventario</button>
+    <button class="tab" data-tab="map" data-type="veh" role="tab" data-perm="map.view">Mapa</button>
+    <button class="tab" data-tab="reports" data-type="veh" role="tab" data-perm="reports.view">Reportes</button>
+    <button class="tab" data-tab="labels" data-type="veh" role="tab" data-perm="inventory.view">Etiquetas</button>
+    <button class="tab" data-tab="zonamove" data-type="veh" role="tab" data-perm="event.register">Mover por zona</button>
+    <button class="tab" data-tab="audit" data-type="veh" role="tab" data-perm="audit.run">Auditoría</button>
+    <!-- Pestaña de REFACCIONES (data-type="ref") -->
+    <button class="tab" data-tab="refacciones" data-type="ref" role="tab" data-perm="inventory.view">🔧 Refacciones</button>
+    <!-- Comunes a ambos tipos (data-type="both") -->
+    <button class="tab" data-tab="settings" data-type="both" role="tab" data-perm="agencies.manage">Agencias</button>
+    <button class="tab" data-tab="users" data-type="both" role="tab" data-perm="users.manage">Usuarios</button>
+    <button class="tab" data-tab="syslog" data-type="both" role="tab" data-perm="users.manage">Bitácora</button>
   </nav>
 
   <main>
@@ -659,6 +673,94 @@
       <div class="card">
         <h2>Auditorías anteriores</h2>
         <div id="audit-history"></div>
+      </div>
+    </section>
+
+    <!-- ================= REFACCIONES (inventario de partes) ================= -->
+    <section id="tab-refacciones" class="tab-panel" role="tabpanel">
+      <!-- 1) CARGA: existencias (CSV) + marbetes (PDF) → cruce -->
+      <div class="card">
+        <h2>🔧 Inventario de refacciones · Carga</h2>
+        <p class="hint">Sube el archivo de <b>existencias</b> (CSV exportado del sistema interno) y el <b>PDF de marbetes</b> (listado para conteo físico). El sistema cruza ambos por <b>número de parte</b>.</p>
+        <div class="row gap wrap" style="margin:8px 0">
+          <button id="ref-existencias-btn" class="btn btn-primary" data-perm="inventory.view">📄 Subir existencias (CSV)</button>
+          <input id="ref-existencias-file" type="file" accept=".csv,text/csv,.txt,text/plain" hidden />
+          <button id="ref-marbetes-btn" class="btn" data-perm="inventory.view">📑 Subir marbetes (PDF)</button>
+          <input id="ref-marbetes-file" type="file" accept="application/pdf,.pdf" hidden />
+          <button id="ref-cruzar" class="btn btn-primary">🔗 Cruzar</button>
+          <button id="ref-limpiar" class="btn btn-ghost">Limpiar</button>
+        </div>
+        <p id="ref-carga-status" class="hint"></p>
+        <div id="ref-carga-resumen" class="summary"></div>
+        <div id="ref-cruce-preview"></div>
+        <div class="row gap wrap" style="margin-top:10px">
+          <button id="ref-confirmar" class="btn btn-primary" hidden>✓ Cargar al inventario</button>
+        </div>
+      </div>
+
+      <!-- 2) ETIQUETAS QR (Janel 32×64, 12/hoja) -->
+      <div class="card">
+        <h2>🏷️ Etiquetas QR (Janel 32×64 mm · 12 por hoja)</h2>
+        <p class="hint">Imprime una etiqueta por parte. Cada etiqueta lleva un <b>QR</b> (número de parte + descripción + ubicación) y muestra el <b>número de parte y la descripción</b>. Usa «Hoja de prueba» para calibrar los márgenes antes de gastar etiquetas.</p>
+        <div class="filters">
+          <div class="field"><label for="ref-etq-sup">Margen superior (mm)</label><input id="ref-etq-sup" type="number" step="0.5" value="12" style="max-width:120px" /></div>
+          <div class="field"><label for="ref-etq-izq">Margen izquierdo (mm)</label><input id="ref-etq-izq" type="number" step="0.5" value="6" style="max-width:120px" /></div>
+          <div class="field"><label for="ref-etq-seph">Separación horizontal (mm)</label><input id="ref-etq-seph" type="number" step="0.5" value="2" style="max-width:140px" /></div>
+          <div class="field"><label for="ref-etq-sepv">Separación vertical (mm)</label><input id="ref-etq-sepv" type="number" step="0.5" value="2" style="max-width:140px" /></div>
+        </div>
+        <div class="row gap wrap" style="margin-top:8px">
+          <button id="ref-etiquetas" class="btn btn-primary">🖨️ Imprimir etiquetas</button>
+          <button id="ref-etiquetas-prueba" class="btn">🧪 Hoja de prueba (con bordes)</button>
+        </div>
+      </div>
+
+      <!-- 3) CONTEO FÍSICO: escanear QR + teclear cantidad -->
+      <div class="card">
+        <h2>📷 Conteo físico</h2>
+        <p class="hint">Escanea el <b>QR de la etiqueta</b> (o teclea el número de parte) y escribe la <b>cantidad contada</b>. El operador solo cuenta y teclea.</p>
+        <div id="ref-conteo-resumen" class="summary"></div>
+        <div class="row gap wrap" style="margin:8px 0">
+          <button id="ref-scan" class="btn btn-primary">📷 Escanear QR</button>
+          <button id="ref-scan-stop" class="btn btn-ghost" hidden>Detener cámara</button>
+          <button id="ref-reset-conteo" class="btn btn-ghost">Reiniciar conteo</button>
+        </div>
+        <div class="scanner" id="ref-scanner-wrap" hidden style="max-width:420px">
+          <video id="ref-video" playsinline muted></video>
+          <div class="scanner-overlay"><div class="scanner-frame"></div></div>
+        </div>
+        <div class="field" style="margin-top:8px;padding:10px;border:1px dashed var(--border);border-radius:8px;background:#f8fafc">
+          <label><b>Captura manual</b> (o con lector USB): número de parte y cantidad.</label>
+          <div class="row gap wrap">
+            <input id="ref-conteo-parte" type="text" placeholder="Número de parte" style="flex:1;min-width:160px" />
+            <input id="ref-conteo-cant" type="number" min="0" step="1" placeholder="Cantidad" style="max-width:140px" />
+            <button id="ref-conteo-manual-btn" class="btn btn-primary">Registrar conteo</button>
+          </div>
+        </div>
+        <p id="ref-scan-status" class="hint"></p>
+        <div class="table-wrap" style="max-height:300px;overflow:auto">
+          <table class="table" id="ref-conteo-table">
+            <thead><tr><th>No. parte</th><th>Descripción</th><th>Existencia</th><th>Conteo</th><th>Dif.</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 4) DIFERENCIAS -->
+      <div class="card">
+        <h2>📊 Reporte de diferencias</h2>
+        <p class="hint">Muestra <b>solo las partes con diferencia</b> entre el conteo físico y la existencia del sistema. Imprime el reporte para capturar los ajustes en el sistema interno.</p>
+        <div id="ref-diff-resumen" class="summary"></div>
+        <div class="row gap wrap" style="margin:8px 0">
+          <button id="ref-diff-pdf" class="btn">🖨️ Reporte PDF</button>
+          <button id="ref-diff-csv" class="btn">📄 Exportar CSV</button>
+        </div>
+        <div class="table-wrap" style="max-height:360px;overflow:auto">
+          <table class="table" id="ref-diff-table">
+            <thead><tr><th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Conteo</th><th>Dif.</th><th>Tipo</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p id="ref-diff-empty" class="muted">Sin diferencias. Cuando registres conteos que no cuadren con la existencia, aparecerán aquí.</p>
       </div>
     </section>
 

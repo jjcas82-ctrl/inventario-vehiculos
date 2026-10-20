@@ -120,6 +120,7 @@ function seed() {
     audits: [],
     openAudits: {},  // auditorías en curso por agencia (congelar/retomar)
     scheduledAudits: [], // agenda de auditorías programadas
+    parts: {},   // inventario de REFACCIONES (por número de parte)
   };
 }
 
@@ -157,6 +158,7 @@ function read() {
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
   if (!_cache.openAudits || typeof _cache.openAudits !== "object") _cache.openAudits = {};
   if (!Array.isArray(_cache.scheduledAudits)) _cache.scheduledAudits = [];
+  if (!_cache.parts || typeof _cache.parts !== "object") _cache.parts = {};
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
   // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
@@ -462,6 +464,47 @@ export const store = {
     db.scheduledAudits = (db.scheduledAudits || []).filter(x => x.id !== id);
     write(db);
   },
+
+  // ---- Refacciones (inventario de partes) ----
+  // Cada parte: { numParte, descripcion, ubicacion, grupo, existencia (número),
+  //   marbete, conteo (número|null), origin, createdAt, updatedAt }
+  listParts() { return Object.values(read().parts || {}); },
+  getPart(numParte) { return (read().parts || {})[numParte] || null; },
+  upsertPart(p) {
+    const db = read();
+    const now = new Date().toISOString();
+    const prev = db.parts[p.numParte];
+    db.parts[p.numParte] = { ...prev, ...p, createdAt: prev?.createdAt || now, updatedAt: now };
+    write(db);
+    return db.parts[p.numParte];
+  },
+  // Alta/actualización MASIVA en una sola escritura (cargar cientos de partes).
+  bulkUpsertParts(arr, { merge = true } = {}) {
+    const db = read();
+    const now = new Date().toISOString();
+    let added = 0, updated = 0;
+    for (const p of (arr || [])) {
+      if (!p || !p.numParte) continue;
+      const prev = db.parts[p.numParte];
+      if (prev) { db.parts[p.numParte] = { ...(merge ? prev : {}), ...p, createdAt: prev.createdAt || now, updatedAt: now }; updated++; }
+      else { db.parts[p.numParte] = { ...p, createdAt: now, updatedAt: now }; added++; }
+    }
+    write(db);
+    return { added, updated };
+  },
+  // Guarda el conteo físico de una parte.
+  setPartConteo(numParte, conteo, by) {
+    const db = read();
+    const p = db.parts[numParte];
+    if (!p) return null;
+    p.conteo = conteo;
+    p.conteoBy = by || "—";
+    p.conteoAt = new Date().toISOString();
+    p.updatedAt = p.conteoAt;
+    write(db);
+    return p;
+  },
+  clearParts() { const db = read(); db.parts = {}; write(db); },
 
   // ---- Respaldo ----
   export() { return JSON.stringify(read(), null, 2); },

@@ -23,6 +23,7 @@ import { initLabels, renderLabels } from "./labels.js";
 import { initCatalogAdmin } from "./catalogadmin.js";
 import { initCdoUpload } from "./cdoui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
+import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
@@ -47,21 +48,13 @@ function refreshUserLabel() {
 // Aplica los permisos a la interfaz: pestañas y acciones visibles según el rol.
 function applyPermissions() {
   const loggedIn = !!auth.currentUser();
-  // Pestañas: mostrar solo las permitidas
-  document.querySelectorAll(".tab[data-perm]").forEach(tab => {
-    const ok = loggedIn && auth.can(tab.dataset.perm);
-    tab.style.display = ok ? "" : "none";
-  });
-  // Acciones marcadas con data-perm en cualquier parte
+  // Pestañas: la visibilidad combina permiso + tipo de inventario activo.
+  // La lógica vive en applyInvType() para no duplicarla.
+  applyInvType();
+  // Acciones marcadas con data-perm en cualquier parte (no pestañas).
   document.querySelectorAll("[data-perm]:not(.tab)").forEach(el => {
     el.style.display = (loggedIn && auth.can(el.dataset.perm)) ? "" : "none";
   });
-  // Si la pestaña activa ya no es visible, saltar a la primera visible
-  const active = document.querySelector(".tab.is-active");
-  if (!active || active.style.display === "none") {
-    const first = [...document.querySelectorAll(".tab")].find(t => t.style.display !== "none");
-    if (first) first.click();
-  }
 }
 
 // ---- Cierre de sesión por inactividad (seguridad) ----
@@ -220,10 +213,53 @@ function setupTabs() {
       if (name === "syslog") renderSyslog();
       if (name === "labels") renderLabels();
       if (name === "audit") window.__initAudit && window.__initAudit();
+      if (name === "refacciones") renderRefacciones();
       if (name === "zonamove") { initZonaMove(); }
       else { try { stopZonaMove(); } catch (e) {} } // apaga la cámara al salir
+      // Apaga la cámara de refacciones al salir de su pestaña.
+      if (name !== "refacciones") { try { stopRefacciones(); } catch (e) {} }
     })
   );
+}
+
+// ---------- Selector de TIPO DE INVENTARIO (Vehículos / Refacciones) ----------
+// Muestra solo las pestañas del tipo elegido (más las comunes, data-type="both").
+// Al cambiar de tipo, salta a la primera pestaña visible de ese tipo.
+let _invType = "veh";
+
+function setupInvTypeSwitch() {
+  const btns = document.querySelectorAll(".inv-type-btn");
+  btns.forEach(b => b.addEventListener("click", () => setInvType(b.dataset.invtype)));
+  applyInvType();
+}
+
+function setInvType(type) {
+  if (type !== "veh" && type !== "ref") return;
+  _invType = type;
+  applyInvType();
+  // Ir a la primera pestaña visible del tipo seleccionado.
+  const first = [...document.querySelectorAll(".tab")]
+    .find(t => t.style.display !== "none");
+  if (first) first.click();
+}
+
+// Aplica la visibilidad de pestañas según el tipo activo Y los permisos del rol.
+function applyInvType() {
+  document.querySelectorAll(".inv-type-btn").forEach(b =>
+    b.classList.toggle("is-active", b.dataset.invtype === _invType));
+
+  const loggedIn = !!auth.currentUser();
+  document.querySelectorAll(".tab").forEach(tab => {
+    const tipoOk = tab.dataset.type === "both" || tab.dataset.type === _invType || !tab.dataset.type;
+    const permOk = !tab.dataset.perm || (loggedIn && auth.can(tab.dataset.perm));
+    tab.style.display = (tipoOk && permOk) ? "" : "none";
+  });
+  // Si la pestaña activa ya no es visible, saltar a la primera visible.
+  const active = document.querySelector(".tab.is-active");
+  if (!active || active.style.display === "none") {
+    const firstVisible = [...document.querySelectorAll(".tab")].find(t => t.style.display !== "none");
+    if (firstVisible) firstVisible.click();
+  }
 }
 
 // ---------- Selectores de agencia/ubicación en el formulario de evento ----------
@@ -1676,6 +1712,8 @@ function main() {
   setupTabs();
   initUsers();
   initLabels();
+  initRefacciones();
+  setupInvTypeSwitch();
   setupScanner();
   setupEventButtons();
   setupDataButtons();
