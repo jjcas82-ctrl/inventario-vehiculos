@@ -16,6 +16,15 @@
 
 import { store } from "./storage.js";
 import { logAction } from "./syslog.js";
+import * as api from "./api.js";
+
+// Cuenta de EMERGENCIA local: funciona SIEMPRE, incluso sin servidor ni internet,
+// en cualquier dispositivo (aunque sea nuevo). Pensada para seguir operando una
+// recepción o auditoría si el Synology/internet se cae. Es un admin local.
+//   - username fijo. La contraseña se puede cambiar (se guarda como usuario local
+//     normal); por defecto es la inicial y obliga a cambiarla en el primer uso.
+const EMERGENCY_USERNAME = "emergencia";
+const EMERGENCY_DEFAULT_PASS = "aeroplasa";   // cámbiala en el primer acceso
 
 export const ROLES = {
   admin:       { label: "Administrador",               desc: "Acceso total: VIN, agencias, usuarios, refacciones y auditorías." },
@@ -120,18 +129,97 @@ export function logout() {
   const name = _session?.name;
   if (name) logAction("logout", "", name);
   setSession(null);
+  // Cierra también la sesión del servidor (best-effort; no bloquea ni importa si falla).
+  try { api.logout(); } catch (e) {}
 }
 
-// ---- Login ----
+// ---- Login MIXTO ----
+// Orden de intento:
+//   1) Cuenta de EMERGENCIA local (siempre, sin red).
+//   2) SERVIDOR (si hay internet y responde): valida contra la API, guarda token
+//      y CACHEA las credenciales localmente para permitir login offline futuro.
+//   3) LOCAL (si el servidor no responde / offline): valida contra el usuario
+//      cacheado en este dispositivo (como hasta ahora).
+// Mantiene la firma (username, password) y el retorno { ok, user, error }.
 export async function login(username, password) {
-  const u = store.listUsers().find(x => (x.username || "").toLowerCase() === String(username).toLowerCase().trim());
-  if (!u) return { ok: false, error: "Usuario no encontrado." };
-  if (!u.passHash || !u.salt) return { ok: false, error: "El usuario no tiene contraseña configurada." };
+  const uname = String(username || "").toLowerCase().trim();
+
+  // 1) Cuenta de emergencia: se valida siempre localmente (nunca contra el servidor).
+  if (uname === EMERGENCY_USERNAME) {
+    return loginLocal(uname, password);
+  }
+
+  // 2) Intento contra el SERVIDOR (si responde).
+  try {
+    const r = await api.login(username, password);   // guarda token si ok
+    if (r && r.ok && r.user) {
+      // Fusiona/actualiza el usuario local con lo que dice el servidor y CACHEA
+      // la contraseña (hash local) para permitir login offline en este equipo.
+      const local = await cacheServerUser(r.user, password);
+      setSession(local);
+      logAction("login", `Rol: ${local.role} (servidor)`, _session.name);
+      return { ok: true, user: _session };
+    }
+    // El servidor respondió pero sin ok → credenciales inválidas en el servidor.
+    return { ok: false, error: (r && r.error) || "Usuario o contraseña incorrectos." };
+  } catch (e) {
+    // Si el servidor NO respondió (offline/caído) → caer al login local.
+    if (e && e.offline) {
+      const res = await loginLocal(uname, password);
+      if (!res.ok && res._notFound) {
+        // El usuario no existe localmente y no hay servidor para validarlo:
+        // es el caso "primer login en equipo nuevo sin internet".
+        return { ok: false, error: "Sin conexión al servidor y este usuario no ha iniciado sesión antes en este equipo. Conéctate a internet para el primer acceso." };
+      }
+      return res;
+    }
+    // Error de la API distinto de 401 (p. ej. 500): lo informamos.
+    if (e && e.status === 401) return { ok: false, error: "Usuario o contraseña incorrectos." };
+    return { ok: false, error: e && e.message ? e.message : "No se pudo iniciar sesión." };
+  }
+}
+
+// Valida contra el usuario LOCAL (cacheado). Devuelve { ok, user } o { ok:false, error }.
+// _notFound:true cuando el usuario no existe localmente (para distinguir ese caso).
+async function loginLocal(uname, password) {
+  const u = store.listUsers().find(x => (x.username || "").toLowerCase() === uname);
+  if (!u) return { ok: false, error: "Usuario no encontrado.", _notFound: true };
+  if (!u.passHash || !u.salt) return { ok: false, error: "El usuario no tiene contraseña configurada en este equipo." };
   const h = await hashPassword(password, u.salt);
   if (h !== u.passHash) return { ok: false, error: "Contraseña incorrecta." };
   setSession(u);
-  logAction("login", `Rol: ${u.role}`, _session.name);
+  logAction("login", `Rol: ${u.role} (local)`, _session.name);
   return { ok: true, user: _session };
+}
+
+// Toma el usuario que devolvió el servidor y lo guarda/actualiza localmente,
+// cacheando la contraseña (hash local SHA-256) para habilitar login offline.
+// Devuelve el registro local completo (para setSession).
+async function cacheServerUser(serverUser, plainPassword) {
+  const salt = randomSalt();
+  const passHash = await hashPassword(plainPassword, salt);
+  // Datos que el servidor conoce. El shape del server es {id,username,name,role,
+  // accessParts?, canEdit?}. Partimos el "name" en nombre/apellido para la vista.
+  const [firstName, ...rest] = String(serverUser.name || serverUser.username || "").split(" ");
+  const patch = {
+    username: serverUser.username,
+    role: serverUser.role,
+    firstName: firstName || serverUser.username,
+    lastName: rest.join(" "),
+    salt, passHash,
+    source: "server",
+    cachedAt: new Date().toISOString(),
+  };
+  if (typeof serverUser.accessParts === "boolean") patch.accessParts = serverUser.accessParts;
+  if (typeof serverUser.canEdit === "boolean") patch.canEdit = serverUser.canEdit;
+
+  // Buscar por username (la clave estable entre servidor y local).
+  const existing = store.listUsers().find(x => (x.username || "").toLowerCase() === String(serverUser.username).toLowerCase());
+  if (existing) {
+    store.updateUser(existing.id, patch);
+    return store.listUsers().find(x => x.id === existing.id);
+  }
+  return store.addUser(patch);
 }
 
 // ---- Permisos ----
@@ -234,17 +322,20 @@ export async function resetPassword(id, newPassword) {
   return { ok: true };
 }
 
-// Asegura que exista el admin inicial jcabrera/1234 si no hay ningún usuario con contraseña.
+// Asegura que exista el admin inicial jcabrera/1234 si no hay ningún usuario con contraseña,
+// y SIEMPRE que exista la cuenta de EMERGENCIA local (en cualquier dispositivo).
 export async function ensureSeedAdmin() {
+  await ensureEmergencyUser();
+
   const users = store.listUsers();
-  const hasCredentialed = users.some(u => u.username && u.passHash);
+  // ¿Hay algún usuario "real" con credenciales (que no sea la cuenta de emergencia)?
+  const hasCredentialed = users.some(u => u.username && u.passHash && u.username !== EMERGENCY_USERNAME);
   if (hasCredentialed) return;
 
   // Migrar: si existe un usuario admin viejo sin credenciales, lo dejamos y creamos jcabrera.
   const salt = randomSalt();
   const passHash = await hashPassword("1234", salt);
-  // Reutiliza un registro admin existente si lo hay; si no, crea uno nuevo.
-  const admin = users.find(u => u.role === "admin");
+  const admin = users.find(u => u.role === "admin" && u.username !== EMERGENCY_USERNAME);
   if (admin) {
     store.updateUser(admin.id, {
       firstName: admin.firstName || "Administrador", lastName: admin.lastName || "",
@@ -253,6 +344,20 @@ export async function ensureSeedAdmin() {
   } else {
     store.addUser({ firstName: "Administrador", lastName: "", email: "", username: "jcabrera", role: "admin", salt, passHash, mustChangePassword: true });
   }
+}
+
+// Crea la cuenta de EMERGENCIA local si no existe en este dispositivo. Es un admin
+// que funciona siempre offline. Obliga a cambiar la contraseña en el primer uso.
+async function ensureEmergencyUser() {
+  const exists = store.listUsers().some(u => (u.username || "").toLowerCase() === EMERGENCY_USERNAME);
+  if (exists) return;
+  const salt = randomSalt();
+  const passHash = await hashPassword(EMERGENCY_DEFAULT_PASS, salt);
+  store.addUser({
+    firstName: "Acceso", lastName: "de Emergencia",
+    email: "", username: EMERGENCY_USERNAME, role: "admin",
+    salt, passHash, mustChangePassword: true, source: "emergency",
+  });
 }
 
 // ¿El usuario actual debe cambiar su contraseña (p. ej. el admin inicial 1234)?
