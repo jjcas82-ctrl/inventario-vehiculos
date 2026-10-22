@@ -24,6 +24,7 @@ import { initCatalogAdmin } from "./catalogadmin.js";
 import { initCdoUpload } from "./cdoui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
+import { initSync, onSyncStatus, syncStatus } from "./sync.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
@@ -1629,17 +1630,32 @@ function setupInstall() {
 // ---------- Indicador de conexión (online/offline) ----------
 function setupConnectivity() {
   const badge = document.getElementById("online-badge");
-  const update = () => {
-    if (navigator.onLine) {
-      badge.textContent = "En línea";
-      badge.style.background = "rgba(255,255,255,.25)";
-      badge.title = "Con conexión a internet";
-    } else {
-      badge.textContent = "⚠️ Sin conexión";
+  const update = (st) => {
+    const s = st || syncStatus();
+    if (!navigator.onLine) {
+      badge.textContent = s.pending ? `⚠️ Sin conexión · ${s.pending} pend.` : "⚠️ Sin conexión";
       badge.style.background = "#b45309";
-      badge.title = "Trabajando sin internet — los registros se guardan localmente";
+      badge.title = "Trabajando sin internet — los registros se guardan localmente y se sincronizarán al reconectar.";
+      return;
     }
+    if (s.syncing) {
+      badge.textContent = "⟳ Sincronizando…";
+      badge.style.background = "rgba(255,255,255,.25)";
+      badge.title = "Sincronizando con el servidor…";
+      return;
+    }
+    if (s.pending) {
+      badge.textContent = `En línea · ${s.pending} pend.`;
+      badge.style.background = "#b45309";
+      badge.title = `${s.pending} cambio(s) pendiente(s) de subir al servidor.`;
+      return;
+    }
+    badge.textContent = "En línea";
+    badge.style.background = "rgba(255,255,255,.25)";
+    badge.title = "Con conexión a internet" + (s.lastSync ? ` · última sincronización: ${new Date(s.lastSync).toLocaleTimeString()}` : "");
   };
+  // El estado de sincronización (cola de pendientes, sincronizando) actualiza el badge.
+  onSyncStatus(update);
   window.addEventListener("online", () => { update(); notify("Conexión restablecida.", { type: "success" }); });
   window.addEventListener("offline", () => { update(); notify("Sin conexión: seguirás trabajando localmente (GPS y registros funcionan).", { type: "warn", timeout: 5000 }); });
   update();
@@ -1744,6 +1760,10 @@ function main() {
   setupInstall();
   setupConnectivity();
   setupServiceWorker();
+
+  // Sincronización con el servidor (pull inicial + cola de pendientes + reintento
+  // al reconectar). No bloquea el arranque y degrada a modo local si no hay red.
+  initSync(refreshAll);
 
   initAgencies(refreshAll);
   initInventory(refreshAll);
