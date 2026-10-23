@@ -10,6 +10,13 @@ return [
   'db_user' => 'inv_app',              // usuario de BD (crear en phpMyAdmin)
   'db_pass' => 'CAMBIA_ESTA_CLAVE',    // contraseña del usuario de BD
 
+  // En Synology, MariaDB suele aceptar SOLO conexión por socket UNIX (no TCP).
+  // Si es tu caso (phpMyAdmin dice "Localhost via UNIX socket"), define aquí la
+  // ruta del socket y la API conectará por ahí (ignora host/port). El socket se
+  // ve en DSM → MariaDB 10 → "Socket de dominio" (p. ej. /run/mysqld/mysqld10.sock).
+  // Déjalo comentado para conectar por TCP (host/port).
+  // 'db_socket' => '/run/mysqld/mysqld10.sock',
+
   // --- Seguridad ---
   // Duración de la sesión (token) en horas.
   'session_hours' => 12,
