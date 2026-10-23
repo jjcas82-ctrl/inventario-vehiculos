@@ -5,6 +5,7 @@ import { EVENT_LABELS } from "./events.js";
 import * as auth from "./auth.js";
 import { notify, confirmDialog } from "./ui.js";
 import { decodeVin } from "./vin.js";
+import { pushVehicle as syncPushVehicle } from "./sync.js";
 import { stagesFor, isClosed } from "./stages.js";
 import { logAction } from "./syslog.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
@@ -595,6 +596,10 @@ export function openVehicle(vin) {
     if (etapaPrevia !== nuevaEtapa) {
       logAction("vehicle.stage", `Etapa: "${etapaPrevia || "—"}" → "${nuevaEtapa}"`, quien, vin);
     }
+    // SINCRONIZACIÓN: sube la ficha editada al servidor (o encola si no hay red).
+    if (cambios.length || etapaPrevia !== nuevaEtapa) {
+      try { syncPushVehicle(vin); } catch (e) {}
+    }
     if (!cambios.length && etapaPrevia === nuevaEtapa) {
       notify("No hubo cambios que guardar.", { type: "info" });
     } else {
@@ -624,6 +629,8 @@ export function openVehicle(vin) {
     const res = store.changeVin(vin, nuevo);
     if (!res.ok) { notify(res.error, { type: "error" }); return; }
     logAction("vehicle.vin", `Cambio de VIN: ${vin} → ${nuevo}`, auth.currentUser()?.name || "—", nuevo);
+    // Sincroniza la unidad con el VIN nuevo al servidor.
+    try { syncPushVehicle(nuevo); } catch (e) {}
     closeModal();
     renderInventory();
     onChange();

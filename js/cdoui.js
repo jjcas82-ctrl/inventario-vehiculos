@@ -10,6 +10,7 @@ import { notify } from "./ui.js";
 import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
 import * as auth from "./auth.js";
+import { pushVehicle } from "./sync.js";
 
 let lastParsed = null;   // { nuevas:[], duplicadas:[], errores:[] }
 let onLoaded = () => {}; // callback para refrescar el inventario tras cargar
@@ -343,6 +344,13 @@ function confirmLoad() {
       updated++;
     }
   }
+
+  // SINCRONIZACIÓN: sube al servidor las unidades cargadas/actualizadas (o encola
+  // si no hay internet). Se hace en segundo plano, sin bloquear la carga local.
+  try {
+    for (const vin of added) pushVehicle(vin);
+    if (actualizarExistentes) for (const u of lastParsed.duplicadas) pushVehicle(u.vin);
+  } catch (e) {}
 
   const origenTxt = (lastParsed.nuevas[0]?.origin || lastParsed.duplicadas[0]?.origin) === "Traspaso" ? "traspaso" : "CDO";
   logAction("cdo.load",

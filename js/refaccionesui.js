@@ -19,6 +19,7 @@ import { notify } from "./ui.js";
 import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
 import * as auth from "./auth.js";
+import { pushParts, pushPartConteo } from "./sync.js";
 
 let initialized = false;
 let scanner = null;
@@ -193,6 +194,8 @@ function confirmarCarga() {
 
   const res = store.bulkUpsertParts(toSave, { merge: true });
   logAction("parts.load", `Refacciones cargadas: ${res.added} nuevas · ${res.updated} actualizadas`, by);
+  // SINCRONIZACIÓN: sube el lote de refacciones al servidor (o encola si no hay red).
+  try { pushParts(toSave); } catch (e) {}
   notify(`Inventario de refacciones cargado: ${res.added} nuevas, ${res.updated} actualizadas.`,
     { type: "success", timeout: 6000 });
 
@@ -355,6 +358,8 @@ function registrarConteoManual() {
   }
   p = store.setPartConteo(numParte, conteo, by);
   logAction("parts.count", `Conteo de ${numParte}: ${conteo}`, by);
+  // SINCRONIZACIÓN: sube el conteo al servidor (o encola si no hay internet).
+  try { pushPartConteo(numParte, conteo); } catch (e) {}
   beep(true);
   setScanStatus(`✓ Contada ${numParte}: ${conteo}.`, "ok");
   if (inp) inp.value = "";
