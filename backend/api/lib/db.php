@@ -30,8 +30,12 @@ function db(): PDO {
         ]);
       } else {
         $c = cfg();
-        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
-          $c['db_host'], $c['db_port'], $c['db_name']);
+        // Synology: MariaDB suele escuchar SOLO por socket UNIX (no TCP). Si se
+        // define 'db_socket' en config.php, se conecta por socket (igual que
+        // phpMyAdmin); si no, por TCP (host:port).
+        $dsn = !empty($c['db_socket'])
+          ? sprintf('mysql:unix_socket=%s;dbname=%s;charset=utf8mb4', $c['db_socket'], $c['db_name'])
+          : sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $c['db_host'], $c['db_port'], $c['db_name']);
         $pdo = new PDO($dsn, $c['db_user'], $c['db_pass'], [
           PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
           PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
