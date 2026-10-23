@@ -1,5 +1,6 @@
 // events.js — Obtención de GPS y registro de entradas/salidas/movimientos.
 import { store } from "./storage.js";
+import { pushEvent, pushVehicle } from "./sync.js";
 
 // Obtiene la posición GPS actual como promesa {lat, lng, accuracy}
 export function getPosition(options = {}) {
@@ -64,6 +65,12 @@ export async function registerEvent({ vin, type, agency, area, location, conditi
       contact: person.contact || "",
     } : null,
   });
+
+  // SINCRONIZACIÓN: un evento cambia el evento Y el estado del vehículo. Subimos
+  // ambos al servidor (o se encolan si no hay internet). No bloquea ni lanza.
+  try { pushEvent(rec); } catch (e) {}
+  try { pushVehicle(vin); } catch (e) {}
+
   return rec;
 }
 
