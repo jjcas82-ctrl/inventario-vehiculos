@@ -718,6 +718,23 @@
       <div class="card">
         <h2>📷 Conteo físico</h2>
         <p class="hint">Escanea el <b>QR de la etiqueta</b> (o teclea el número de parte) y escribe la <b>cantidad contada</b>. El operador solo cuenta y teclea.</p>
+
+        <!-- Configuración de rondas de conteo (1 a 3). El 1er conteo es de todo;
+             el 2º y 3º recuentan SOLO las partes que siguen con diferencia. -->
+        <div class="loc-card" id="ref-rondas-box" style="margin-bottom:10px">
+          <div class="row gap wrap" style="align-items:center">
+            <label><b>Número de conteos:</b></label>
+            <select id="ref-rondas-sel">
+              <option value="1">1 conteo</option>
+              <option value="2">2 conteos</option>
+              <option value="3" selected>3 conteos</option>
+            </select>
+            <span id="ref-ronda-actual" class="tag" style="background:#e0e7ff;color:#3730a3;font-weight:700">Conteo 1 de 3</span>
+            <button id="ref-ronda-siguiente" class="btn">Terminar conteo y pasar al siguiente →</button>
+          </div>
+          <p id="ref-ronda-hint" class="hint" style="margin:6px 0 0">1er conteo: todas las partes. Los siguientes recuentan solo las que sigan con diferencia.</p>
+        </div>
+
         <div id="ref-conteo-resumen" class="summary"></div>
         <div class="row gap wrap" style="margin:8px 0">
           <button id="ref-scan" class="btn btn-primary">📷 Escanear QR</button>
@@ -761,6 +778,22 @@
           </table>
         </div>
         <p id="ref-diff-empty" class="muted">Sin diferencias. Cuando registres conteos que no cuadren con la existencia, aparecerán aquí.</p>
+      </div>
+
+      <!-- 5) RESULTADO FINAL CON FIRMAS -->
+      <div class="card">
+        <h2>✍️ Resultado final de la auditoría</h2>
+        <p class="hint">Resumen del inventario con <b>valor total $</b>, <b>monto de la diferencia $</b> y las partes con diferencia o no comprobadas. Incluye el área de firmas para cerrar la auditoría.</p>
+        <div id="ref-final-resumen" class="summary"></div>
+        <div class="filters" style="margin-top:6px">
+          <div class="field"><label for="ref-firma-admin">Gte. Administrativo (nombre)</label><input id="ref-firma-admin" type="text" placeholder="Nombre y firma" /></div>
+          <div class="field"><label for="ref-firma-refacciones">Gte. de Refacciones (nombre)</label><input id="ref-firma-refacciones" type="text" placeholder="Nombre y firma" /></div>
+          <div class="field"><label for="ref-firma-auditor">Auditor (nombre)</label><input id="ref-firma-auditor" type="text" placeholder="Nombre y firma" /></div>
+        </div>
+        <div class="row gap wrap" style="margin-top:8px">
+          <button id="ref-final-pdf" class="btn btn-primary">🖨️ Imprimir resultado con firmas</button>
+          <button id="ref-final-cerrar" class="btn">✓ Cerrar auditoría (guardar en bitácora)</button>
+        </div>
       </div>
     </section>
 
