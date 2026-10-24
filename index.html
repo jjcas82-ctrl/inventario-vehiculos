@@ -762,6 +762,28 @@
         </div>
       </div>
 
+      <!-- 3.5) EXHIBICIÓN / PUNTOS DE VENTA (la "libreta") -->
+      <div class="card">
+        <h2>🛒 Exhibición / Puntos de venta</h2>
+        <p class="hint">Captura las refacciones que están físicamente en <b>exhibición</b> (puntos de venta o armarios) y que el sistema aún tiene en el almacén. Se <b>suman</b> al conteo para que el total cuadre contra la existencia (digitaliza la "libreta").</p>
+        <div class="field" style="padding:10px;border:1px dashed var(--border);border-radius:8px;background:#f8fafc">
+          <div class="row gap wrap">
+            <input id="ref-exh-parte" type="text" placeholder="Número de parte" style="flex:1;min-width:150px" />
+            <select id="ref-exh-punto" style="min-width:180px"></select>
+            <input id="ref-exh-cant" type="number" min="0" step="1" placeholder="Cantidad" style="max-width:120px" />
+            <button id="ref-exh-btn" class="btn btn-primary">Registrar en exhibición</button>
+          </div>
+          <p id="ref-exh-status" class="hint"></p>
+        </div>
+        <div id="ref-exh-resumen" class="summary" style="margin-top:6px"></div>
+        <div class="table-wrap" style="max-height:260px;overflow:auto">
+          <table class="table" id="ref-exh-table">
+            <thead><tr><th>No. parte</th><th>Descripción</th><th>Punto de venta</th><th>En exhibición</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- 4) DIFERENCIAS -->
       <div class="card">
         <h2>📊 Reporte de diferencias</h2>

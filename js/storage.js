@@ -512,6 +512,31 @@ export const store = {
     write(db);
     return p;
   },
+  // Registra piezas de una parte que están en EXHIBICIÓN / punto de venta (la
+  // "libreta"). Se guarda por punto (p.exhibiciones = { "Punto X": n }) y el
+  // total p.exhibicion. Estas piezas SUMAN al conteo físico para cuadrar contra
+  // la existencia del sistema (Opción A). Si la parte no existe, se da de alta.
+  setPartExhibicion(numParte, punto, cantidad, by) {
+    const db = read();
+    let p = db.parts[numParte];
+    const now = new Date().toISOString();
+    if (!p) {
+      p = db.parts[numParte] = { numParte, descripcion: "", ubicacion: "", existencia: null,
+        enMarbetes: false, enExistencias: false, origin: "exhibicion", createdAt: now };
+    }
+    p.exhibiciones = p.exhibiciones || {};
+    const key = punto || "Exhibición";
+    const n = Number(cantidad);
+    if (!Number.isFinite(n) || n <= 0) delete p.exhibiciones[key];
+    else p.exhibiciones[key] = n;
+    // Total en exhibición = suma de todos los puntos.
+    p.exhibicion = Object.values(p.exhibiciones).reduce((s, v) => s + Number(v || 0), 0);
+    p.exhibicionBy = by || "—";
+    p.exhibicionAt = now;
+    p.updatedAt = now;
+    write(db);
+    return p;
+  },
   clearParts() { const db = read(); db.parts = {}; write(db); },
 
   // ---- Auditoría de REFACCIONES (sesión: nº de rondas, ronda actual, firmantes) ----

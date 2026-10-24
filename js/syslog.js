@@ -31,6 +31,7 @@ export const SYSLOG_ACTIONS = {
   "data.import":    "📥 Importación de respaldo",
   "parts.load":          "🔧 Carga de refacciones",
   "parts.count":         "🔧 Conteo de refacción",
+  "parts.exhibicion":    "🛒 Refacción en exhibición",
   "parts.count.round":   "🔧 Conteo (vuelta) terminado",
   "parts.count.reset":   "🔧 Conteo reiniciado",
   "parts.diff.report":   "🔧 Reporte de diferencias",
