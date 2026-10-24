@@ -71,33 +71,56 @@ function parseExistenciasFixed(text) {
 }
 
 // Formato A: CSV delimitado (, o ;) con o sin encabezado.
+// Columnas del reporte real de refacciones (por posición, sin encabezado):
+//   0 No.Parte | 1 Descripción | 2 Existencia | 3 Ubicación | 4 Clasificación
+//   5 Precio U. (costo unitario) | 6 Precio Público (= valor total) | 7 Fecha
+// Clasificación: L=Lento, O=Obsoleto, R=Rápido, E=Estancado, P=Próximo obsoleto, I=Inactivo.
 function parseExistenciasDelimited(text) {
   const rows = parseCsv(text);
   if (!rows.length) return [];
   const first = rows[0].map(c => c.toLowerCase());
-  const hasHeader = first.some(c => /parte|descrip|exist|cantidad|ubicac/.test(c));
+  const hasHeader = first.some(c => /parte|descrip|exist|cantidad|ubicac|precio|clasif/.test(c));
   const dataRows = hasHeader ? rows.slice(1) : rows;
 
-  let idx = { parte: 0, desc: 1, cant: 2, ubic: 3 };
+  // Mapeo de columnas. Por defecto, posición (el reporte real NO trae encabezado).
+  let idx = { parte: 0, desc: 1, cant: 2, ubic: 3, clasif: 4, precioU: 5, valorTotal: 6, fecha: 7 };
   if (hasHeader) {
-    const find = (re) => first.findIndex(c => re.test(c));
+    const find = (re, def) => { const i = first.findIndex(c => re.test(c)); return i >= 0 ? i : def; };
     idx = {
-      parte: find(/parte|no\.?\s*de?\s*parte|n[úu]mero/),
-      desc:  find(/descrip/),
-      cant:  find(/exist|cantidad|cant\b|stock/),
-      ubic:  find(/ubicac|localiz|rack/),
+      parte:      find(/parte|no\.?\s*de?\s*parte|n[úu]mero/, 0),
+      desc:       find(/descrip/, 1),
+      cant:       find(/exist|cantidad|cant\b|stock/, 2),
+      ubic:       find(/ubicac|localiz|rack/, 3),
+      clasif:     find(/clasif|estatus|rotaci/, 4),
+      precioU:    find(/precio\s*u|costo|unit/, 5),
+      valorTotal: find(/p[úu]blico|valor|importe|total/, 6),
+      fecha:      find(/fecha/, 7),
     };
   }
 
+  const num = (v) => {
+    const s = String(v ?? "").replace(/"/g, "").replace(/,/g, "").trim();
+    if (s === "") return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
   const out = [];
   for (const r of dataRows) {
-    const numParte = (r[idx.parte] ?? "").toString().trim();
+    const numParte = (r[idx.parte] ?? "").toString().replace(/"/g, "").trim();
     if (!numParte) continue;
-    const descripcion = (r[idx.desc] ?? "").toString().trim();
-    const cantRaw = (r[idx.cant] ?? "").toString().replace(/[^0-9.\-]/g, "");
-    const existencia = cantRaw === "" ? 0 : Number(cantRaw);
-    const ubicacion = (r[idx.ubic] ?? "").toString().trim();
-    out.push({ numParte, descripcion, existencia, ubicacion });
+    // Ignorar las líneas de totales del pie ("Total Valor del Inventario...").
+    if (/^total\b/i.test(numParte)) continue;
+
+    const descripcion = (r[idx.desc] ?? "").toString().replace(/"/g, "").trim();
+    const existencia = num(r[idx.cant]) ?? 0;
+    const ubicacion = (r[idx.ubic] ?? "").toString().replace(/"/g, "").trim();
+    const clasificacion = (r[idx.clasif] ?? "").toString().replace(/"/g, "").trim().toUpperCase();
+    const precioUnit = num(r[idx.precioU]);
+    const valorTotal = num(r[idx.valorTotal]);
+    const fecha = (r[idx.fecha] ?? "").toString().replace(/"/g, "").trim();
+
+    out.push({ numParte, descripcion, existencia, ubicacion, clasificacion, precioUnit, valorTotal, fecha });
   }
   return out;
 }
@@ -183,6 +206,9 @@ export function cruzar(marbetes, existencias) {
       ubicacion: m.ubicacion || (ex ? ex.ubicacion : ""),
       marbete: m.marbete,
       existencia: ex ? ex.existencia : null,
+      // Datos económicos/clasificación del archivo de existencias (si cruzó).
+      precioUnit: ex ? (ex.precioUnit ?? null) : null,
+      clasificacion: ex ? (ex.clasificacion || "") : "",
       enExistencias: !!ex,
       enMarbetes: true,
     });
@@ -196,6 +222,7 @@ export function cruzar(marbetes, existencias) {
     soloExistencia.push({
       grupo: "", numParte: e.numParte, descripcion: e.descripcion,
       ubicacion: e.ubicacion, marbete: "", existencia: e.existencia,
+      precioUnit: e.precioUnit ?? null, clasificacion: e.clasificacion || "",
       enExistencias: true, enMarbetes: false,
     });
   }
