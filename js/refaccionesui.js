@@ -19,7 +19,7 @@ import { notify } from "./ui.js";
 import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
 import * as auth from "./auth.js";
-import { pushParts, pushPartConteo } from "./sync.js";
+import { pushParts, pushPartConteo, pushPart } from "./sync.js";
 
 let initialized = false;
 let scanner = null;
@@ -83,6 +83,14 @@ export function initRefacciones() {
     if (e.key === "Enter") { e.preventDefault(); registrarConteoManual(); }
   });
 
+  // --- Exhibición / puntos de venta ---
+  const btnExh = document.getElementById("ref-exh-btn");
+  if (btnExh) btnExh.addEventListener("click", registrarExhibicion);
+  const inpExhCant = document.getElementById("ref-exh-cant");
+  if (inpExhCant) inpExhCant.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); registrarExhibicion(); }
+  });
+
   // --- Rondas de conteo (1 a 3) ---
   const selRondas = document.getElementById("ref-rondas-sel");
   if (selRondas) selRondas.addEventListener("change", () => {
@@ -123,9 +131,80 @@ export function renderRefacciones() {
   renderRondas();
   renderCargaResumen();
   renderConteo();
+  renderExhibicion();
   renderDiferencias();
   renderFinal();
 }
+
+// ======================= EXHIBICIÓN / PUNTOS DE VENTA =======================
+
+// Llena el desplegable de puntos de venta con las agencias/sitios existentes.
+function fillPuntosVenta() {
+  const sel = document.getElementById("ref-exh-punto");
+  if (!sel) return;
+  const sitios = store.listAgencies().map(a => a.name);
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">— Punto de venta / armario —</option>` +
+    sitios.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("") +
+    `<option value="Otro">Otro…</option>`;
+  if (prev) sel.value = prev;
+}
+
+function registrarExhibicion() {
+  if (!puedeContar()) { notify("Tu rol no permite registrar refacciones.", { type: "warn" }); return; }
+  const parteEl = document.getElementById("ref-exh-parte");
+  const puntoEl = document.getElementById("ref-exh-punto");
+  const cantEl = document.getElementById("ref-exh-cant");
+  const numParte = (parteEl?.value || "").trim();
+  const punto = (puntoEl?.value || "").trim();
+  const cantRaw = (cantEl?.value || "").trim();
+  if (!numParte) { notify("Escribe el número de parte.", { type: "warn" }); parteEl?.focus(); return; }
+  if (!punto) { notify("Elige el punto de venta / armario.", { type: "warn" }); puntoEl?.focus(); return; }
+  const cant = Number(cantRaw);
+  if (!Number.isFinite(cant) || cant < 0) { notify("La cantidad debe ser 0 o más.", { type: "warn" }); cantEl?.focus(); return; }
+
+  const by = auth.currentUser()?.name || "—";
+  const p = store.setPartExhibicion(numParte, punto, cant, by);
+  logAction("parts.exhibicion", `Exhibición de ${numParte}: ${cant} en ${punto}`, by);
+  try { pushPart(numParte); } catch (e) {}
+  setExhStatus(`✓ ${numParte}: ${cant} en ${punto} (total en exhibición: ${p.exhibicion}).`, "ok");
+  if (parteEl) parteEl.value = "";
+  if (cantEl) cantEl.value = "";
+  if (parteEl) parteEl.focus();
+  renderExhibicion();
+  renderConteo();
+  renderDiferencias();
+  renderFinal();
+}
+
+function renderExhibicion() {
+  fillPuntosVenta();
+  const el = document.getElementById("ref-exh-resumen");
+  const tbody = document.querySelector("#ref-exh-table tbody");
+  const all = store.listParts();
+  const conExh = all.filter(p => Number(p.exhibicion || 0) > 0);
+  const totalPiezas = conExh.reduce((s, p) => s + Number(p.exhibicion || 0), 0);
+  if (el) el.innerHTML = `
+    <div class="stat"><b>${conExh.length}</b><span>Partes en exhibición</span></div>
+    <div class="stat"><b>${totalPiezas}</b><span>Piezas en exhibición (suman al conteo)</span></div>`;
+  if (tbody) {
+    // Una fila por (parte, punto).
+    const filas = [];
+    for (const p of conExh) {
+      for (const [punto, n] of Object.entries(p.exhibiciones || {})) {
+        filas.push(`<tr>
+          <td><code>${escapeHtml(p.numParte)}</code></td>
+          <td>${escapeHtml((p.descripcion || "").slice(0, 40))}</td>
+          <td>${escapeHtml(punto)}</td>
+          <td style="text-align:right"><b>${escapeHtml(String(n))}</b></td>
+        </tr>`);
+      }
+    }
+    tbody.innerHTML = filas.join("");
+  }
+}
+
+function setExhStatus(msg, kind) { setStatusEl("ref-exh-status", msg, kind); }
 
 // ======================= RONDAS DE CONTEO (1 a 3) =======================
 
@@ -164,11 +243,13 @@ function pendienteEnRonda(p, ronda) {
   if (p.enMarbetes === false) return false;       // sin marbete no entra al conteo físico
   const conteos = p.conteos || {};
   if (ronda === 1) return conteos["1"] == null;
-  // Para rondas ≥2: solo las que la ronda anterior dejó con diferencia vs existencia.
+  // Para rondas ≥2: solo las que la ronda anterior dejó con diferencia vs
+  // existencia (contando también lo que esté en exhibición → Opción A).
   const prev = conteos[String(ronda - 1)];
   if (prev == null) return false;                  // no se contó antes → no aplica
   if (p.existencia == null) return false;
-  return Number(prev) !== Number(p.existencia);    // seguía con diferencia → recontar
+  const efectivo = Number(prev) + Number(p.exhibicion || 0);
+  return efectivo !== Number(p.existencia);        // seguía con diferencia → recontar
 }
 
 // Avanza a la siguiente ronda (registra la vuelta en la bitácora).
@@ -505,10 +586,13 @@ function renderConteo() {
 
 // ======================= DIFERENCIAS =======================
 
-// Diferencia = conteo físico − existencia del sistema. null si falta algún dato.
+// Diferencia = (conteo físico + exhibición) − existencia del sistema.
+// Opción A: las piezas en exhibición/puntos de venta SUMAN al conteo para que
+// el total cuadre contra la existencia. null si falta algún dato.
 function diffValor(p) {
   if (p.conteo == null || p.existencia == null) return null;
-  return p.conteo - p.existencia;
+  const exhib = Number(p.exhibicion || 0);
+  return (Number(p.conteo) + exhib) - Number(p.existencia);
 }
 function difBadge(dif) {
   if (dif == null) return `<span class="muted">—</span>`;
