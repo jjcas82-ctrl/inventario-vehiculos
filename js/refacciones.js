@@ -8,25 +8,81 @@
 
 import { extractPdfLines } from "./cdo.js"; // reutiliza el lector de PDF ya existente
 
-// --- Parseo de EXISTENCIAS (CSV) ---
-// Formato flexible. Columnas esperadas (en cualquier orden, con encabezado o sin él):
-//   No. de Parte | Descripción | Existencia (cantidad) | Ubicación | Fecha
-// Si no hay encabezado, se asume: parte, descripcion, cantidad, ubicacion, fecha.
+// --- Parseo de EXISTENCIAS ---
+// Acepta DOS formatos y los detecta automáticamente:
+//   A) CSV (separado por , o ;) con o sin encabezado.
+//   B) TEXTO POR COLUMNAS (ancho fijo) del sistema interno, cuyas líneas se ven:
+//        19434095   ACEITE SINTICO,5W30 DEXOSGEN3   863 102D0102R   29/09/2026
+//      → parte | descripción | cantidad + ubicación (pegadas) | fecha
+//      La cantidad es el número que precede a la ubicación; la ubicación es un
+//      código alfanumérico; la fecha (dd/mm/aaaa) es opcional al final.
 export function parseExistenciasCsv(text) {
+  if (!text) return [];
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+
+  // Detectar el formato: si hay comas/; en varias líneas → CSV; si no → texto por columnas.
+  const sample = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 20);
+  const comma = sample.filter(l => l.includes(",")).length;
+  const semi = sample.filter(l => l.includes(";")).length;
+  const esCsv = (comma + semi) >= Math.max(3, sample.length * 0.6);
+
+  return esCsv ? parseExistenciasDelimited(text) : parseExistenciasFixed(text);
+}
+
+// Formato B: TEXTO POR COLUMNAS (el del sistema interno de refacciones).
+// Estrategia robusta por regex, línea por línea:
+//   - Nº de parte: primer "token" (alfanumérico) de la línea.
+//   - Fecha: dd/mm/aaaa al final (si existe) → se usa como ancla derecha.
+//   - Antes de la fecha viene: "<cantidad> <ubicación>" (cantidad = dígitos,
+//     ubicación = código alfanumérico que puede empezar con dígito y acabar en letra).
+//   - Descripción: lo que queda entre el nº de parte y la cantidad.
+function parseExistenciasFixed(text) {
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  // Nº de parte: 5+ caracteres alfanuméricos (12605566, MMFR1LS, PF48M, BIRLOS, H431260C, 9594500).
+  const PARTE_RE = /^\s*([0-9A-Z][0-9A-Z\-]{3,})\s+(.*)$/i;
+  // "cantidad ubicación [fecha]" al final del resto: cantidad (1-6 díg) + espacio +
+  // ubicación (letras/dígitos, 5-12) + opcional fecha dd/mm/aaaa.
+  const COLA_RE = /\s(\d{1,6})\s+([0-9A-Z]{4,14})(?:\s+(\d{2}\/\d{2}\/\d{4}))?\s*$/i;
+
+  for (const raw of lines) {
+    const line = String(raw || "").replace(/\t/g, " ").replace(/\s+$/,"");
+    if (!line.trim()) continue;
+    const mp = line.match(PARTE_RE);
+    if (!mp) continue;
+    const numParte = mp[1].trim();
+    // Descartar líneas de cabecera/separadores accidentales.
+    if (/^(no\.?\s*de?\s*parte|grupo|descripcion|pagina|listado|firma)/i.test(numParte)) continue;
+
+    let resto = mp[2];
+    const mc = resto.match(COLA_RE);
+    let existencia = null, ubicacion = "";
+    if (mc) {
+      existencia = Number(mc[1]);
+      ubicacion = mc[2].trim();
+      resto = resto.slice(0, mc.index); // la descripción es lo que queda antes
+    }
+    const descripcion = resto.replace(/\s+/g, " ").trim();
+    // Debe tener al menos descripción o cantidad para contar como renglón válido.
+    if (!descripcion && existencia == null) continue;
+    out.push({ numParte, descripcion, existencia: existencia == null ? 0 : existencia, ubicacion });
+  }
+  return out;
+}
+
+// Formato A: CSV delimitado (, o ;) con o sin encabezado.
+function parseExistenciasDelimited(text) {
   const rows = parseCsv(text);
   if (!rows.length) return [];
-
-  // ¿La primera fila es encabezado? (si contiene palabras tipo "parte"/"desc").
   const first = rows[0].map(c => c.toLowerCase());
   const hasHeader = first.some(c => /parte|descrip|exist|cantidad|ubicac/.test(c));
   const dataRows = hasHeader ? rows.slice(1) : rows;
 
-  // Mapear columnas por nombre si hay encabezado; si no, por posición.
   let idx = { parte: 0, desc: 1, cant: 2, ubic: 3 };
   if (hasHeader) {
     const find = (re) => first.findIndex(c => re.test(c));
     idx = {
-      parte: find(/parte|no\.?\s*de?\s*parte|n[úu]mero/) ,
+      parte: find(/parte|no\.?\s*de?\s*parte|n[úu]mero/),
       desc:  find(/descrip/),
       cant:  find(/exist|cantidad|cant\b|stock/),
       ubic:  find(/ubicac|localiz|rack/),
@@ -40,8 +96,6 @@ export function parseExistenciasCsv(text) {
     const descripcion = (r[idx.desc] ?? "").toString().trim();
     const cantRaw = (r[idx.cant] ?? "").toString().replace(/[^0-9.\-]/g, "");
     const existencia = cantRaw === "" ? 0 : Number(cantRaw);
-    // La ubicación suele traer un estatus pegado al final (ej "401B0402L");
-    // la dejamos tal cual, limpiando espacios.
     const ubicacion = (r[idx.ubic] ?? "").toString().trim();
     out.push({ numParte, descripcion, existencia, ubicacion });
   }
@@ -57,10 +111,20 @@ export async function parseMarbetesFile(file, onProgress) {
   const out = [];
   const MARBETE_RE = /\b(\d{6}-\d)\b/;
   // Ubicación: código alfanumérico tipo 01A0101, 02B0104, ALT0101, o "ENTREGAS", "Z999Z".
-  const UBIC_RE = /\b([0-9]{2}[A-Z][0-9]{4}|ALT[0-9]{3,4}|ENTREGAS|Z999Z)\b/;
+  // Ubicación: código tipo 01A0101, 03I01101 (8), ALT0119, ENTREGAS, Z999Z.
+  const UBIC_RE = /\b([0-9]{2}[A-Z][0-9]{4,5}|ALT[0-9]{3,4}|ENTREGAS|Z999Z)\b/;
 
   for (const raw of lines) {
     const line = String(raw || "").trim();
+
+    // "MARBETE EN BLANCO" se detecta primero (no trae nº de parte ni descripción normal).
+    if (/MARBETE EN BLANCO/i.test(line)) {
+      const mb = line.match(MARBETE_RE);
+      out.push({ grupo: "", numParte: "", descripcion: "MARBETE EN BLANCO",
+                 ubicacion: (line.match(UBIC_RE) || [,""])[1], marbete: mb ? mb[1] : "", enBlanco: true });
+      continue;
+    }
+
     const mm = line.match(MARBETE_RE);
     if (!mm) continue;                       // sin marbete → no es renglón de parte
     const marbete = mm[1];
@@ -89,9 +153,6 @@ export async function parseMarbetesFile(file, onProgress) {
     const cutUbic = um ? afterParte.indexOf(um[1]) : -1;
     descripcion = (cutUbic >= 0 ? afterParte.slice(0, cutUbic) : afterParte)
       .replace(MARBETE_RE, "").replace(/\s+/g, " ").trim();
-
-    // Filtrar "MARBETE EN BLANCO" (no es una parte real).
-    if (/MARBETE EN BLANCO/i.test(line)) { out.push({ grupo, numParte: "", descripcion: "MARBETE EN BLANCO", ubicacion, marbete, enBlanco: true }); continue; }
 
     out.push({ grupo, numParte, descripcion, ubicacion, marbete });
   }
