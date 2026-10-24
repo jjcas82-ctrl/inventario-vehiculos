@@ -385,3 +385,22 @@ input:focus, select:focus { outline: 2px solid var(--primary); border-color: var
 body.locked .inv-type-bar { display: none !important; }
 /* Cuando existe la barra de tipo, las pestañas quedan debajo de ella. */
 .inv-type-bar ~ .tabs { top: 96px; }
+
+
+/* ===== Scanner de REFACCIONES (QR): área más amplia y recuadro cuadrado =====
+   No afecta al scanner de VIN de vehículos (que usa un recuadro ancho y bajo,
+   ideal para código de barras/VIN). El QR se lee mejor con un recuadro grande
+   y más cuadrado. */
+.scanner.scanner-qr {
+  aspect-ratio: 3 / 4;   /* más alto que ancho: cabe un QR grande */
+}
+.scanner.scanner-qr .scanner-frame {
+  width: 78%;
+  height: 58%;           /* recuadro grande y casi cuadrado para el QR */
+  border-radius: 14px;
+}
+@media (min-width: 640px) {
+  /* En pantallas grandes, un cuadro más equilibrado. */
+  .scanner.scanner-qr { aspect-ratio: 4 / 3; }
+  .scanner.scanner-qr .scanner-frame { width: 60%; height: 70%; }
+}
