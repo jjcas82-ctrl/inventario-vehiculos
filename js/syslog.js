@@ -31,8 +31,11 @@ export const SYSLOG_ACTIONS = {
   "data.import":    "📥 Importación de respaldo",
   "parts.load":          "🔧 Carga de refacciones",
   "parts.count":         "🔧 Conteo de refacción",
+  "parts.count.round":   "🔧 Conteo (vuelta) terminado",
   "parts.count.reset":   "🔧 Conteo reiniciado",
   "parts.diff.report":   "🔧 Reporte de diferencias",
+  "parts.audit.result":  "🔧 Resultado de auditoría impreso",
+  "parts.audit.close":   "🔧 Auditoría de refacciones cerrada",
 };
 
 let _cache = null;

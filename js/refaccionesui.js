@@ -83,6 +83,17 @@ export function initRefacciones() {
     if (e.key === "Enter") { e.preventDefault(); registrarConteoManual(); }
   });
 
+  // --- Rondas de conteo (1 a 3) ---
+  const selRondas = document.getElementById("ref-rondas-sel");
+  if (selRondas) selRondas.addEventListener("change", () => {
+    const rondas = Number(selRondas.value) || 1;
+    const a = store.getPartsAudit() || {};
+    store.setPartsAudit({ rondas, rondaActual: a.rondaActual || 1 });
+    renderRondas();
+  });
+  const btnRondaSig = document.getElementById("ref-ronda-siguiente");
+  if (btnRondaSig) btnRondaSig.addEventListener("click", avanzarRonda);
+
   // --- Reporte de diferencias ---
   const btnDiffPdf = document.getElementById("ref-diff-pdf");
   if (btnDiffPdf) btnDiffPdf.addEventListener("click", imprimirDiferencias);
@@ -90,6 +101,12 @@ export function initRefacciones() {
   if (btnDiffCsv) btnDiffCsv.addEventListener("click", exportarDiferenciasCsv);
   const btnReset = document.getElementById("ref-reset-conteo");
   if (btnReset) btnReset.addEventListener("click", reiniciarConteo);
+
+  // --- Resultado final con firmas ---
+  const btnFinalPdf = document.getElementById("ref-final-pdf");
+  if (btnFinalPdf) btnFinalPdf.addEventListener("click", imprimirResultadoFinal);
+  const btnFinalCerrar = document.getElementById("ref-final-cerrar");
+  if (btnFinalCerrar) btnFinalCerrar.addEventListener("click", cerrarAuditoria);
 
   const video = document.getElementById("ref-video");
   if (video) {
@@ -103,7 +120,68 @@ export function initRefacciones() {
 // Se llama cada vez que se abre la pestaña de refacciones.
 export function renderRefacciones() {
   if (!initialized) return;
+  renderRondas();
   renderCargaResumen();
+  renderConteo();
+  renderDiferencias();
+  renderFinal();
+}
+
+// ======================= RONDAS DE CONTEO (1 a 3) =======================
+
+// Devuelve la ronda actual (1-3) y el total de rondas configurado.
+function rondaInfo() {
+  const a = store.getPartsAudit() || {};
+  const rondas = Math.min(3, Math.max(1, Number(a.rondas) || 1));
+  const rondaActual = Math.min(rondas, Math.max(1, Number(a.rondaActual) || 1));
+  return { rondas, rondaActual };
+}
+
+function renderRondas() {
+  const { rondas, rondaActual } = rondaInfo();
+  const sel = document.getElementById("ref-rondas-sel");
+  if (sel && Number(sel.value) !== rondas) sel.value = String(rondas);
+  const badge = document.getElementById("ref-ronda-actual");
+  if (badge) badge.textContent = `Conteo ${rondaActual} de ${rondas}`;
+  const btnSig = document.getElementById("ref-ronda-siguiente");
+  if (btnSig) {
+    btnSig.hidden = rondaActual >= rondas;   // en la última ronda no hay "siguiente"
+    btnSig.textContent = rondaActual < rondas
+      ? `Terminar conteo ${rondaActual} y pasar al ${rondaActual + 1} →` : "";
+  }
+  const hint = document.getElementById("ref-ronda-hint");
+  if (hint) {
+    hint.textContent = rondaActual === 1
+      ? "1er conteo: cuenta TODAS las partes con marbete."
+      : `Conteo ${rondaActual}: recuenta SOLO las partes que siguen con diferencia (resaltadas como pendientes).`;
+  }
+}
+
+// ¿Una parte está "pendiente de contar" en la ronda actual?
+//  - Ronda 1: pendiente si aún no tiene conteo en la ronda 1 (y tiene marbete).
+//  - Ronda ≥2: pendiente solo si en la ronda anterior quedó con DIFERENCIA.
+function pendienteEnRonda(p, ronda) {
+  if (p.enMarbetes === false) return false;       // sin marbete no entra al conteo físico
+  const conteos = p.conteos || {};
+  if (ronda === 1) return conteos["1"] == null;
+  // Para rondas ≥2: solo las que la ronda anterior dejó con diferencia vs existencia.
+  const prev = conteos[String(ronda - 1)];
+  if (prev == null) return false;                  // no se contó antes → no aplica
+  if (p.existencia == null) return false;
+  return Number(prev) !== Number(p.existencia);    // seguía con diferencia → recontar
+}
+
+// Avanza a la siguiente ronda (registra la vuelta en la bitácora).
+function avanzarRonda() {
+  const { rondas, rondaActual } = rondaInfo();
+  if (rondaActual >= rondas) { notify("Ya estás en el último conteo.", { type: "info" }); return; }
+  const by = auth.currentUser()?.name || "—";
+  // Resumen de la ronda que se cierra.
+  const difs = listaDiferencias().filter(d => d.tipo === "faltante" || d.tipo === "sobrante").length;
+  logAction("parts.count.round", `Conteo ${rondaActual} terminado · ${difs} con diferencia`, by);
+  store.setPartsAudit({ rondaActual: rondaActual + 1, rondas });
+  notify(`Conteo ${rondaActual} terminado. Ahora el conteo ${rondaActual + 1} recuenta solo las diferencias.`, { type: "success", timeout: 6000 });
+  renderRondas();
   renderConteo();
   renderDiferencias();
 }
@@ -355,34 +433,40 @@ function registrarConteoManual() {
   if (!puedeContar()) { notify("Tu rol no permite registrar conteos de refacciones.", { type: "warn" }); return; }
 
   const by = auth.currentUser()?.name || "—";
+  const { rondaActual } = rondaInfo();
   let p = store.getPart(numParte);
   if (!p) {
     // Parte contada que no estaba en el inventario cargado: se da de alta.
     store.upsertPart({ numParte, descripcion: "", ubicacion: "", existencia: null, enMarbetes: false, enExistencias: false, origin: "conteo" });
   }
-  p = store.setPartConteo(numParte, conteo, by);
-  logAction("parts.count", `Conteo de ${numParte}: ${conteo}`, by);
+  p = store.setPartConteo(numParte, conteo, by, rondaActual);
+  logAction("parts.count", `Conteo ${rondaActual} de ${numParte}: ${conteo}`, by);
   // SINCRONIZACIÓN: sube el conteo al servidor (o encola si no hay internet).
   try { pushPartConteo(numParte, conteo); } catch (e) {}
   beep(true);
-  setScanStatus(`✓ Contada ${numParte}: ${conteo}.`, "ok");
+  setScanStatus(`✓ Contada ${numParte}: ${conteo} (conteo ${rondaActual}).`, "ok");
   if (inp) inp.value = "";
   if (cantEl) cantEl.value = "";
   if (inp) inp.focus();
   renderConteo();
   renderDiferencias();
+  renderFinal();
 }
 
 function reiniciarConteo() {
-  const partes = store.listParts().filter(p => p.conteo != null);
+  const partes = store.listParts().filter(p => p.conteo != null || (p.conteos && Object.keys(p.conteos).length));
   if (!partes.length) { notify("No hay conteos registrados.", { type: "info" }); return; }
-  if (!confirm(`¿Borrar el conteo físico de ${partes.length} parte(s)? El inventario cargado (existencias) se conserva.`)) return;
+  if (!confirm(`¿Borrar TODOS los conteos (todas las rondas) de ${partes.length} parte(s)? El inventario cargado (existencias) se conserva.`)) return;
   const by = auth.currentUser()?.name || "—";
   for (const p of partes) {
-    store.upsertPart({ numParte: p.numParte, conteo: null, conteoBy: null, conteoAt: null });
+    store.upsertPart({ numParte: p.numParte, conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null });
   }
+  // Reiniciar la ronda a 1 (conserva el nº de rondas configurado).
+  const a = store.getPartsAudit() || {};
+  store.setPartsAudit({ rondas: a.rondas || 1, rondaActual: 1 });
   logAction("parts.count.reset", `Conteo reiniciado (${partes.length} partes)`, by);
-  notify("Conteo físico reiniciado.", { type: "success" });
+  notify("Conteo físico reiniciado (vuelve al conteo 1).", { type: "success" });
+  renderRondas();
   renderConteo();
   renderDiferencias();
 }
@@ -391,12 +475,14 @@ function renderConteo() {
   const el = document.getElementById("ref-conteo-resumen");
   if (!el) return;
   const all = store.listParts();
-  const contadas = all.filter(p => p.conteo != null).length;
-  const pendientes = all.filter(p => p.conteo == null && p.enMarbetes !== false).length;
+  const { rondaActual } = rondaInfo();
+  // Contadas EN ESTA RONDA y pendientes de contar EN ESTA RONDA.
+  const contadas = all.filter(p => (p.conteos || {})[String(rondaActual)] != null).length;
+  const pendientes = all.filter(p => pendienteEnRonda(p, rondaActual)).length;
   el.innerHTML = `
     <div class="stat"><b>${all.length}</b><span>Partes en inventario</span></div>
-    <div class="stat"><b style="color:var(--primary)">${contadas}</b><span>Contadas</span></div>
-    <div class="stat"><b style="color:#b45309">${pendientes}</b><span>Pendientes (con marbete)</span></div>`;
+    <div class="stat"><b style="color:var(--primary)">${contadas}</b><span>Contadas (conteo ${rondaActual})</span></div>
+    <div class="stat"><b style="color:#b45309">${pendientes}</b><span>Pendientes (conteo ${rondaActual})</span></div>`;
 
   // Tabla de las últimas contadas (orden por fecha de conteo descendente).
   const tbody = document.querySelector("#ref-conteo-table tbody");
@@ -560,6 +646,150 @@ function exportarDiferenciasCsv() {
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
   notify(`CSV de diferencias exportado (${difs.length} partes).`, { type: "success" });
+}
+
+// ======================= RESULTADO FINAL CON FIRMAS =======================
+
+// Formatea un monto en pesos.
+function money(n) {
+  return "$ " + (Number(n) || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Calcula el resumen económico del inventario de refacciones.
+//   valorInventario: suma de existencia × precioUnit de todas las partes.
+//   valorDiferencia: suma de |diferencia| × precioUnit de las partes con diferencia.
+function resumenFinal() {
+  const all = store.listParts();
+  let valorInventario = 0, partesConPrecio = 0;
+  for (const p of all) {
+    if (p.precioUnit != null && p.existencia != null) {
+      valorInventario += Number(p.precioUnit) * Number(p.existencia);
+      partesConPrecio++;
+    }
+  }
+  const difs = listaDiferencias();
+  const conDif = difs.filter(d => d.tipo === "faltante" || d.tipo === "sobrante");
+  let valorDiferencia = 0;
+  for (const d of conDif) {
+    const p = store.getPart(d.numParte);
+    const precio = p && p.precioUnit != null ? Number(p.precioUnit) : 0;
+    valorDiferencia += Math.abs(Number(d.dif) || 0) * precio;
+  }
+  const noComprobadas = difs.filter(d => d.tipo === "sin-contar").length;
+  return {
+    totalPartes: all.length, partesConPrecio,
+    valorInventario, valorDiferencia,
+    faltantes: conDif.filter(d => d.tipo === "faltante").length,
+    sobrantes: conDif.filter(d => d.tipo === "sobrante").length,
+    noComprobadas, difs, conDif,
+  };
+}
+
+function renderFinal() {
+  const el = document.getElementById("ref-final-resumen");
+  if (!el) return;
+  const r = resumenFinal();
+  el.innerHTML = `
+    <div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>
+    <div class="stat"><b style="color:var(--danger)">${money(r.valorDiferencia)}</b><span>Monto de la diferencia</span></div>
+    <div class="stat"><b style="color:var(--danger)">${r.faltantes}</b><span>Faltantes</span></div>
+    <div class="stat"><b style="color:#b45309">${r.sobrantes}</b><span>Sobrantes</span></div>
+    <div class="stat"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>`;
+}
+
+// Imprime la hoja de resultado final con el resumen, las partes con diferencia y
+// el área de firmas (Gte. Administrativo, Gte. de Refacciones, Auditor).
+function imprimirResultadoFinal() {
+  const r = resumenFinal();
+  const by = auth.currentUser()?.name || "—";
+  const fecha = new Date().toLocaleString();
+  const { rondas, rondaActual } = rondaInfo();
+  const fAdmin = (document.getElementById("ref-firma-admin")?.value || "").trim();
+  const fRefa = (document.getElementById("ref-firma-refacciones")?.value || "").trim();
+  const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
+
+  const filas = r.difs.map(d => {
+    const p = store.getPart(d.numParte);
+    const precio = p && p.precioUnit != null ? Number(p.precioUnit) : null;
+    const impacto = (d.dif != null && precio != null) ? Math.abs(d.dif) * precio : null;
+    return `<tr>
+      <td>${esc(d.numParte)}</td>
+      <td>${esc(d.descripcion || "")}</td>
+      <td>${esc(d.ubicacion || "")}</td>
+      <td style="text-align:right">${d.existencia == null ? "—" : esc(String(d.existencia))}</td>
+      <td style="text-align:right">${d.conteo == null ? "—" : esc(String(d.conteo))}</td>
+      <td style="text-align:right">${d.dif == null ? "—" : (d.dif > 0 ? "+" : "") + d.dif}</td>
+      <td style="text-align:right">${precio == null ? "—" : money(precio)}</td>
+      <td style="text-align:right">${impacto == null ? "—" : money(impacto)}</td>
+      <td>${esc(tipoTexto(d.tipo))}</td>
+    </tr>`;
+  }).join("");
+
+  const win = window.open("", "_blank", "width=1000,height=1100");
+  if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Resultado de auditoría — Refacciones</title>
+    <style>
+      *{box-sizing:border-box} body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}
+      h1{font-size:18px;margin:0 0 2px} h2{font-size:14px;margin:18px 0 6px}
+      .meta{color:#555;font-size:12px;margin-bottom:10px}
+      .resumen{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+      .box{border:1px solid #ccc;border-radius:8px;padding:8px 12px;min-width:150px}
+      .box b{display:block;font-size:16px} .box span{font-size:11px;color:#555}
+      table{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}
+      th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}
+      th{background:#0f204a;color:#fff} tr:nth-child(even){background:#f6f8fc}
+      .firmas{display:flex;justify-content:space-between;gap:24px;margin-top:48px}
+      .firma{flex:1;text-align:center} .firma .linea{border-top:1px solid #000;margin-top:40px;padding-top:4px;font-size:12px}
+      .firma .cargo{font-size:11px;color:#555}
+      .barra{margin-bottom:12px} .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;background:#0f204a;color:#fff;cursor:pointer}
+      @media print{.barra{display:none}}
+    </style></head><body>
+    <div class="barra"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+    <h1>Resultado de auditoría — Inventario de refacciones</h1>
+    <div class="meta">Generado: ${esc(fecha)} · Responsable: ${esc(by)} · Conteos realizados: ${rondaActual} de ${rondas}</div>
+    <div class="resumen">
+      <div class="box"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>
+      <div class="box"><b>${money(r.valorDiferencia)}</b><span>Monto total de la diferencia</span></div>
+      <div class="box"><b>${r.faltantes}</b><span>Faltantes</span></div>
+      <div class="box"><b>${r.sobrantes}</b><span>Sobrantes</span></div>
+      <div class="box"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>
+      <div class="box"><b>${r.difs.length}</b><span>Partes en el reporte</span></div>
+    </div>
+    <h2>Partes con diferencia / no comprobadas</h2>
+    ${r.difs.length ? `<table><thead><tr>
+      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Exist.</th><th>Conteo</th><th>Dif.</th>
+      <th>Precio U.</th><th>Impacto $</th><th>Tipo</th>
+    </tr></thead><tbody>${filas}</tbody></table>` : "<p>Sin diferencias. El inventario cuadra. 🎉</p>"}
+    <div class="firmas">
+      <div class="firma"><div class="linea">${esc(fAdmin || "&nbsp;")}</div><div class="cargo">Gte. Administrativo</div></div>
+      <div class="firma"><div class="linea">${esc(fRefa || "&nbsp;")}</div><div class="cargo">Gte. de Refacciones</div></div>
+      <div class="firma"><div class="linea">${esc(fAud || "&nbsp;")}</div><div class="cargo">Auditor (nombre y firma)</div></div>
+    </div>
+    </body></html>`);
+  win.document.close();
+  logAction("parts.audit.result", `Resultado impreso · dif ${money(r.valorDiferencia)} · ${r.conDif.length} partes`, by);
+}
+
+// Cierra la auditoría: guarda firmantes y resumen en la bitácora y marca fin.
+function cerrarAuditoria() {
+  const r = resumenFinal();
+  const by = auth.currentUser()?.name || "—";
+  const fAdmin = (document.getElementById("ref-firma-admin")?.value || "").trim();
+  const fRefa = (document.getElementById("ref-firma-refacciones")?.value || "").trim();
+  const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
+  if (!confirm("¿Cerrar la auditoría de refacciones y guardarla en la bitácora?")) return;
+
+  store.setPartsAudit({
+    finishedAt: new Date().toISOString(),
+    firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaAuditor: fAud,
+    valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
+    faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
+  });
+  logAction("parts.audit.close",
+    `Auditoría cerrada · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
+    `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · firmas: ${[fAdmin, fRefa, fAud].filter(Boolean).length}/3`, by);
+  notify("Auditoría de refacciones cerrada y registrada en la bitácora.", { type: "success", timeout: 6000 });
 }
 
 // ======================= HELPERS =======================

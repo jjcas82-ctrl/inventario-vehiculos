@@ -121,6 +121,7 @@ function seed() {
     openAudits: {},  // auditorías en curso por agencia (congelar/retomar)
     scheduledAudits: [], // agenda de auditorías programadas
     parts: {},   // inventario de REFACCIONES (por número de parte)
+    partsAudit: null, // sesión de auditoría de refacciones (rondas, firmantes)
   };
 }
 
@@ -159,6 +160,7 @@ function read() {
   if (!_cache.openAudits || typeof _cache.openAudits !== "object") _cache.openAudits = {};
   if (!Array.isArray(_cache.scheduledAudits)) _cache.scheduledAudits = [];
   if (!_cache.parts || typeof _cache.parts !== "object") _cache.parts = {};
+  if (_cache.partsAudit === undefined) _cache.partsAudit = null;
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
   // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
@@ -492,12 +494,18 @@ export const store = {
     write(db);
     return { added, updated };
   },
-  // Guarda el conteo físico de una parte.
-  setPartConteo(numParte, conteo, by) {
+  // Guarda el conteo físico de una parte en la RONDA indicada (1, 2 o 3).
+  // Mantiene el histórico por ronda en p.conteos = { "1": n, "2": n, "3": n } y
+  // deja p.conteo = el valor de la ronda recién capturada (vista rápida).
+  setPartConteo(numParte, conteo, by, ronda = 1) {
     const db = read();
     const p = db.parts[numParte];
     if (!p) return null;
-    p.conteo = conteo;
+    const r = String(ronda || 1);
+    p.conteos = p.conteos || {};
+    p.conteos[r] = conteo;
+    p.conteo = conteo;                 // compat: último conteo
+    p.conteoRonda = Number(ronda || 1);
     p.conteoBy = by || "—";
     p.conteoAt = new Date().toISOString();
     p.updatedAt = p.conteoAt;
@@ -505,6 +513,18 @@ export const store = {
     return p;
   },
   clearParts() { const db = read(); db.parts = {}; write(db); },
+
+  // ---- Auditoría de REFACCIONES (sesión: nº de rondas, ronda actual, firmantes) ----
+  // partsAudit = { rondas (1-3), rondaActual, by, startedAt, finishedAt,
+  //   firmaAdmin, firmaRefacciones, firmaAuditor, note }
+  getPartsAudit() { return read().partsAudit || null; },
+  setPartsAudit(patch) {
+    const db = read();
+    db.partsAudit = { ...(db.partsAudit || {}), ...patch };
+    write(db);
+    return db.partsAudit;
+  },
+  clearPartsAudit() { const db = read(); db.partsAudit = null; write(db); },
 
   // ---- Respaldo ----
   export() { return JSON.stringify(read(), null, 2); },
