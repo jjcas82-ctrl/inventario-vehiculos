@@ -10,6 +10,8 @@ function user_row_to_api(array $r): array {
     'username'  => $r['username'],
     'role'      => $r['role'],
     'activo'    => (bool)$r['activo'],
+    'accessParts' => isset($r['access_parts']) && $r['access_parts'] !== null ? (bool)$r['access_parts'] : null,
+    'canEdit'     => isset($r['can_edit']) ? (bool)$r['can_edit'] : false,
   ];
 }
 
@@ -32,11 +34,14 @@ function handle_users(array $user, string $method, array $parts): void {
     if (strlen($pass) < 4) json_error(422, 'La contraseña debe tener al menos 4 caracteres.');
     $dup = db()->prepare('SELECT id FROM usuarios WHERE username=?'); $dup->execute([$username]);
     if ($dup->fetch()) json_error(409, 'Ya existe ese nombre de usuario.');
-    db()->prepare('INSERT INTO usuarios (first_name, last_name, email, username, pass_hash, role) VALUES (?,?,?,?,?,?)')
+    $accessParts = array_key_exists('accessParts', $b) && $b['accessParts'] !== null ? (int)(bool)$b['accessParts'] : null;
+    $canEdit = !empty($b['canEdit']) ? 1 : 0;
+    db()->prepare('INSERT INTO usuarios (first_name, last_name, email, username, pass_hash, role, access_parts, can_edit) VALUES (?,?,?,?,?,?,?,?)')
         ->execute([
           (string)($b['firstName'] ?? ''), (string)($b['lastName'] ?? ''),
           (string)($b['email'] ?? ''), $username,
           password_hash($pass, PASSWORD_DEFAULT), (string)($b['role'] ?? 'operador'),
+          $accessParts, $canEdit,
         ]);
     json_ok(['id' => (int)db()->lastInsertId()]);
   }
@@ -58,6 +63,13 @@ function handle_users(array $user, string $method, array $parts): void {
     }
     foreach (['firstName'=>'first_name','lastName'=>'last_name','email'=>'email'] as $k=>$col) {
       if (isset($b[$k])) db()->prepare("UPDATE usuarios SET $col=? WHERE id=?")->execute([(string)$b[$k], $id]);
+    }
+    if (array_key_exists('accessParts', $b)) {
+      $ap = $b['accessParts'] === null ? null : (int)(bool)$b['accessParts'];
+      db()->prepare('UPDATE usuarios SET access_parts=? WHERE id=?')->execute([$ap, $id]);
+    }
+    if (array_key_exists('canEdit', $b)) {
+      db()->prepare('UPDATE usuarios SET can_edit=? WHERE id=?')->execute([!empty($b['canEdit']) ? 1 : 0, $id]);
     }
     if (!empty($b['password'])) {
       if (strlen($b['password']) < 4) json_error(422, 'Contraseña muy corta.');

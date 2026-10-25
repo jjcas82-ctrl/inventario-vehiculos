@@ -11,6 +11,7 @@
 
 import { store } from "./storage.js";
 import * as api from "./api.js";
+import { mergeServerUsers } from "./auth.js";
 
 const QUEUE_KEY = "inv_sync_queue_v1";
 const LASTSYNC_KEY = "inv_sync_last";
@@ -144,15 +145,23 @@ export async function pullAll() {
     // Primero drena lo pendiente (para no pisar cambios locales con lo viejo del server).
     await flushQueue();
 
-    const [vehicles, parts, events, agencies] = await Promise.all([
+    const [vehicles, parts, events, agencies, users] = await Promise.all([
       api.listVehicles().catch(() => null),
       api.listParts().catch(() => null),
       api.listEvents().catch(() => null),
       api.listAgencies().catch(() => null),
+      api.listUsers().catch(() => null),
     ]);
 
     if (Array.isArray(vehicles)) mergeVehicles(vehicles);
     if (Array.isArray(parts)) mergeParts(parts);
+    // Usuarios: merge ADITIVO solo-metadatos (ver auth.mergeServerUsers). Nunca
+    // toca credenciales locales (salt/passHash) ni borra la cuenta de emergencia.
+    // El push de altas/bajas/cambios va directo desde auth.js (fire-and-forget),
+    // no por la cola; aquí solo reconciliamos la lista bajada del servidor.
+    if (Array.isArray(users)) {
+      try { mergeServerUsers(users); } catch (e) {}
+    }
     // Eventos: por ahora NO se fusionan en el pull (son históricos e inmutables y
     // storage.js no expone una inserción segura sin recalcular el estado del
     // vehículo). Se suben al registrarse (pushEvent). La fusión de históricos se

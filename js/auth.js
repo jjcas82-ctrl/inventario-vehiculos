@@ -210,6 +210,7 @@ async function cacheServerUser(serverUser, plainPassword) {
     source: "server",
     cachedAt: new Date().toISOString(),
   };
+  if (serverUser.id != null) patch.serverId = Number(serverUser.id);
   if (typeof serverUser.accessParts === "boolean") patch.accessParts = serverUser.accessParts;
   if (typeof serverUser.canEdit === "boolean") patch.canEdit = serverUser.canEdit;
 
@@ -220,6 +221,78 @@ async function cacheServerUser(serverUser, plainPassword) {
     return store.listUsers().find(x => x.id === existing.id);
   }
   return store.addUser(patch);
+}
+
+// Fusiona la lista de usuarios que devuelve el SERVIDOR con los usuarios locales.
+// Reglas (ver notas del proyecto):
+//   - Casa por `username` (clave estable; el id local es uuid y el del server int).
+//   - Merge ADITIVO: no borra locales que no vengan del servidor (protege la cuenta
+//     de emergencia y el seed jcabrera que aún no haya subido).
+//   - Solo actualiza METADATOS (firstName/lastName/email/role/accessParts/canEdit/serverId).
+//     NUNCA toca salt/passHash/mustChangePassword (la credencial local manda para el
+//     login offline; las contraseñas del server son bcrypt e incompatibles con el hash local).
+//   - Si el usuario del server no existe localmente, se crea SOLO con metadatos (sin
+//     credencial local todavía): podrá hacer su primer login contra el servidor, que
+//     cacheará la contraseña vía cacheServerUser.
+//   - Salta SIEMPRE la cuenta de emergencia.
+export function mergeServerUsers(list) {
+  if (!Array.isArray(list)) return;
+  const locals = store.listUsers();
+  for (const su of list) {
+    const uname = String(su.username || "").toLowerCase();
+    if (!uname || uname === EMERGENCY_USERNAME) continue;
+
+    const [firstName, ...rest] = String(su.name || `${su.firstName || ""} ${su.lastName || ""}`.trim() || su.username || "").split(" ");
+    const meta = {};
+    if (su.role) meta.role = su.role;
+    // Nombre/apellido: prioriza campos explícitos del server; si no, parte "name".
+    if (su.firstName != null) meta.firstName = String(su.firstName);
+    else if (firstName) meta.firstName = firstName;
+    if (su.lastName != null) meta.lastName = String(su.lastName);
+    else if (rest.length) meta.lastName = rest.join(" ");
+    if (su.email != null) meta.email = String(su.email);
+    if (typeof su.accessParts === "boolean") meta.accessParts = su.accessParts;
+    else if (su.accessParts === null) meta.accessParts = undefined;
+    if (typeof su.canEdit === "boolean") meta.canEdit = su.canEdit;
+    if (su.id != null) meta.serverId = Number(su.id);
+
+    const existing = locals.find(x => (x.username || "").toLowerCase() === uname);
+    if (existing) {
+      if (existing.source === "emergency") continue;  // no tocar emergencia aunque coincida
+      // Update IN-PLACE (no recrear: rompería currentFullUser / la sesión activa).
+      store.updateUser(existing.id, meta);
+    } else {
+      // Nuevo usuario del server sin credencial local todavía.
+      store.addUser({
+        username: su.username,
+        source: "server",
+        cachedAt: new Date().toISOString(),
+        ...meta,
+      });
+    }
+  }
+}
+
+// Resuelve el serverId de un usuario local (por id local). Devuelve number|null.
+function serverIdFor(localId) {
+  const u = store.listUsers().find(x => x.id === localId);
+  return u && u.serverId != null ? Number(u.serverId) : null;
+}
+
+// ---- Push de usuarios al servidor (fire-and-forget, silencioso si no hay red) ----
+// No bloquean la UI: la operación local ya quedó guardada. Si el servidor no está
+// disponible, el cambio simplemente no sube (no hay cola de reintento para usuarios;
+// el pull periódico reconcilia metadatos, y la credencial local sigue funcionando).
+function pushCreateUser(localId, payload) {
+  api.createUser(payload).then(r => {
+    if (r && r.id != null) store.updateUser(localId, { serverId: Number(r.id) });
+  }).catch(() => {});
+}
+function pushUpdateUser(serverId, patch) {
+  api.updateUser(serverId, patch).catch(() => {});
+}
+function pushDeleteUser(serverId) {
+  api.deleteUser(serverId).catch(() => {});
 }
 
 // ---- Permisos ----
@@ -297,17 +370,38 @@ export async function createUser(data) {
     salt, passHash,
   });
   logAction("user.create", `${username} (${user.role})`, currentUser()?.name || "—");
+  // Push al servidor (fire-and-forget): manda la contraseña EN CLARO (el server la
+  // re-hashea con bcrypt). Al volver guarda el serverId para futuras ediciones/borrados.
+  pushCreateUser(user.id, {
+    username: user.username, firstName: user.firstName, lastName: user.lastName,
+    email: user.email, role: user.role, password: data.password,
+    accessParts: typeof user.accessParts === "boolean" ? user.accessParts : null,
+    canEdit: typeof user.canEdit === "boolean" ? user.canEdit : false,
+  });
   return { ok: true, user };
 }
 
 export function updateUser(id, patch) {
   const r = store.updateUser(id, patch);
   logAction("user.edit", `Usuario ${r?.username || id}`, currentUser()?.name || "—");
+  // Push de metadatos al servidor (nunca la credencial local).
+  const sid = serverIdFor(id);
+  if (sid != null) {
+    const serverPatch = {};
+    for (const k of ["firstName", "lastName", "email", "role"]) {
+      if (patch[k] !== undefined) serverPatch[k] = patch[k];
+    }
+    if (patch.accessParts !== undefined) serverPatch.accessParts = patch.accessParts === undefined ? null : patch.accessParts;
+    if (patch.canEdit !== undefined) serverPatch.canEdit = patch.canEdit;
+    if (Object.keys(serverPatch).length) pushUpdateUser(sid, serverPatch);
+  }
   return r;
 }
 export function removeUser(id) {
   const u = store.listUsers().find(x => x.id === id);
   logAction("user.delete", `Usuario ${u?.username || id}`, currentUser()?.name || "—");
+  const sid = u && u.serverId != null ? Number(u.serverId) : null;
+  if (sid != null) pushDeleteUser(sid);
   return store.removeUser(id);
 }
 
@@ -319,6 +413,9 @@ export async function resetPassword(id, newPassword) {
   store.updateUser(id, { salt, passHash, mustChangePassword: false });
   const u = store.listUsers().find(x => x.id === id);
   logAction("user.password", `Contraseña restablecida para ${u?.username || id}`, currentUser()?.name || "—");
+  // Push al servidor: la nueva contraseña en claro (el server re-hashea con bcrypt).
+  const sid = u && u.serverId != null ? Number(u.serverId) : null;
+  if (sid != null) pushUpdateUser(sid, { password: newPassword });
   return { ok: true };
 }
 
@@ -383,5 +480,8 @@ export async function changeOwnPassword(currentPassword, newPassword) {
   const passHash = await hashPassword(newPassword, salt);
   store.updateUser(u.id, { salt, passHash, mustChangePassword: false });
   logAction("user.password", "Cambió su propia contraseña", u.name);
+  // Push al servidor: la nueva contraseña en claro (el server re-hashea con bcrypt).
+  const sid = serverIdFor(u.id);
+  if (sid != null) pushUpdateUser(sid, { password: newPassword });
   return { ok: true };
 }

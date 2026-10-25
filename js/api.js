@@ -145,6 +145,9 @@ export async function saveAgencies(agencies) { return apiFetch("agencies", { met
 
 // Usuarios
 export async function listUsers() { return (await apiFetch("users")).users || []; }
+export async function createUser(data) { return apiFetch("users", { method: "POST", body: data }); }
+export async function updateUser(id, patch) { return apiFetch(`users/${encodeURIComponent(id)}`, { method: "PUT", body: patch }); }
+export async function deleteUser(id) { return apiFetch(`users/${encodeURIComponent(id)}`, { method: "DELETE" }); }
 
 // Auditorías
 export async function listAudits() { return (await apiFetch("audits")).audits || []; }
