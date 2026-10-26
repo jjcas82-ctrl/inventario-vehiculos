@@ -53,6 +53,14 @@ const SEED_SITES = [
     lat: 19.425222, lng: -99.093219, radius: 200, areas: DEFAULT_AREAS,
   },
   {
+    // Aeroplasa Automotriz (Buick/GMC). Comparte SITIO físico con Aeroplasa
+    // Aeropuerto (mismas coordenadas); mismas áreas. Sus refacciones solo están
+    // en puntos de venta / exhibidores dentro de la agencia.
+    name: "Aeroplasa Automotriz",
+    address: "Blvd. Puerto Aéreo 141, Col. Federal, Venustiano Carranza, 15700 Ciudad de México, CDMX",
+    lat: 19.425222, lng: -99.093219, radius: 200, areas: DEFAULT_AREAS,
+  },
+  {
     name: "Aeroplasa Auto",
     address: "Carretera Federal México-Tuxpan Km 190 S/N, Col. El Potro, C.P. 73176, Huauchinango, Puebla",
     lat: 20.173122, lng: -98.070828, radius: 200, areas: AEROPLASA_AUTO_AREAS,
