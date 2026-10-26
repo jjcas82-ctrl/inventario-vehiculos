@@ -101,6 +101,8 @@ export function initRefacciones() {
   });
   const btnRondaSig = document.getElementById("ref-ronda-siguiente");
   if (btnRondaSig) btnRondaSig.addEventListener("click", avanzarRonda);
+  const btnRondaFin = document.getElementById("ref-ronda-finalizar");
+  if (btnRondaFin) btnRondaFin.addEventListener("click", finalizarConteos);
 
   // --- Reporte de diferencias ---
   const btnDiffPdf = document.getElementById("ref-diff-pdf");
@@ -265,6 +267,26 @@ function avanzarRonda() {
   renderRondas();
   renderConteo();
   renderDiferencias();
+}
+
+// Finaliza los conteos AQUÍ, aunque falten rondas por hacer. El auditor decide
+// cuándo ya es suficiente (p. ej. configuró 3 conteos pero con 2 le basta).
+// Fija el total de rondas a la ronda actual para cerrar el proceso de conteo.
+function finalizarConteos() {
+  const { rondas, rondaActual } = rondaInfo();
+  const faltan = rondas - rondaActual;
+  const msg = faltan > 0
+    ? `¿Finalizar los conteos en el conteo ${rondaActual}? Se omitirá(n) ${faltan} conteo(s) restante(s) y pasarás al resultado final.`
+    : `¿Finalizar los conteos y pasar al resultado final?`;
+  if (!confirm(msg)) return;
+  const by = auth.currentUser()?.name || "—";
+  store.setPartsAudit({ rondas: rondaActual, rondaActual });
+  logAction("parts.count.finish", `Conteos finalizados en el conteo ${rondaActual} (de ${rondas} configurados)`, by);
+  notify(`Conteos finalizados en el conteo ${rondaActual}. Revisa las diferencias y el resultado final.`, { type: "success", timeout: 6000 });
+  renderRondas();
+  renderConteo();
+  renderDiferencias();
+  renderFinal();
 }
 
 export function stopRefacciones() { try { stopScan(); } catch (e) {} }
@@ -516,7 +538,25 @@ function registrarConteoManual() {
   const by = auth.currentUser()?.name || "—";
   const { rondaActual } = rondaInfo();
   let p = store.getPart(numParte);
-  if (!p) {
+
+  // AVISO: si esta parte YA fue contada en la ronda ACTUAL, confirmar antes de
+  // reemplazar el valor (opción A). En las rondas ≥2 recontar es lo esperado, así
+  // que el aviso solo aplica a un re-registro dentro de la misma ronda.
+  if (p) {
+    const previo = (p.conteos || {})[String(rondaActual)];
+    if (previo != null) {
+      const ok = confirm(
+        `La parte ${numParte} ya fue contada en el conteo ${rondaActual} (valor: ${previo}).\n\n` +
+        `¿Reemplazar por el nuevo valor (${conteo})?`
+      );
+      if (!ok) {
+        setScanStatus(`Sin cambios: ${numParte} conserva su conteo anterior (${previo}).`, "warn");
+        if (inp) { inp.value = ""; inp.focus(); }
+        if (cantEl) cantEl.value = "";
+        return;
+      }
+    }
+  } else {
     // Parte contada que no estaba en el inventario cargado: se da de alta.
     store.upsertPart({ numParte, descripcion: "", ubicacion: "", existencia: null, enMarbetes: false, enExistencias: false, origin: "conteo" });
   }
