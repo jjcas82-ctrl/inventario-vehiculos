@@ -172,6 +172,7 @@ export function renderRefacciones() {
   renderExhibicion();
   renderDiferencias();
   renderFinal();
+  renderHistorialAuditorias();
   // Comprueba el estado de conexión al abrir la pestaña (no bloquea).
   try { probarConexion(); } catch (e) {}
 }
@@ -984,6 +985,44 @@ async function importarRespaldo(file) {
 
 function setBackupStatus(msg, kind) { setStatusEl("ref-backup-status", msg, kind); }
 
+// Histórico de inventarios de refacciones cerrados: tabla con fecha, valor,
+// diferencia y firmantes, para comparar entre auditorías.
+function renderHistorialAuditorias() {
+  const cont = document.getElementById("ref-historial");
+  if (!cont) return;
+  const hist = store.listPartsAuditHistory();
+  if (!hist.length) {
+    cont.innerHTML = `<p class="muted">Aún no hay inventarios cerrados. Cuando cierres una auditoría, se guardará aquí.</p>`;
+    return;
+  }
+  const filas = hist.map(h => {
+    const fecha = h.fecha ? new Date(h.fecha).toLocaleString("es-MX") : "—";
+    const firmas = [h.firmaAdmin, h.firmaRefacciones, h.firmaPosventa, h.firmaAuditor].filter(Boolean).length;
+    return `<tr>
+      <td>${escapeHtml(fecha)}</td>
+      <td style="text-align:right">${h.totalPartes ?? "—"}</td>
+      <td style="text-align:right">${money(h.valorInventario || 0)}</td>
+      <td style="text-align:right;color:var(--danger)">${money(h.valorDiferencia || 0)}</td>
+      <td style="text-align:right">${h.faltantes ?? 0}/${h.sobrantes ?? 0}</td>
+      <td style="text-align:right">${firmas}/4</td>
+      <td>${escapeHtml(h.by || "—")}</td>
+    </tr>`;
+  }).join("");
+  cont.innerHTML = `
+    <div class="table-wrap" style="max-height:320px;overflow:auto">
+      <table class="table">
+        <thead><tr>
+          <th>Fecha de cierre</th><th style="text-align:right">Partes</th>
+          <th style="text-align:right">Valor inventario</th>
+          <th style="text-align:right">Diferencia $</th>
+          <th style="text-align:right">Falt./Sobr.</th>
+          <th style="text-align:right">Firmas</th><th>Responsable</th>
+        </tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`;
+}
+
 // Diagnóstico de conexión: dice claramente si está conectado al SERVIDOR o en
 // MODO LOCAL, y por qué. Ayuda a resolver el "cargué en una PC y no aparece en
 // otra" antes de empezar el inventario.
@@ -1031,6 +1070,53 @@ async function probarConexion() {
 // Formatea un monto en pesos.
 function money(n) {
   return "$ " + (Number(n) || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Etiquetas de clasificación de rotación (del archivo de existencias).
+const CLASIF_LABEL = {
+  R: "Rápido", L: "Lento", E: "Estancado", P: "Próximo obsoleto",
+  O: "Obsoleto", I: "Inactivo",
+};
+const CLASIF_ORDEN = ["R", "L", "E", "P", "O", "I"];
+
+// Agrupa el inventario por CLASIFICACIÓN (L/O/R/E/P/I): cuántas partes, valor del
+// inventario y monto de diferencia por cada clasificación. Útil para contabilidad
+// (p. ej. cuánto valor hay en obsoletos, cuánta merma en rápidos).
+function resumenPorClasificacion() {
+  const all = store.listParts();
+  const difs = listaDiferencias();
+  // Mapa numParte → impacto $ de su diferencia (faltante/sobrante).
+  const impactoPorParte = new Map();
+  for (const d of difs) {
+    if ((d.tipo === "faltante" || d.tipo === "sobrante") && d.impacto != null) {
+      impactoPorParte.set(d.numParte, d.impacto);
+    }
+  }
+  const grupos = new Map();  // clave clasif → acumulados
+  const getG = (k) => {
+    if (!grupos.has(k)) grupos.set(k, { clasif: k, partes: 0, valor: 0, difMonto: 0, difPartes: 0 });
+    return grupos.get(k);
+  };
+  for (const p of all) {
+    const k = (p.clasificacion || "").trim().toUpperCase() || "—";
+    const g = getG(k);
+    g.partes++;
+    if (p.precioUnit != null && p.existencia != null) g.valor += Number(p.precioUnit) * Number(p.existencia);
+    const imp = impactoPorParte.get(p.numParte);
+    if (imp != null) { g.difMonto += imp; g.difPartes++; }
+  }
+  // Ordenar según CLASIF_ORDEN; lo desconocido ("—" u otras) al final.
+  const claves = [...grupos.keys()].sort((a, b) => {
+    const ia = CLASIF_ORDEN.indexOf(a), ib = CLASIF_ORDEN.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  return claves.map(k => grupos.get(k));
+}
+
+// Nombre legible de una clasificación (p. ej. "R" → "Rápido (R)").
+function clasifNombre(k) {
+  if (k === "—" || !k) return "Sin clasificación";
+  return CLASIF_LABEL[k] ? `${CLASIF_LABEL[k]} (${k})` : k;
 }
 
 // Calcula el resumen económico del inventario de refacciones.
@@ -1088,6 +1174,37 @@ function renderFinal() {
     <div class="stat"><b style="color:var(--danger)">${r.faltantes}</b><span>Faltantes</span></div>
     <div class="stat"><b style="color:#b45309">${r.sobrantes}</b><span>Sobrantes</span></div>
     <div class="stat"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>`;
+
+  renderClasificacion();
+}
+
+// Tabla de valor y diferencias por CLASIFICACIÓN (L/O/R/E/P/I) para contabilidad.
+function renderClasificacion() {
+  const cont = document.getElementById("ref-final-clasif");
+  if (!cont) return;
+  const grupos = resumenPorClasificacion();
+  if (!grupos.length) { cont.innerHTML = ""; return; }
+  const filas = grupos.map(g => `
+    <tr>
+      <td>${escapeHtml(clasifNombre(g.clasif))}</td>
+      <td style="text-align:right">${g.partes}</td>
+      <td style="text-align:right">${money(g.valor)}</td>
+      <td style="text-align:right">${g.difPartes}</td>
+      <td style="text-align:right${g.difMonto > 0 ? ";color:var(--danger)" : ""}">${money(g.difMonto)}</td>
+    </tr>`).join("");
+  cont.innerHTML = `
+    <h3 style="margin:0 0 6px">Resumen por clasificación</h3>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr>
+          <th>Clasificación</th><th style="text-align:right">Partes</th>
+          <th style="text-align:right">Valor inventario</th>
+          <th style="text-align:right">Partes c/dif.</th>
+          <th style="text-align:right">Monto diferencia</th>
+        </tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`;
 }
 
 // Imprime la hoja de resultado final con el resumen, las partes con diferencia y
@@ -1176,16 +1293,27 @@ function cerrarAuditoria() {
   const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
   if (!confirm("¿Cerrar la auditoría de refacciones y guardarla en la bitácora?")) return;
 
+  const { rondas, rondaActual } = rondaInfo();
   store.setPartsAudit({
     finishedAt: new Date().toISOString(),
     firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
   });
+  // Guarda un SNAPSHOT en el histórico (para comparar con futuras auditorías).
+  store.addPartsAuditHistory({
+    by, rondas, rondasHechas: rondaActual,
+    totalPartes: r.totalPartes,
+    valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
+    faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
+    firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
+    porClasificacion: resumenPorClasificacion(),
+  });
   logAction("parts.audit.close",
     `Auditoría cerrada · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
     `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · firmas: ${[fAdmin, fRefa, fPosventa, fAud].filter(Boolean).length}/4`, by);
   notify("Auditoría de refacciones cerrada y registrada en la bitácora.", { type: "success", timeout: 6000 });
+  renderHistorialAuditorias();
 }
 
 // ======================= HELPERS =======================
