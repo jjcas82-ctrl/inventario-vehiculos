@@ -86,6 +86,8 @@ export function initRefacciones() {
   // --- Exhibición / puntos de venta ---
   const btnExh = document.getElementById("ref-exh-btn");
   if (btnExh) btnExh.addEventListener("click", registrarExhibicion);
+  const selExhAg = document.getElementById("ref-exh-agencia");
+  if (selExhAg) selExhAg.addEventListener("change", () => { fillPuntosVenta(); });
   const inpExhCant = document.getElementById("ref-exh-cant");
   if (inpExhCant) inpExhCant.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); registrarExhibicion(); }
@@ -141,15 +143,48 @@ export function renderRefacciones() {
 // ======================= EXHIBICIÓN / PUNTOS DE VENTA =======================
 
 // Llena el desplegable de puntos de venta con las agencias/sitios existentes.
+// Sitios de EXHIBICIÓN / puntos de venta por agencia (mapeo fijo). "Exhibición"
+// es dentro de la propia agencia. Las bodegas y talleres NO aparecen aquí (no se
+// exhiben refacciones). Aeropuerto y Automotriz comparten sitio y puntos de venta.
+const PUNTOS_POR_AGENCIA = {
+  "Aeroplasa Auto":        ["Exhibición", "Punto de Venta Zacatlán", "Punto de Venta Chignahuapan"],
+  "Aeroplasa Aeropuerto":  ["Exhibición", "Punto de Venta Calzada del Hueso", "Punto de Venta Miramontes"],
+  "Aeroplasa Automotriz":  ["Exhibición", "Punto de Venta Calzada del Hueso", "Punto de Venta Miramontes"],
+};
+const AGENCIAS_REF = ["Aeroplasa Auto", "Aeroplasa Aeropuerto", "Aeroplasa Automotriz"];
+
+// Agencia del inventario de refacciones seleccionada (para filtrar exhibición).
+function agenciaExhSeleccionada() {
+  const sel = document.getElementById("ref-exh-agencia");
+  return (sel && sel.value) || AGENCIAS_REF[0];
+}
+
+// Llena el selector de AGENCIA de la sección exhibición (las 3 agencias).
+function fillAgenciasExh() {
+  const sel = document.getElementById("ref-exh-agencia");
+  if (!sel) return;
+  // Solo las agencias de refacciones que existan dadas de alta (por si acaso).
+  const existentes = new Set(store.listAgencies().map(a => a.name));
+  const opciones = AGENCIAS_REF.filter(a => existentes.has(a));
+  const lista = opciones.length ? opciones : AGENCIAS_REF;
+  const prev = sel.value;
+  sel.innerHTML = lista.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+  if (prev && lista.includes(prev)) sel.value = prev;
+}
+
+// Llena el desplegable de puntos de venta SOLO con los sitios de la agencia
+// seleccionada (según PUNTOS_POR_AGENCIA). Sin bodegas ni talleres.
 function fillPuntosVenta() {
   const sel = document.getElementById("ref-exh-punto");
   if (!sel) return;
-  const sitios = store.listAgencies().map(a => a.name);
+  const agencia = agenciaExhSeleccionada();
+  const sitios = PUNTOS_POR_AGENCIA[agencia] || ["Exhibición"];
   const prev = sel.value;
-  sel.innerHTML = `<option value="">— Punto de venta / armario —</option>` +
+  sel.innerHTML = `<option value="">— Punto de venta / exhibidor —</option>` +
     sitios.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("") +
     `<option value="Otro">Otro…</option>`;
-  if (prev) sel.value = prev;
+  // Conservar la selección previa solo si sigue siendo válida para esta agencia.
+  if (prev && (sitios.includes(prev) || prev === "Otro")) sel.value = prev;
 }
 
 function registrarExhibicion() {
@@ -180,6 +215,7 @@ function registrarExhibicion() {
 }
 
 function renderExhibicion() {
+  fillAgenciasExh();
   fillPuntosVenta();
   const el = document.getElementById("ref-exh-resumen");
   const tbody = document.querySelector("#ref-exh-table tbody");
