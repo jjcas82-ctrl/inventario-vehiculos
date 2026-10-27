@@ -866,6 +866,7 @@ function imprimirResultadoFinal() {
   const { rondas, rondaActual } = rondaInfo();
   const fAdmin = (document.getElementById("ref-firma-admin")?.value || "").trim();
   const fRefa = (document.getElementById("ref-firma-refacciones")?.value || "").trim();
+  const fPosventa = (document.getElementById("ref-firma-posventa")?.value || "").trim();
   const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
 
   const filas = r.difs.map(d => {
@@ -899,7 +900,7 @@ function imprimirResultadoFinal() {
       table{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}
       th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}
       th{background:#0f204a;color:#fff} tr:nth-child(even){background:#f6f8fc}
-      .firmas{display:flex;justify-content:space-between;gap:24px;margin-top:48px}
+      .firmas{display:flex;justify-content:space-between;gap:16px;margin-top:48px;flex-wrap:wrap}
       .firma{flex:1;text-align:center} .firma .linea{border-top:1px solid #000;margin-top:40px;padding-top:4px;font-size:12px}
       .firma .cargo{font-size:11px;color:#555}
       .barra{margin-bottom:12px} .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;background:#0f204a;color:#fff;cursor:pointer}
@@ -924,6 +925,7 @@ function imprimirResultadoFinal() {
     <div class="firmas">
       <div class="firma"><div class="linea">${esc(fAdmin || "&nbsp;")}</div><div class="cargo">Gte. Administrativo</div></div>
       <div class="firma"><div class="linea">${esc(fRefa || "&nbsp;")}</div><div class="cargo">Gte. de Refacciones</div></div>
+      <div class="firma"><div class="linea">${esc(fPosventa || "&nbsp;")}</div><div class="cargo">Gte. de Posventa</div></div>
       <div class="firma"><div class="linea">${esc(fAud || "&nbsp;")}</div><div class="cargo">Auditor (nombre y firma)</div></div>
     </div>
     </body></html>`);
@@ -937,18 +939,19 @@ function cerrarAuditoria() {
   const by = auth.currentUser()?.name || "—";
   const fAdmin = (document.getElementById("ref-firma-admin")?.value || "").trim();
   const fRefa = (document.getElementById("ref-firma-refacciones")?.value || "").trim();
+  const fPosventa = (document.getElementById("ref-firma-posventa")?.value || "").trim();
   const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
   if (!confirm("¿Cerrar la auditoría de refacciones y guardarla en la bitácora?")) return;
 
   store.setPartsAudit({
     finishedAt: new Date().toISOString(),
-    firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaAuditor: fAud,
+    firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
   });
   logAction("parts.audit.close",
     `Auditoría cerrada · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
-    `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · firmas: ${[fAdmin, fRefa, fAud].filter(Boolean).length}/3`, by);
+    `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · firmas: ${[fAdmin, fRefa, fPosventa, fAud].filter(Boolean).length}/4`, by);
   notify("Auditoría de refacciones cerrada y registrada en la bitácora.", { type: "success", timeout: 6000 });
 }
 
