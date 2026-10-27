@@ -130,6 +130,7 @@ function seed() {
     scheduledAudits: [], // agenda de auditorías programadas
     parts: {},   // inventario de REFACCIONES (por número de parte)
     partsAudit: null, // sesión de auditoría de refacciones (rondas, firmantes)
+    partsAuditHistory: [], // snapshots de inventarios de refacciones cerrados
   };
 }
 
@@ -169,6 +170,7 @@ function read() {
   if (!Array.isArray(_cache.scheduledAudits)) _cache.scheduledAudits = [];
   if (!_cache.parts || typeof _cache.parts !== "object") _cache.parts = {};
   if (_cache.partsAudit === undefined) _cache.partsAudit = null;
+  if (!Array.isArray(_cache.partsAuditHistory)) _cache.partsAuditHistory = [];
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
   // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
@@ -558,6 +560,23 @@ export const store = {
     return db.partsAudit;
   },
   clearPartsAudit() { const db = read(); db.partsAudit = null; write(db); },
+
+  // ---- Histórico de inventarios de refacciones CERRADOS ----
+  // Cada entrada es un snapshot al cerrar: { id, fecha, by, rondas, valorInventario,
+  //   valorDiferencia, faltantes, sobrantes, noComprobadas, totalPartes,
+  //   firmaAdmin, firmaRefacciones, firmaPosventa, firmaAuditor, porClasificacion }
+  listPartsAuditHistory() {
+    const db = read();
+    return (db.partsAuditHistory || []).slice().sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+  },
+  addPartsAuditHistory(entry) {
+    const db = read();
+    db.partsAuditHistory = db.partsAuditHistory || [];
+    const rec = { id: cryptoId(), fecha: new Date().toISOString(), ...entry };
+    db.partsAuditHistory.push(rec);
+    write(db);
+    return rec;
+  },
 
   // ---- Respaldo ----
   export() { return JSON.stringify(read(), null, 2); },

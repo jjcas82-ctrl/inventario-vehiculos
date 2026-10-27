@@ -835,6 +835,7 @@
         <h2>✍️ Resultado final de la auditoría</h2>
         <p class="hint">Resumen del inventario con <b>valor total $</b>, <b>monto de la diferencia $</b> y las partes con diferencia o no comprobadas. Incluye el área de firmas para cerrar la auditoría.</p>
         <div id="ref-final-resumen" class="summary"></div>
+        <div id="ref-final-clasif" style="margin-top:10px"></div>
         <div class="filters" style="margin-top:6px">
           <div class="field"><label for="ref-firma-admin">Gte. Administrativo (nombre)</label><input id="ref-firma-admin" type="text" placeholder="Nombre y firma" /></div>
           <div class="field"><label for="ref-firma-refacciones">Gte. de Refacciones (nombre)</label><input id="ref-firma-refacciones" type="text" placeholder="Nombre y firma" /></div>
@@ -868,6 +869,13 @@
           <input id="ref-backup-importar-file" type="file" accept="application/json,.json" hidden />
         </div>
         <p id="ref-backup-status" class="hint"></p>
+      </div>
+
+      <!-- 7) HISTÓRICO DE INVENTARIOS CERRADOS -->
+      <div class="card">
+        <h2>📚 Histórico de inventarios</h2>
+        <p class="hint">Inventarios de refacciones cerrados anteriormente, para comparar tendencias (valor, diferencias) entre auditorías.</p>
+        <div id="ref-historial"></div>
       </div>
     </section>
 
