@@ -74,6 +74,19 @@ export function initRefacciones() {
   if (btnScan) btnScan.addEventListener("click", startScan);
   if (btnScanStop) btnScanStop.addEventListener("click", stopScan);
   if (btnManual) btnManual.addEventListener("click", registrarConteoManual);
+  // Botones +1 / -1 para ajustar la cantidad con el pulgar (celular).
+  const ajustarCant = (delta) => {
+    const cantEl = document.getElementById("ref-conteo-cant");
+    if (!cantEl) return;
+    const actual = Number(cantEl.value);
+    const base = Number.isFinite(actual) ? actual : 0;
+    cantEl.value = String(Math.max(0, base + delta));
+    beep(true);
+  };
+  const btnMas = document.getElementById("ref-cant-mas");
+  const btnMenos = document.getElementById("ref-cant-menos");
+  if (btnMas) btnMas.addEventListener("click", () => ajustarCant(1));
+  if (btnMenos) btnMenos.addEventListener("click", () => ajustarCant(-1));
   const inpManual = document.getElementById("ref-conteo-parte");
   if (inpManual) inpManual.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); document.getElementById("ref-conteo-cant")?.focus(); }
@@ -550,15 +563,16 @@ function stopScan() {
 // Al escanear un QR de parte: rellena el número de parte y enfoca la cantidad.
 function handleScan(text) {
   const p = parsePartQr(text);
-  if (!p || !p.numParte) { setScanStatus("Código no reconocido.", "error"); beep(false); return; }
+  if (!p || !p.numParte) { setScanStatus("Código no reconocido.", "error"); beep("error"); return; }
   const inp = document.getElementById("ref-conteo-parte");
   const cant = document.getElementById("ref-conteo-cant");
   if (inp) inp.value = p.numParte;
-  beep(true);
   const existente = store.getPart(p.numParte);
   if (existente) {
+    beep("ok");  // sonido/vibración de ÉXITO: la parte está en el inventario
     setScanStatus(`✓ ${p.numParte} — ${existente.descripcion || p.descripcion || ""}. Teclea la cantidad contada.`, "ok");
   } else {
+    beep("warn");  // sonido/vibración de AVISO: la parte NO está en el inventario
     setScanStatus(`⚠️ ${p.numParte} no está en el inventario cargado. Puedes contarla igual.`, "warn");
   }
   if (cant) { cant.value = ""; cant.focus(); }
@@ -568,11 +582,11 @@ function registrarConteoManual() {
   const inp = document.getElementById("ref-conteo-parte");
   const cantEl = document.getElementById("ref-conteo-cant");
   const numParte = (inp?.value || "").trim();
-  if (!numParte) { notify("Escanea o escribe el número de parte.", { type: "warn" }); inp?.focus(); return; }
+  if (!numParte) { beep("error"); notify("Escanea o escribe el número de parte.", { type: "warn" }); inp?.focus(); return; }
   const cantRaw = (cantEl?.value || "").trim();
-  if (cantRaw === "") { notify("Teclea la cantidad contada.", { type: "warn" }); cantEl?.focus(); return; }
+  if (cantRaw === "") { beep("error"); notify("Teclea la cantidad contada.", { type: "warn" }); cantEl?.focus(); return; }
   const conteo = Number(cantRaw);
-  if (!Number.isFinite(conteo) || conteo < 0) { notify("La cantidad debe ser un número válido (0 o más).", { type: "warn" }); cantEl?.focus(); return; }
+  if (!Number.isFinite(conteo) || conteo < 0) { beep("error"); notify("La cantidad debe ser un número válido (0 o más).", { type: "warn" }); cantEl?.focus(); return; }
 
   if (!puedeContar()) { notify("Tu rol no permite registrar conteos de refacciones.", { type: "warn" }); return; }
 
@@ -1086,17 +1100,33 @@ function setStatusEl(id, msg, kind) {
     : (kind === "ok" ? "var(--primary)" : (kind === "warn" ? "#b45309" : "var(--muted)"));
 }
 
-function beep(ok) {
+// Retroalimentación por sonido + vibración, diferenciada por tipo para que el
+// contador NO tenga que mirar la pantalla:
+//   "ok"    → pitido agudo corto + vibración breve (escaneo/registro correcto)
+//   "warn"  → pitido medio doble + vibración doble (parte no está en inventario)
+//   "error" → pitido grave triple + vibración larga triple (dato inválido)
+// Compatibilidad: beep(true)=ok, beep(false)=error.
+function beep(tipo) {
+  if (tipo === true) tipo = "ok";
+  else if (tipo === false) tipo = "error";
+  const cfg = {
+    ok:    { vib: 40,            tonos: [{ f: 880, d: 0.16 }] },
+    warn:  { vib: [50, 40, 50],  tonos: [{ f: 600, d: 0.12 }, { f: 600, d: 0.12, gap: 0.14 }] },
+    error: { vib: [70, 50, 70, 50, 70], tonos: [{ f: 260, d: 0.14 }, { f: 260, d: 0.14, gap: 0.16 }, { f: 260, d: 0.14, gap: 0.32 }] },
+  }[tipo] || { vib: 40, tonos: [{ f: 880, d: 0.16 }] };
   try {
-    if (navigator.vibrate) navigator.vibrate(ok ? 40 : [60, 40, 60]);
+    if (navigator.vibrate) navigator.vibrate(cfg.vib);
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.frequency.value = ok ? 880 : 300;
-    o.connect(g); g.connect(audioCtx.destination);
-    g.gain.setValueAtTime(0.08, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
-    o.start(); o.stop(audioCtx.currentTime + 0.18);
+    for (const t of cfg.tonos) {
+      const start = audioCtx.currentTime + (t.gap || 0);
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.frequency.value = t.f;
+      o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.08, start);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + t.d);
+      o.start(start); o.stop(start + t.d);
+    }
   } catch (e) { /* audio no disponible */ }
 }
 
