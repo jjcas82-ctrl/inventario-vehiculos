@@ -19,6 +19,7 @@ import { notify } from "./ui.js";
 import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
 import * as auth from "./auth.js";
+import * as api from "./api.js";
 import { pushParts, pushPartConteo, pushPart } from "./sync.js";
 
 let initialized = false;
@@ -138,6 +139,21 @@ export function initRefacciones() {
   const btnFinalCerrar = document.getElementById("ref-final-cerrar");
   if (btnFinalCerrar) btnFinalCerrar.addEventListener("click", cerrarAuditoria);
 
+  // --- Respaldo y conexión ---
+  const btnBackupExp = document.getElementById("ref-backup-exportar");
+  if (btnBackupExp) btnBackupExp.addEventListener("click", exportarRespaldo);
+  const btnBackupImpBtn = document.getElementById("ref-backup-importar-btn");
+  const fileBackupImp = document.getElementById("ref-backup-importar-file");
+  if (btnBackupImpBtn && fileBackupImp) {
+    btnBackupImpBtn.addEventListener("click", () => { fileBackupImp.value = ""; fileBackupImp.click(); });
+    fileBackupImp.addEventListener("change", async () => {
+      const f = fileBackupImp.files && fileBackupImp.files[0];
+      if (f) await importarRespaldo(f);
+    });
+  }
+  const btnConnProbar = document.getElementById("ref-conn-probar");
+  if (btnConnProbar) btnConnProbar.addEventListener("click", probarConexion);
+
   const video = document.getElementById("ref-video");
   if (video) {
     scanner = new Scanner(video, {
@@ -156,6 +172,8 @@ export function renderRefacciones() {
   renderExhibicion();
   renderDiferencias();
   renderFinal();
+  // Comprueba el estado de conexión al abrir la pestaña (no bloquea).
+  try { probarConexion(); } catch (e) {}
 }
 
 // ======================= EXHIBICIÓN / PUNTOS DE VENTA =======================
@@ -906,6 +924,109 @@ function exportarDiferenciasCsv() {
 }
 
 // ======================= RESULTADO FINAL CON FIRMAS =======================
+
+// ======================= RESPALDO Y CONEXIÓN =======================
+
+// Exporta el inventario de refacciones (partes + sesión de auditoría) a un
+// archivo JSON descargable. Respaldo de seguridad por si falla el servidor.
+function exportarRespaldo() {
+  const parts = store.listParts();
+  if (!parts.length) { notify("No hay inventario de refacciones que respaldar.", { type: "warn" }); return; }
+  const data = {
+    tipo: "respaldo-refacciones",
+    version: 1,
+    generadoEn: new Date().toISOString(),
+    generadoPor: auth.currentUser()?.name || "—",
+    parts,
+    partsAudit: store.getPartsAudit(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const fecha = new Date().toISOString().slice(0, 10);
+  const a = document.createElement("a");
+  a.href = url; a.download = `respaldo-refacciones-${fecha}.json`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
+  logAction("parts.backup.export", `Respaldo exportado: ${parts.length} partes`, data.generadoPor);
+  setBackupStatus(`✓ Respaldo exportado: ${parts.length} partes.`, "ok");
+}
+
+// Importa un respaldo JSON y restaura las partes (merge) y, opcionalmente, la
+// sesión de auditoría. Pide confirmación. Requiere permiso de edición.
+async function importarRespaldo(file) {
+  if (!puedeEditar()) { notify("Tu rol no permite importar inventario de refacciones.", { type: "warn" }); return; }
+  let data;
+  try {
+    data = JSON.parse(await readTextFile(file));
+  } catch (e) {
+    setBackupStatus("El archivo no es un respaldo válido (JSON ilegible).", "error");
+    return;
+  }
+  if (!data || data.tipo !== "respaldo-refacciones" || !Array.isArray(data.parts)) {
+    setBackupStatus("El archivo no es un respaldo de refacciones válido.", "error");
+    return;
+  }
+  if (!confirm(`¿Importar el respaldo con ${data.parts.length} parte(s)?\n` +
+      `Se combinarán con el inventario actual (las partes del respaldo actualizan las existentes).`)) return;
+
+  const res = store.bulkUpsertParts(data.parts, { merge: true });
+  if (data.partsAudit && typeof data.partsAudit === "object") {
+    store.setPartsAudit(data.partsAudit);
+  }
+  const by = auth.currentUser()?.name || "—";
+  logAction("parts.backup.import", `Respaldo importado: ${res.added} nuevas, ${res.updated} actualizadas`, by);
+  // Sube lo importado al servidor (o encola si no hay red).
+  try { pushParts(data.parts); } catch (e) {}
+  setBackupStatus(`✓ Respaldo importado: ${res.added} nuevas, ${res.updated} actualizadas.`, "ok");
+  notify("Respaldo de refacciones importado.", { type: "success", timeout: 6000 });
+  renderRondas(); renderCargaResumen(); renderConteo(); renderDiferencias(); renderFinal();
+}
+
+function setBackupStatus(msg, kind) { setStatusEl("ref-backup-status", msg, kind); }
+
+// Diagnóstico de conexión: dice claramente si está conectado al SERVIDOR o en
+// MODO LOCAL, y por qué. Ayuda a resolver el "cargué en una PC y no aparece en
+// otra" antes de empezar el inventario.
+async function probarConexion() {
+  const estado = document.getElementById("ref-conn-estado");
+  const detalle = document.getElementById("ref-conn-detalle");
+  const set = (txt, color, det) => {
+    if (estado) { estado.textContent = txt; estado.style.color = color; estado.style.fontWeight = "700"; }
+    if (detalle) detalle.textContent = det || "";
+  };
+  set("Comprobando…", "var(--muted)", "");
+
+  if (!navigator.onLine) {
+    set("⚠️ Sin internet (modo local)", "#b45309",
+      "Este dispositivo no tiene conexión. Los registros se guardan localmente y se subirán al reconectar.");
+    return;
+  }
+  if (!api.hasToken()) {
+    set("⚠️ Modo local (sin sesión de servidor)", "#b45309",
+      "Iniciaste sesión en modo local o de emergencia. Lo que cargues/cuentes NO se sube al servidor ni se ve en otros equipos. Cierra sesión y entra con tu usuario del servidor para sincronizar.");
+    return;
+  }
+  // Hay token: comprobamos que el servidor responda y que la sesión siga válida.
+  try {
+    const ok = await api.ping();
+    if (!ok) {
+      set("⚠️ Servidor no responde (modo local)", "#b45309",
+        "Hay internet pero el servidor no contesta. Se trabajará localmente y se sincronizará cuando vuelva.");
+      return;
+    }
+    await api.me();  // valida el token contra el servidor
+    set("✅ Conectado al servidor", "#059669",
+      `Sesión válida. Los cambios se sincronizan con el servidor (${api.apiBase()}).`);
+  } catch (e) {
+    if (e && e.status === 401) {
+      set("⚠️ Sesión expirada (modo local)", "#b45309",
+        "El servidor respondió pero tu sesión caducó. Cierra sesión y vuelve a entrar para sincronizar.");
+    } else {
+      set("⚠️ Servidor no disponible (modo local)", "#b45309",
+        "No se pudo confirmar la conexión con el servidor. Se trabajará localmente.");
+    }
+  }
+}
 
 // Formatea un monto en pesos.
 function money(n) {
