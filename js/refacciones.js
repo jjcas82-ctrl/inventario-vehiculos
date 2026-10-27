@@ -55,6 +55,17 @@ function parseExistenciasFixed(text) {
     if (/^(no\.?\s*de?\s*parte|grupo|descripcion|pagina|listado|firma)/i.test(numParte)) continue;
 
     let resto = mp[2];
+    // Precio (defensivo) PRIMERO: si el renglón trae un importe con decimales
+    // (p. ej. "1,234.56" o "99.00") al final, lo tomamos como precio unitario y
+    // lo recortamos antes de buscar "cantidad ubicación [fecha]". El formato
+    // texto plano normalmente NO trae precio (entonces precioUnit queda null y
+    // el valor se calcula solo si se carga el CSV con la columna Precio U.).
+    let precioUnit = null;
+    const mp2 = resto.match(/\s(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})\s*$/);
+    if (mp2) {
+      const val = Number(mp2[1].replace(/,/g, ""));
+      if (Number.isFinite(val)) { precioUnit = val; resto = resto.slice(0, mp2.index); }
+    }
     const mc = resto.match(COLA_RE);
     let existencia = null, ubicacion = "";
     if (mc) {
@@ -65,7 +76,7 @@ function parseExistenciasFixed(text) {
     const descripcion = resto.replace(/\s+/g, " ").trim();
     // Debe tener al menos descripción o cantidad para contar como renglón válido.
     if (!descripcion && existencia == null) continue;
-    out.push({ numParte, descripcion, existencia: existencia == null ? 0 : existencia, ubicacion });
+    out.push({ numParte, descripcion, existencia: existencia == null ? 0 : existencia, ubicacion, precioUnit });
   }
   return out;
 }
@@ -187,18 +198,39 @@ export async function parseMarbetesFile(file, onProgress) {
 //   items: unidades con marbete Y existencia (lo normal), o lo que haya.
 // Cada item: { numParte, descripcion, ubicacion, grupo, marbete, existencia, enExistencias, enMarbetes }
 export function cruzar(marbetes, existencias) {
-  const exByParte = new Map();
-  for (const e of existencias) if (e.numParte) exByParte.set(norm(e.numParte), e);
+  // Índice EXACTO (clave primaria) y TOLERANTE (fallback). El tolerante solo se
+  // llena si no genera ambigüedad: si dos existencias distintas colapsan a la
+  // misma clave tolerante, esa clave se marca como ambigua y NO se usa (para no
+  // cruzar partes equivocadas).
+  const exByParte = new Map();      // norm(numParte) -> existencia
+  const exByLoose = new Map();      // normLoose(numParte) -> existencia | AMBIGUO
+  const AMBIGUO = Symbol("ambiguo");
+  for (const e of existencias) {
+    if (!e.numParte) continue;
+    exByParte.set(norm(e.numParte), e);
+    const lk = normLoose(e.numParte);
+    if (exByLoose.has(lk)) exByLoose.set(lk, AMBIGUO);
+    else exByLoose.set(lk, e);
+  }
+
+  // Resuelve una existencia para un número de parte: exacto primero, luego
+  // tolerante (si no es ambiguo). Devuelve { ex, usoLoose } o { ex:null }.
+  const resolverEx = (numParte) => {
+    const exacto = exByParte.get(norm(numParte));
+    if (exacto) return { ex: exacto, usoLoose: false };
+    const loose = exByLoose.get(normLoose(numParte));
+    if (loose && loose !== AMBIGUO) return { ex: loose, usoLoose: true };
+    return { ex: null, usoLoose: false };
+  };
 
   const items = [];
-  const vistos = new Set();
+  const vistos = new Set();         // claves (norm) de existencias ya cruzadas
 
   // 1) Recorremos los MARBETES (definen el orden del conteo físico).
   for (const m of marbetes) {
     if (m.enBlanco) { items.push({ ...m, existencia: null, enExistencias: false, enMarbetes: true }); continue; }
-    const key = norm(m.numParte);
-    const ex = exByParte.get(key);
-    vistos.add(key);
+    const { ex } = resolverEx(m.numParte);
+    if (ex) vistos.add(norm(ex.numParte));
     items.push({
       grupo: m.grupo || "",
       numParte: m.numParte,
@@ -336,7 +368,20 @@ export async function printPartLabels(parts, opts = {}) {
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
 // --- Utilidades ---
+// Normalización ESTRICTA: mayúsculas, sin espacios. Es la clave primaria del cruce.
 function norm(s) { return String(s || "").toUpperCase().replace(/\s+/g, "").trim(); }
+
+// Normalización TOLERANTE (fallback): además quita guiones/puntos y ceros a la
+// izquierda, para cruzar números que difieren solo en el formato entre el CSV de
+// existencias y el PDF de marbetes (p. ej. "H431-260C" vs "H431260C", o
+// "0012345" vs "12345"). Solo se usa cuando NO hubo coincidencia exacta, para no
+// fusionar por error dos partes legítimamente distintas.
+function normLoose(s) {
+  let t = norm(s).replace(/[-.\s]/g, "");
+  // Quitar ceros a la izquierda solo si lo que queda sigue teniendo contenido.
+  const sinCeros = t.replace(/^0+/, "");
+  return sinCeros || t;
+}
 
 // Parser CSV mínimo (separador , o ;, comillas, BOM).
 function parseCsv(text) {

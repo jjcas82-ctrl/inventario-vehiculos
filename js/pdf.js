@@ -6,7 +6,7 @@ import { listPhotos, PHOTO_KINDS } from "./photos.js";
 import { EVENT_LABELS } from "./events.js";
 import { store } from "./storage.js";
 
-const BRAND = "GRUPO AEROPLASA · INVENTARIO DE UNIDADES";
+const BRAND = "GRUPO AEROPLASA · CONTROL DE INVENTARIOS";
 const LOGO = "icons/logo.png";
 
 function esc(s) {
@@ -56,7 +56,7 @@ function openDoc(title, inner) {
   win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
     <title>${esc(title)}</title><style>${DOC_STYLE}</style></head>
     <body>${head()}${inner}
-    <div class="foot">Grupo Aeroplasa · Sistema de Inventario de Unidades · Documento interno.</div>
+    <div class="foot">Grupo Aeroplasa · Control de Inventarios · Documento interno.</div>
     <div class="no-print"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
     <script>window.onload=()=>setTimeout(()=>window.print(),400);<\/script>
     </body></html>`);
