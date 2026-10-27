@@ -760,9 +760,12 @@
           <label><b>Captura manual</b> (o con lector USB): número de parte y cantidad.</label>
           <div class="row gap wrap">
             <input id="ref-conteo-parte" type="text" placeholder="Número de parte" style="flex:1;min-width:160px" />
-            <input id="ref-conteo-cant" type="number" min="0" step="1" placeholder="Cantidad" style="max-width:140px" />
+            <button id="ref-cant-menos" class="btn" type="button" title="Restar 1" style="font-size:22px;font-weight:700;min-width:52px;padding:6px 0">−</button>
+            <input id="ref-conteo-cant" type="number" min="0" step="1" placeholder="Cantidad" style="max-width:110px;text-align:center;font-size:18px" inputmode="numeric" />
+            <button id="ref-cant-mas" class="btn" type="button" title="Sumar 1" style="font-size:22px;font-weight:700;min-width:52px;padding:6px 0">+</button>
             <button id="ref-conteo-manual-btn" class="btn btn-primary">Registrar conteo</button>
           </div>
+          <p class="hint" style="margin:6px 0 0">Escanea el QR o escribe el número de parte; ajusta la cantidad con <b>+ / −</b> o tecléala, y pulsa <b>Registrar</b>.</p>
         </div>
         <p id="ref-scan-status" class="hint"></p>
         <div class="table-wrap" style="max-height:300px;overflow:auto">
