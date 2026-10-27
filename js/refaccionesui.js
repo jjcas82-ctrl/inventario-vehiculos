@@ -113,6 +113,11 @@ export function initRefacciones() {
   if (btnDiffCsv) btnDiffCsv.addEventListener("click", exportarDiferenciasCsv);
   const btnReset = document.getElementById("ref-reset-conteo");
   if (btnReset) btnReset.addEventListener("click", reiniciarConteo);
+  const btnPendToggle = document.getElementById("ref-pend-toggle");
+  if (btnPendToggle) btnPendToggle.addEventListener("click", () => {
+    _pendColapsado = !_pendColapsado;
+    renderPendientesUbicacion();
+  });
 
   // --- Resultado final con firmas ---
   const btnFinalPdf = document.getElementById("ref-final-pdf");
@@ -641,6 +646,24 @@ function renderConteo() {
     <div class="stat"><b style="color:var(--primary)">${contadas}</b><span>Contadas (conteo ${rondaActual})</span></div>
     <div class="stat"><b style="color:#b45309">${pendientes}</b><span>Pendientes (conteo ${rondaActual})</span></div>`;
 
+  // Barra de progreso en vivo: contadas / (contadas + pendientes) de ESTA ronda.
+  const wrap = document.getElementById("ref-progress-wrap");
+  const totalRonda = contadas + pendientes;
+  if (wrap) {
+    if (totalRonda > 0) {
+      const pct = Math.round((contadas / totalRonda) * 100);
+      wrap.hidden = false;
+      const fill = document.getElementById("ref-progress-fill");
+      const label = document.getElementById("ref-progress-label");
+      const pctEl = document.getElementById("ref-progress-pct");
+      if (fill) { fill.style.width = pct + "%"; fill.style.background = pct >= 100 ? "#059669" : "var(--primary)"; }
+      if (label) label.textContent = `Conteo ${rondaActual}: ${contadas} de ${totalRonda} · faltan ${pendientes}`;
+      if (pctEl) { pctEl.textContent = pct + "%"; pctEl.style.color = pct >= 100 ? "#059669" : "var(--primary)"; }
+    } else {
+      wrap.hidden = true;  // aún no hay inventario cargado para esta ronda
+    }
+  }
+
   // Tabla de las últimas contadas (orden por fecha de conteo descendente).
   const tbody = document.querySelector("#ref-conteo-table tbody");
   if (tbody) {
@@ -658,6 +681,46 @@ function renderConteo() {
       </tr>`;
     }).join("");
   }
+
+  renderPendientesUbicacion();
+}
+
+// Lista las partes PENDIENTES de contar en la ronda actual, AGRUPADAS por
+// ubicación (rack), ordenadas alfabéticamente, para recorrer el almacén en orden.
+let _pendColapsado = false;
+function renderPendientesUbicacion() {
+  const cont = document.getElementById("ref-pendientes-ubic");
+  if (!cont) return;
+  if (_pendColapsado) { cont.innerHTML = ""; return; }
+
+  const { rondaActual } = rondaInfo();
+  const pend = store.listParts().filter(p => pendienteEnRonda(p, rondaActual));
+  if (!pend.length) {
+    cont.innerHTML = `<p class="muted" style="margin:4px 0">✓ No hay partes pendientes en el conteo ${rondaActual}.</p>`;
+    return;
+  }
+
+  // Agrupar por ubicación (las sin ubicación van al final en "Sin ubicación").
+  const grupos = new Map();
+  for (const p of pend) {
+    const u = (p.ubicacion || "").trim() || "— Sin ubicación —";
+    if (!grupos.has(u)) grupos.set(u, []);
+    grupos.get(u).push(p);
+  }
+  const claves = [...grupos.keys()].sort((a, b) => {
+    if (a.startsWith("—")) return 1;      // "Sin ubicación" al final
+    if (b.startsWith("—")) return -1;
+    return a.localeCompare(b, "es");
+  });
+
+  cont.innerHTML = claves.map(u => {
+    const items = grupos.get(u);
+    const filas = items.map(p => `<li><code>${escapeHtml(p.numParte)}</code> — ${escapeHtml((p.descripcion || "").slice(0, 45))}</li>`).join("");
+    return `<details class="loc-card" style="margin:6px 0" open>
+      <summary style="cursor:pointer;font-weight:700">${escapeHtml(u)} <span class="muted" style="font-weight:400">(${items.length})</span></summary>
+      <ul style="margin:6px 0 0 18px;font-size:13px">${filas}</ul>
+    </details>`;
+  }).join("");
 }
 
 // ======================= DIFERENCIAS =======================
@@ -685,19 +748,31 @@ function listaDiferencias() {
   const out = [];
   for (const p of all) {
     const dif = diffValor(p);
+    // Impacto económico de la diferencia: |dif| × precio unitario (si hay precio).
+    const precio = p.precioUnit != null ? Number(p.precioUnit) : null;
+    const impacto = (dif != null && dif !== 0 && precio != null) ? Math.abs(dif) * precio : null;
     if (dif != null) {
-      if (dif !== 0) out.push({ ...p, dif, tipo: dif > 0 ? "sobrante" : "faltante" });
+      if (dif !== 0) out.push({ ...p, dif, impacto, tipo: dif > 0 ? "sobrante" : "faltante" });
     } else {
       // Falta un dato para comparar: lo reportamos como pendiente/sin-dato.
-      if (p.conteo != null && p.existencia == null) out.push({ ...p, dif: null, tipo: "sin-existencia" });
-      else if (p.conteo == null && p.existencia != null && p.enMarbetes !== false) out.push({ ...p, dif: null, tipo: "sin-contar" });
+      if (p.conteo != null && p.existencia == null) out.push({ ...p, dif: null, impacto: null, tipo: "sin-existencia" });
+      else if (p.conteo == null && p.existencia != null && p.enMarbetes !== false) out.push({ ...p, dif: null, impacto: null, tipo: "sin-contar" });
     }
   }
-  // Orden: faltantes primero, luego sobrantes, luego sin dato; por magnitud.
+  // Orden: faltantes primero, luego sobrantes, luego sin dato; dentro de cada
+  // grupo por IMPACTO $ descendente (y por magnitud de unidades como desempate).
   const rank = { faltante: 0, sobrante: 1, "sin-existencia": 2, "sin-contar": 3 };
-  out.sort((a, b) => (rank[a.tipo] - rank[b.tipo]) || (Math.abs(b.dif || 0) - Math.abs(a.dif || 0)));
+  out.sort((a, b) =>
+    (rank[a.tipo] - rank[b.tipo]) ||
+    ((b.impacto || 0) - (a.impacto || 0)) ||
+    (Math.abs(b.dif || 0) - Math.abs(a.dif || 0)));
   return out;
 }
+
+// Umbral de "diferencia grande" en $: configurable, default $500. Las partes con
+// impacto económico >= umbral se resaltan para priorizar la recontada.
+const UMBRAL_DIF_GRANDE = 500;
+function esDifGrande(d) { return d && d.impacto != null && d.impacto >= UMBRAL_DIF_GRANDE; }
 
 function renderDiferencias() {
   const el = document.getElementById("ref-diff-resumen");
@@ -708,24 +783,32 @@ function renderDiferencias() {
   const sobrantes = difs.filter(d => d.tipo === "sobrante").length;
   const sinContar = difs.filter(d => d.tipo === "sin-contar").length;
   const sinExist = difs.filter(d => d.tipo === "sin-existencia").length;
+  const grandes = difs.filter(esDifGrande);
+  const impactoGrande = grandes.reduce((s, d) => s + (d.impacto || 0), 0);
 
   if (el) el.innerHTML = `
     <div class="stat"><b style="color:var(--danger)">${faltantes}</b><span>Faltantes</span></div>
     <div class="stat"><b style="color:#b45309">${sobrantes}</b><span>Sobrantes</span></div>
     <div class="stat"><b>${sinContar}</b><span>Sin contar</span></div>
-    <div class="stat"><b>${sinExist}</b><span>Contadas sin existencia</span></div>`;
+    <div class="stat"><b>${sinExist}</b><span>Contadas sin existencia</span></div>
+    ${grandes.length ? `<div class="stat" style="background:#fef2f2;border-color:#fecaca"><b style="color:var(--danger)">${grandes.length} · ${money(impactoGrande)}</b><span>⚠️ Diferencias grandes (≥ ${money(UMBRAL_DIF_GRANDE)})</span></div>` : ""}`;
 
   if (tbody) {
-    tbody.innerHTML = difs.map(d => `
-      <tr>
-        <td><code>${escapeHtml(d.numParte)}</code></td>
+    tbody.innerHTML = difs.map(d => {
+      const grande = esDifGrande(d);
+      const impactoCell = d.impacto == null ? "—" : money(d.impacto);
+      return `
+      <tr${grande ? ` style="background:#fef2f2"` : ""}>
+        <td>${grande ? "⚠️ " : ""}<code>${escapeHtml(d.numParte)}</code></td>
         <td>${escapeHtml((d.descripcion || "").slice(0, 45))}</td>
         <td><code>${escapeHtml(d.ubicacion || "")}</code></td>
         <td style="text-align:right">${d.existencia == null ? "—" : escapeHtml(String(d.existencia))}</td>
         <td style="text-align:right">${d.conteo == null ? "—" : escapeHtml(String(d.conteo))}</td>
         <td style="text-align:right">${difBadge(d.dif)}</td>
+        <td style="text-align:right${grande ? ";color:var(--danger);font-weight:700" : ""}">${impactoCell}</td>
         <td>${tipoLabel(d.tipo)}</td>
-      </tr>`).join("");
+      </tr>`;
+    }).join("");
     const empty = document.getElementById("ref-diff-empty");
     if (empty) empty.style.display = difs.length ? "none" : "";
   }
