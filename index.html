@@ -846,6 +846,29 @@
           <button id="ref-final-cerrar" class="btn">✓ Cerrar auditoría (guardar en bitácora)</button>
         </div>
       </div>
+
+      <!-- 6) RESPALDO Y CONEXIÓN -->
+      <div class="card">
+        <h2>💾 Respaldo y conexión</h2>
+        <p class="hint">Antes del inventario, revisa que estés <b>conectado al servidor</b>. Puedes guardar un <b>respaldo</b> del inventario de refacciones (existencias + conteos) por si falla la conexión, y restaurarlo después.</p>
+
+        <!-- Diagnóstico de conexión -->
+        <div class="loc-card" style="margin-bottom:10px">
+          <div class="row between wrap" style="align-items:center">
+            <div><b>Estado de conexión:</b> <span id="ref-conn-estado" class="muted">Comprobando…</span></div>
+            <button id="ref-conn-probar" class="btn" type="button">🔄 Probar conexión</button>
+          </div>
+          <p id="ref-conn-detalle" class="hint" style="margin:6px 0 0"></p>
+        </div>
+
+        <!-- Respaldo -->
+        <div class="row gap wrap">
+          <button id="ref-backup-exportar" class="btn btn-primary">⬇️ Exportar respaldo (archivo)</button>
+          <button id="ref-backup-importar-btn" class="btn">⬆️ Importar respaldo</button>
+          <input id="ref-backup-importar-file" type="file" accept="application/json,.json" hidden />
+        </div>
+        <p id="ref-backup-status" class="hint"></p>
+      </div>
     </section>
 
     <!-- ================= USUARIOS ================= -->
