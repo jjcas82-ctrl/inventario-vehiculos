@@ -849,8 +849,23 @@ function renderFinal() {
   const el = document.getElementById("ref-final-resumen");
   if (!el) return;
   const r = resumenFinal();
+  // Aviso si FALTAN precios: el valor del inventario quedaría incompleto/en $0.
+  // Suele pasar cuando se cargó el archivo de TEXTO PLANO (sin precio) en vez del
+  // CSV que trae la columna "Precio U.".
+  const sinPrecio = r.totalPartes - r.partesConPrecio;
+  let aviso = "";
+  if (r.totalPartes > 0 && r.partesConPrecio === 0) {
+    aviso = `<div class="stat stat-wide" style="background:#fef2f2;border-color:#fecaca">
+      <b style="color:var(--danger)">⚠️ Sin precios cargados</b>
+      <span>El valor del inventario sale en $0. Carga el <b>CSV de existencias con la columna "Precio U."</b> para calcular los montos.</span></div>`;
+  } else if (sinPrecio > 0) {
+    aviso = `<div class="stat stat-wide" style="background:#fffbeb;border-color:#fde68a">
+      <b style="color:#b45309">Valor parcial</b>
+      <span>${sinPrecio} de ${r.totalPartes} partes <b>sin precio</b>: el valor mostrado solo cubre ${r.partesConPrecio} partes.</span></div>`;
+  }
   el.innerHTML = `
-    <div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>
+    ${aviso}
+    <div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario${r.partesConPrecio < r.totalPartes ? " (parcial)" : ""}</span></div>
     <div class="stat"><b style="color:var(--danger)">${money(r.valorDiferencia)}</b><span>Monto de la diferencia</span></div>
     <div class="stat"><b style="color:var(--danger)">${r.faltantes}</b><span>Faltantes</span></div>
     <div class="stat"><b style="color:#b45309">${r.sobrantes}</b><span>Sobrantes</span></div>

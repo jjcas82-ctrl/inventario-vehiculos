@@ -32,7 +32,7 @@ async function labelHtml(vehicle) {
   const extra = [vehicle.color, vehicle.plate].filter(Boolean).join(" · ");
   return `
     <div class="label">
-      <div class="brand">GRUPO AEROPLASA · INVENTARIO DE UNIDADES</div>
+      <div class="brand">GRUPO AEROPLASA · CONTROL DE INVENTARIOS</div>
       <img class="qr" src="${qrUrl}" alt="QR del VIN">
       ${barUrl ? `<img class="bar" src="${barUrl}" alt="Código de barras del VIN">` : ""}
       <div class="vin">${esc(vehicle.vin)}</div>

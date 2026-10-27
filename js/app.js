@@ -24,7 +24,7 @@ import { initCatalogAdmin } from "./catalogadmin.js";
 import { initCdoUpload } from "./cdoui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
-import { initSync, onSyncStatus, syncStatus } from "./sync.js";
+import { initSync, onSyncStatus, onSyncError, syncStatus } from "./sync.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
@@ -1656,6 +1656,9 @@ function setupConnectivity() {
   };
   // El estado de sincronización (cola de pendientes, sincronizando) actualiza el badge.
   onSyncStatus(update);
+  // Aviso cuando una operación NO se pudo sincronizar con el servidor (error de
+  // API): el usuario debe saber que el cambio quedó solo en este equipo.
+  onSyncError((msg) => notify(msg, { type: "warn", timeout: 9000 }));
   window.addEventListener("online", () => { update(); notify("Conexión restablecida.", { type: "success" }); });
   window.addEventListener("offline", () => { update(); notify("Sin conexión: seguirás trabajando localmente (GPS y registros funcionan).", { type: "warn", timeout: 5000 }); });
   update();

@@ -19,6 +19,7 @@ const LASTSYNC_KEY = "inv_sync_last";
 let _refresh = () => {};     // callback para refrescar la UI (refreshAll de app.js)
 let _syncing = false;
 let _onStatus = () => {};    // callback para avisar del estado (badge)
+let _onError = () => {};     // callback para avisar un error de sincronización (toast)
 
 // --- Cola de pendientes (operaciones que no se pudieron subir) ---
 function readQueue() {
@@ -55,6 +56,7 @@ export function syncStatus() {
   };
 }
 export function onSyncStatus(cb) { _onStatus = cb || (() => {}); }
+export function onSyncError(cb) { _onError = cb || (() => {}); }
 
 // ===================== PUSH (subir cambios) =====================
 // Las funciones push* las llama la UI tras mutar el storage. Intentan subir al
@@ -89,15 +91,31 @@ export async function pushAgencies() {
   await trySend({ type: "agencies", key: "all", data: ag }, () => api.saveAgencies(ag));
 }
 
+// Etiqueta legible de una operación, para los avisos al usuario.
+function opLabel(op) {
+  switch (op && op.type) {
+    case "vehicle":    return "la unidad " + (op.key || "");
+    case "event":      return "un movimiento";
+    case "stage":      return "la etapa de " + (op.key || "");
+    case "part":       return "la refacción " + (op.key || "");
+    case "partsBulk":  return `la carga de refacciones (${Array.isArray(op.data) ? op.data.length : "?"} partes)`;
+    case "partConteo": return "el conteo de " + (op.key || "");
+    case "agencies":   return "las agencias";
+    default:           return "un cambio";
+  }
+}
+
 // Intenta ejecutar una llamada; si el servidor está offline, encola la operación.
 async function trySend(op, fn) {
   if (!api.hasToken()) { enqueue(op); return; }   // sin sesión de servidor → pendiente
   try {
     await fn();
   } catch (e) {
-    if (e && e.offline) { enqueue(op); }           // sin conexión → pendiente
-    // Si es error de la API (400/500), NO encolamos en bucle: se descarta y se
-    // reintentará en el próximo pull/push manual. (Evita colas envenenadas.)
+    if (e && e.offline) { enqueue(op); return; }   // sin conexión → pendiente
+    // Error de la API (400/500): NO encolamos en bucle (evita colas envenenadas),
+    // pero AVISAMOS al usuario para que no crea que se guardó en el servidor.
+    const motivo = (e && e.message) ? e.message : "el servidor rechazó la operación";
+    try { _onError(`No se pudo sincronizar ${opLabel(op)} con el servidor: ${motivo}. El cambio quedó guardado solo en este equipo.`); } catch (e2) {}
   }
 }
 
@@ -200,10 +218,26 @@ function mergeParts(serverList) {
     }
   }
 }
+// ¿La fecha 'a' (servidor) es MÁS NUEVA que 'b' (local)?
+// Normaliza ambos formatos: el servidor MySQL usa "YYYY-MM-DD HH:MM:SS" (con
+// ESPACIO) y el local usa ISO "YYYY-MM-DDTHH:MM:SS.sssZ" (con 'T'). Comparar
+// como texto daba resultados erróneos (el espacio 0x20 < 'T' 0x54), así que el
+// registro del servidor "nunca ganaba" aunque fuera más reciente. Parseamos a
+// timestamp y comparamos numéricamente; si no se puede parsear, caemos a texto.
+function toTime(v) {
+  if (!v) return NaN;
+  let s = String(v).trim();
+  // MySQL "YYYY-MM-DD HH:MM:SS" → ISO "YYYY-MM-DDTHH:MM:SS" (asumimos misma zona).
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) s = s.replace(" ", "T");
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? NaN : t;
+}
 function isNewer(a, b) {
   if (!a) return false;
   if (!b) return true;
-  return String(a) > String(b);  // ISO 8601 compara bien lexicográficamente
+  const ta = toTime(a), tb = toTime(b);
+  if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta > tb;
+  return String(a) > String(b);   // fallback si algún formato no parsea
 }
 
 // ===================== ARRANQUE =====================

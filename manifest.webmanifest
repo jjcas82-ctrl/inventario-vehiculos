@@ -1,7 +1,7 @@
 {
-  "name": "Inventario de Unidades Grupo Aeroplasa",
+  "name": "Control de Inventarios Grupo Aeroplasa",
   "short_name": "Inv. Aeroplasa",
-  "description": "Inventario de unidades Grupo Aeroplasa: entradas, salidas, movimientos, VIN/QR y GPS.",
+  "description": "Control de inventarios Grupo Aeroplasa: unidades y refacciones. Entradas, salidas, movimientos, VIN/QR, GPS y conteo físico.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
