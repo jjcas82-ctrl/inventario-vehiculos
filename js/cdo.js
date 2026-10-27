@@ -53,24 +53,71 @@ export async function extractPdfPages(file, onProgress) {
     if (onProgress) onProgress(p, pdf.numPages);
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    const byLine = new Map();
-    for (const item of content.items) {
-      if (!item.str) continue;
-      const y = Math.round(item.transform[5]);
-      const x = item.transform[4];
-      if (!byLine.has(y)) byLine.set(y, []);
-      byLine.get(y).push({ x, s: item.str });
-    }
-    const ys = [...byLine.keys()].sort((a, b) => b - a);
-    const pageLines = [];
-    for (const y of ys) {
-      const parts = byLine.get(y).sort((a, b) => a.x - b.x);
-      const text = parts.map(pp => pp.s).join(" ").replace(/\s+/g, " ").trim();
-      if (text) { pageLines.push(text); lines.push(text); }
-    }
+    const pageLines = groupItemsIntoLines(content.items);
+    for (const text of pageLines) lines.push(text);
     pages.push(pageLines);
   }
   return { lines, pages };
+}
+
+// Agrupa los tokens de una página en LÍNEAS lógicas con TOLERANCIA VERTICAL.
+//
+// pdf.js entrega cada fragmento de texto con su posición (transform[5]=Y, [4]=X).
+// El método anterior agrupaba por Y redondeado al entero EXACTO: funcionaba para
+// tablas de baseline uniforme (CDO de vehículos), pero en reportes con filas muy
+// altas (p. ej. el PDF de MARBETES, con casillas de conteo) los campos de una
+// misma fila lógica caen en Y ligeramente distintos y la fila se fragmentaba
+// (el nº de parte quedaba en una "línea" y el marbete en otra) → el cruce daba 0.
+//
+// Aquí agrupamos por BANDAS: un token pertenece a la fila si su Y está dentro de
+// una tolerancia (≈ mitad de la altura del texto). Así una fila alta sigue siendo
+// UNA sola línea. Dentro de cada fila se ordena por X (izquierda→derecha).
+function groupItemsIntoLines(items) {
+  // Tokens con posición y una altura estimada (para calcular la tolerancia).
+  const toks = [];
+  for (const item of items) {
+    if (!item.str || !item.str.trim()) continue;
+    const y = item.transform[5];
+    const x = item.transform[4];
+    // Altura del glifo: item.height si viene; si no, |transform[3]| (escala vert).
+    const h = Math.abs(item.height || item.transform[3] || 10);
+    toks.push({ x, y, h, s: item.str });
+  }
+  if (!toks.length) return [];
+
+  // Tolerancia vertical: mitad de la altura mediana del texto (mínimo 2px). Dos
+  // tokens cuya diferencia de Y sea menor a esto se consideran de la misma fila.
+  const alturas = toks.map(t => t.h).sort((a, b) => a - b);
+  const hMed = alturas[Math.floor(alturas.length / 2)] || 10;
+  const tol = Math.max(2, hMed * 0.5);
+
+  // Ordenar de arriba a abajo (Y descendente: en PDF, mayor Y = más arriba).
+  toks.sort((a, b) => b.y - a.y);
+
+  // Agrupar en filas por cercanía de Y al "ancla" de la fila en curso.
+  const filas = [];
+  let actual = null;
+  for (const t of toks) {
+    if (actual && Math.abs(t.y - actual.anchorY) <= tol) {
+      actual.items.push(t);
+      // Promedia el ancla para que la banda siga el centro de la fila.
+      actual.anchorY = (actual.anchorY * (actual.items.length - 1) + t.y) / actual.items.length;
+    } else {
+      actual = { anchorY: t.y, items: [t] };
+      filas.push(actual);
+    }
+  }
+
+  // Cada fila → texto ordenado por X. Inserta espacio entre tokens; si el hueco
+  // horizontal es grande (columnas separadas), el join por espacio es suficiente
+  // para que las regex de parseo encuentren los campos juntos en un mismo renglón.
+  const out = [];
+  for (const f of filas) {
+    f.items.sort((a, b) => a.x - b.x);
+    const text = f.items.map(it => it.s).join(" ").replace(/\s+/g, " ").trim();
+    if (text) out.push(text);
+  }
+  return out;
 }
 
 const VIN_RE = /\b[A-HJ-NPR-Z0-9]{17}\b/;          // VIN completo en una línea
