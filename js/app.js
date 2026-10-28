@@ -124,6 +124,13 @@ async function submitLoginScreen(e) {
   renderUsers();
   notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
   resetInactivityTimer();              // arranca el control de inactividad
+  // Avisa si la sesión quedó en MODO LOCAL (sin token de servidor): los datos NO
+  // se compartirán con otros equipos. Pasa con la cuenta de emergencia o si el
+  // servidor no respondió al entrar.
+  if (navigator.onLine && !syncStatus().authed) {
+    notify("⚠️ Entraste en MODO LOCAL (sin servidor). Lo que registres no se sube ni se ve en otros equipos. Si no es intencional, cierra sesión y entra con tu usuario del servidor.",
+      { type: "warn", timeout: 11000 });
+  }
   if (auth.mustChangePassword()) await forzarCambioPassword();
   // Avisa de auditorías programadas próximas o vencidas (a todos los usuarios).
   try { checkAuditReminders(); } catch (e) {}
@@ -1636,6 +1643,14 @@ function setupConnectivity() {
       badge.textContent = s.pending ? `⚠️ Sin conexión · ${s.pending} pend.` : "⚠️ Sin conexión";
       badge.style.background = "#b45309";
       badge.title = "Trabajando sin internet — los registros se guardan localmente y se sincronizarán al reconectar.";
+      return;
+    }
+    // Hay internet pero NO hay sesión de servidor (token): se trabaja en MODO LOCAL
+    // y los datos NO se comparten con otros equipos. Hay que avisarlo claramente.
+    if (!s.authed) {
+      badge.textContent = s.pending ? `⚠️ Modo local · ${s.pending} sin subir` : "⚠️ Modo local";
+      badge.style.background = "#b45309";
+      badge.title = "Iniciaste sesión en modo local o de emergencia. Lo que registres NO se sube al servidor ni se ve en otros equipos. Cierra sesión y entra con tu usuario del servidor para sincronizar.";
       return;
     }
     if (s.syncing) {
