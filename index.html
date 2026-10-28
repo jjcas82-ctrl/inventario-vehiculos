@@ -390,6 +390,17 @@
 
     <!-- ================= AGENCIAS ================= -->
     <section id="tab-settings" class="tab-panel" role="tabpanel">
+      <!-- Diagnóstico de conexión con el servidor (para saber si sincroniza o va en modo local) -->
+      <div class="card">
+        <h2>🔌 Conexión con el servidor</h2>
+        <p class="hint">Comprueba si la app está <b>conectada al servidor</b> (sincroniza entre equipos) o trabajando en <b>modo local</b> (datos solo en este equipo).</p>
+        <div class="row between wrap" style="align-items:center">
+          <div><b>Estado:</b> <span id="conn-estado" class="muted">Comprobando…</span></div>
+          <button id="conn-probar" class="btn btn-primary" type="button">🔄 Probar conexión</button>
+        </div>
+        <p id="conn-detalle" class="hint" style="margin:8px 0 0"></p>
+      </div>
+
       <div class="card">
         <h2>Agencias y ubicaciones</h2>
         <p class="hint">Define las agencias y sus ubicaciones internas. Usa "Usar mi ubicación actual" para fijar el centro GPS de la agencia.</p>

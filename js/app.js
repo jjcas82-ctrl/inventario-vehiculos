@@ -25,6 +25,7 @@ import { initCdoUpload } from "./cdoui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
 import { initSync, onSyncStatus, onSyncError, syncStatus } from "./sync.js";
+import { ping as apiPing, me as apiMe, hasToken as apiHasToken, apiBase } from "./api.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
@@ -1679,6 +1680,61 @@ function setupConnectivity() {
   update();
 }
 
+// ---------- Diagnóstico de conexión con el servidor (pestaña Agencias) ----------
+// Dice claramente si la app sincroniza con el servidor o va en modo local, y por
+// qué. Pensado para verificar en el sitio cuándo el servidor vuelve a estar bien.
+function setupServerDiagnostic() {
+  const btn = document.getElementById("conn-probar");
+  const estadoEl = document.getElementById("conn-estado");
+  const detalleEl = document.getElementById("conn-detalle");
+  if (!btn || !estadoEl) return;
+
+  const set = (txt, color, det) => {
+    estadoEl.textContent = txt;
+    estadoEl.style.color = color;
+    estadoEl.style.fontWeight = "700";
+    if (detalleEl) detalleEl.textContent = det || "";
+  };
+
+  async function probar() {
+    set("Comprobando…", "var(--muted)", "");
+    if (!navigator.onLine) {
+      set("⚠️ Sin internet (modo local)", "#b45309",
+        "Este dispositivo no tiene conexión. Los registros se guardan localmente y se subirán al reconectar.");
+      return;
+    }
+    if (!apiHasToken()) {
+      set("⚠️ Modo local (sin sesión de servidor)", "#b45309",
+        "Entraste en modo local o de emergencia. Lo que registres NO se sube al servidor ni se ve en otros equipos. Cierra sesión y entra con tu usuario del servidor.");
+      return;
+    }
+    try {
+      const ok = await apiPing();
+      if (!ok) {
+        set("⚠️ El servidor no responde (modo local)", "#b45309",
+          `Hay internet pero el servidor (${apiBase()}) no contesta. Revisa que el Synology esté encendido y accesible desde internet (DDNS y redireccionamiento del puerto 443 en el módem). Mientras tanto se trabaja localmente y se sincroniza al volver.`);
+        return;
+      }
+      await apiMe();   // valida el token contra el servidor
+      set("✅ Conectado al servidor", "#059669",
+        `Sesión válida. Los cambios se sincronizan entre equipos (${apiBase()}).`);
+    } catch (e) {
+      if (e && e.status === 401) {
+        set("⚠️ Sesión expirada (modo local)", "#b45309",
+          "El servidor respondió pero tu sesión caducó. Cierra sesión y vuelve a entrar.");
+      } else {
+        set("⚠️ El servidor no está disponible (modo local)", "#b45309",
+          `No se pudo confirmar la conexión con el servidor (${apiBase()}). Revisa el Synology / DDNS / puerto 443. Se trabaja localmente por ahora.`);
+      }
+    }
+  }
+
+  btn.addEventListener("click", probar);
+  // Al abrir la pestaña Agencias, comprobar automáticamente (sin bloquear).
+  const tabBtn = document.querySelector('[data-tab="settings"]');
+  if (tabBtn) tabBtn.addEventListener("click", () => { setTimeout(probar, 50); });
+}
+
 // ---------- Service Worker ----------
 function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -1777,6 +1833,7 @@ function main() {
   setupDataButtons();
   setupInstall();
   setupConnectivity();
+  setupServerDiagnostic();
   setupServiceWorker();
 
   // Sincronización con el servidor (pull inicial + cola de pendientes + reintento
