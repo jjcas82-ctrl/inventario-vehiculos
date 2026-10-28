@@ -34,8 +34,9 @@ async function loadPdfjs() {
 
 // Extrae TODO el texto del PDF, línea por línea, respetando el orden de lectura.
 // onProgress(pageActual, totalPaginas) para feedback con archivos grandes.
-export async function extractPdfLines(file, onProgress) {
-  const { lines } = await extractPdfPages(file, onProgress);
+export async function extractPdfLines(file, onProgress, opts = {}) {
+  // Marbetes usa tolerancia AMPLIA por defecto (filas altas con casillas).
+  const { lines } = await extractPdfPages(file, onProgress, { tolMode: "ancha", ...opts });
   return lines;
 }
 
@@ -43,7 +44,10 @@ export async function extractPdfLines(file, onProgress) {
 // clave para CDO de varias hojas: cada página tiene su propio bloque de columnas,
 // así que hay que parsear página por página (si se concatenan todas, el método
 // por columnas solo "ve" el primer bloque y pierde las demás hojas).
-export async function extractPdfPages(file, onProgress) {
+export async function extractPdfPages(file, onProgress, opts = {}) {
+  // tolMode: "estricta" (CDO de vehículos, baseline uniforme → Y casi exacto)
+  //          "ancha"    (marbetes, filas altas → banda amplia). Default estricta.
+  const tolMode = opts.tolMode || "estricta";
   const pdfjs = await loadPdfjs();
   const buf = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: buf }).promise;
@@ -53,7 +57,7 @@ export async function extractPdfPages(file, onProgress) {
     if (onProgress) onProgress(p, pdf.numPages);
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    const pageLines = groupItemsIntoLines(content.items);
+    const pageLines = groupItemsIntoLines(content.items, { tolMode });
     for (const text of pageLines) lines.push(text);
     pages.push(pageLines);
   }
@@ -72,7 +76,8 @@ export async function extractPdfPages(file, onProgress) {
 // Aquí agrupamos por BANDAS: un token pertenece a la fila si su Y está dentro de
 // una tolerancia (≈ mitad de la altura del texto). Así una fila alta sigue siendo
 // UNA sola línea. Dentro de cada fila se ordena por X (izquierda→derecha).
-function groupItemsIntoLines(items) {
+function groupItemsIntoLines(items, opts = {}) {
+  const tolMode = opts.tolMode || "estricta";
   // Tokens con posición y una altura estimada (para calcular la tolerancia).
   const toks = [];
   for (const item of items) {
@@ -85,11 +90,14 @@ function groupItemsIntoLines(items) {
   }
   if (!toks.length) return [];
 
-  // Tolerancia vertical: mitad de la altura mediana del texto (mínimo 2px). Dos
-  // tokens cuya diferencia de Y sea menor a esto se consideran de la misma fila.
+  // Tolerancia vertical según el modo:
+  //   - "estricta" (CDO): banda muy pequeña (≈Y exacto). Evita fusionar/partir la
+  //     descripción del vehículo con filas o columnas vecinas (bug "Modelo: a").
+  //   - "ancha" (marbetes): media altura, para reunir filas altas con casillas.
   const alturas = toks.map(t => t.h).sort((a, b) => a - b);
   const hMed = alturas[Math.floor(alturas.length / 2)] || 10;
-  const tol = Math.max(2, hMed * 0.5);
+  const factor = tolMode === "ancha" ? 0.5 : 0.15;
+  const tol = Math.max(tolMode === "ancha" ? 2 : 1, hMed * factor);
 
   // Ordenar de arriba a abajo (Y descendente: en PDF, mayor Y = más arriba).
   toks.sort((a, b) => b.y - a.y);
@@ -229,11 +237,16 @@ function parseDescription(desc) {
   const mk = MARCAS.find(m => up.includes(m));
   if (mk) {
     make = mk.charAt(0) + mk.slice(1).toLowerCase(); // Chevrolet
-    // Lo que sigue a la marca: primer token = modelo; el resto = versión.
+    // Lo que sigue a la marca: primer token "válido" = modelo; el resto = versión.
     const after = desc.slice(up.indexOf(mk) + mk.length).trim();
-    const tokens = after.split(/\s+/);
-    model = tokens.shift() || "";
-    version = tokens.join(" ").replace(/\s+/g, " ").trim();
+    const tokens = after.split(/\s+/).filter(Boolean);
+    // El modelo debe ser un token "real" (≥2 caracteres alfanuméricos). Evita que
+    // un fragmento basura de 1 letra ("a") quede como modelo cuando la línea viene
+    // cortada; en ese caso tomamos el primer token con ≥2 chars como modelo.
+    let idx = tokens.findIndex(t => t.replace(/[^A-Za-z0-9]/g, "").length >= 2);
+    if (idx < 0) idx = 0;
+    model = tokens[idx] || "";
+    version = tokens.slice(idx + 1).join(" ").replace(/\s+/g, " ").trim();
   } else {
     // Sin marca reconocida: dejamos todo como versión para no perder el dato.
     version = desc.replace(/^UN\s+(VEHICULO|CAMION)\s*/i, "").trim();
@@ -353,7 +366,30 @@ export function parseCdoLines(lines) {
       windowLines.push(l);
 
       if (!unit.model && DESC_RE.test(l)) {
-        const { make, model, version, vehType, descripcion } = parseDescription(l);
+        // La descripción puede venir PARTIDA en 2 renglones por cómo pdf.js
+        // separa el texto. Concatenamos la(s) línea(s) siguiente(s) que sean
+        // continuación (NO otro VIN, NO línea de precios, NO fecha, NO color
+        // solo-mayúsculas corto): así parseDescription recibe la descripción
+        // completa y el modelo no queda truncado a una letra.
+        let descFull = l;
+        let k = j + 1;
+        while (k < windowEnd && k < lines.length) {
+          const cont = lines[k] || "";
+          if (!cont.trim()) break;
+          if (findVinAt(lines, k)) break;
+          if (DESC_RE.test(cont)) break;
+          if (PRECIO_LINE_RE.test(cont)) break;
+          if (FECHA_RE.test(cont)) break;
+          if (NUMMOV_RE.test(cont)) break;
+          // Un color/aduana suele ser solo mayúsculas corto; si es continuación
+          // de descripción normalmente trae minúsculas o paréntesis/puntuación.
+          if (/^[A-ZÁÉÍÓÚÑ ]{3,30}$/.test(cont) && !/[a-z]/.test(cont)) break;
+          descFull += " " + cont;
+          k++;
+          // Límite de seguridad: no más de 2 líneas de continuación.
+          if (k - (j + 1) >= 2) break;
+        }
+        const { make, model, version, vehType, descripcion } = parseDescription(descFull);
         unit.make = make; unit.model = model; unit.version = version;
         unit.vehType = vehType; unit.descripcion = descripcion;
         unit.raw.push(l);

@@ -213,6 +213,11 @@ async function cacheServerUser(serverUser, plainPassword) {
   if (serverUser.id != null) patch.serverId = Number(serverUser.id);
   if (typeof serverUser.accessParts === "boolean") patch.accessParts = serverUser.accessParts;
   if (typeof serverUser.canEdit === "boolean") patch.canEdit = serverUser.canEdit;
+  // El servidor YA validó la credencial real, así que el flag de "cambia tu
+  // contraseña inicial" (sembrado localmente con el seed jcabrera/1234) ya no
+  // aplica para un login de servidor. Si no se limpiara, cada equipo lo pediría
+  // en bucle aunque la contraseña ya se haya cambiado en el servidor.
+  patch.mustChangePassword = false;
 
   // Buscar por username (la clave estable entre servidor y local).
   const existing = store.listUsers().find(x => (x.username || "").toLowerCase() === String(serverUser.username).toLowerCase());
