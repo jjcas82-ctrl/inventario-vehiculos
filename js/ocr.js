@@ -489,6 +489,52 @@ export function setCloudOcrKey(k) {
 }
 export function hasCloudOcr() { return !!getCloudOcrKey(); }
 
+// ---- Contador mensual de consultas al OCR en la nube ----
+// El plan gratuito de OCR.space permite 25,000 consultas al MES (se reinicia
+// cada mes). Llevamos un contador local por mes para AVISAR cuando se acerque al
+// límite (quedan ~2000). Nota: el contador es por equipo/navegador; si usas la
+// misma key en varios equipos, el consumo real total puede ser mayor que lo que
+// ve un solo equipo. Por eso el aviso es preventivo (margen de 2000).
+const OCR_MENSUAL_LIMITE = 25000;      // cuota del plan gratuito
+const OCR_AVISO_RESTANTES = 2000;      // avisar cuando queden estas o menos
+const OCR_COUNT_KEY = "inv_ocrspace_uso"; // { "YYYY-MM": n }
+
+function mesActual() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function leerUso() {
+  try { return JSON.parse(localStorage.getItem(OCR_COUNT_KEY) || "{}"); } catch (e) { return {}; }
+}
+// Consultas usadas este mes (según el contador local).
+export function getCloudOcrUsage() {
+  const uso = leerUso();
+  return Number(uso[mesActual()] || 0);
+}
+export function getCloudOcrRemaining() {
+  return Math.max(0, OCR_MENSUAL_LIMITE - getCloudOcrUsage());
+}
+export const OCR_LIMITE = OCR_MENSUAL_LIMITE;
+export const OCR_AVISO = OCR_AVISO_RESTANTES;
+
+// Registra UNA consulta y devuelve el estado para que la UI avise si procede.
+// Devuelve { usado, restante, avisar } (avisar=true al cruzar el umbral o agotarse).
+function registrarConsultaOcr() {
+  const uso = leerUso();
+  const mes = mesActual();
+  const antes = Number(uso[mes] || 0);
+  const ahora = antes + 1;
+  // Limpia meses viejos para no acumular basura.
+  const limpio = { [mes]: ahora };
+  try { localStorage.setItem(OCR_COUNT_KEY, JSON.stringify(limpio)); } catch (e) {}
+  const restanteAntes = OCR_MENSUAL_LIMITE - antes;
+  const restanteAhora = OCR_MENSUAL_LIMITE - ahora;
+  // Avisar SOLO al cruzar el umbral (no en cada consulta): cuando antes estaba
+  // por encima del umbral y ahora quedó en el umbral o por debajo.
+  const avisar = restanteAntes > OCR_AVISO_RESTANTES && restanteAhora <= OCR_AVISO_RESTANTES;
+  return { usado: ahora, restante: Math.max(0, restanteAhora), avisar };
+}
+
 // Captura la franja central del video y devuelve un Blob JPEG (para enviar a la nube).
 function grabStripBlob(video, heightFactor = 0.22, cy = 0.50) {
   return new Promise((resolve) => {
@@ -546,11 +592,15 @@ export async function readVinCloud(video, { onProgress } = {}) {
   const { vin, best } = bestVinCandidate(clean);
   onProgress && onProgress("Lectura recibida.");
 
+  // La consulta al OCR se consumió (hubo respuesta sin error): la contamos para
+  // el aviso de cuota. `uso` lo lee la UI para avisar al acercarse al límite.
+  const uso = registrarConsultaOcr();
+
   if (vin) {
     const fixed = fixCommonOcr(vin);
     let verified = (computeCheckDigit(fixed) === fixed[8]) ? fixed : resolveByCheckDigit(fixed);
-    if (verified) return { vin: verified, verified: true, raw: best };
-    return { vin: fixed, verified: false, raw: best };
+    if (verified) return { vin: verified, verified: true, raw: best, uso };
+    return { vin: fixed, verified: false, raw: best, uso };
   }
-  return { vin: null, verified: false, raw: best || clean };
+  return { vin: null, verified: false, raw: best || clean, uso };
 }

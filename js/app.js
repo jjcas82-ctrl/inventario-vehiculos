@@ -2,7 +2,8 @@
 // eventos, respaldo de datos e instalación PWA.
 import { decodeVin, normalizeVin } from "./vin.js";
 import { Scanner } from "./scanner.js";
-import { readVinFromVideo, readVinCloud, getCloudOcrKey, setCloudOcrKey, hasCloudOcr } from "./ocr.js";
+import { readVinFromVideo, readVinCloud, getCloudOcrKey, setCloudOcrKey, hasCloudOcr,
+  getCloudOcrUsage, getCloudOcrRemaining, OCR_LIMITE } from "./ocr.js";
 import { enrichVin } from "./vinapi.js";
 import { store } from "./storage.js";
 import { registerEvent } from "./events.js";
@@ -983,9 +984,12 @@ function setupScanner() {
     cloudBtn.disabled = true;
     cloudBtn.textContent = "Enviando…";
     try {
-      const { vin, verified, raw, error } = await readVinCloud(video, {
+      const { vin, verified, raw, error, uso } = await readVinCloud(video, {
         onProgress: (m) => setStatus(m, "muted"),
       });
+      // Aviso de cuota del OCR: al cruzar el umbral (quedan ~2000), explicar cómo
+      // generar una nueva API key gratis. Solo salta una vez (al cruzar).
+      if (uso && uso.avisar) avisarCuotaOcr(uso.restante);
       if (error) {
         setStatus("OCR en la nube: " + error + " Usa el lector local o la captura manual.", "error");
       } else if (verified && vin) {
@@ -1031,11 +1035,21 @@ function setupScanner() {
 
   // ---- Configuración de la API key del OCR en la nube (pestaña Datos) ----
   const keyInput = document.getElementById("cloud-ocr-key");
+  // (avisarCuotaOcr se define a nivel de módulo, abajo)
+
   const keyStatus = document.getElementById("cloud-ocr-status");
   const refreshKeyStatus = () => {
     if (!keyStatus) return;
-    keyStatus.textContent = hasCloudOcr() ? "✓ OCR en la nube configurado y activo." : "No configurado (se usa el lector local).";
-    keyStatus.style.color = hasCloudOcr() ? "var(--primary)" : "var(--muted)";
+    if (hasCloudOcr()) {
+      const usado = getCloudOcrUsage();
+      const restante = getCloudOcrRemaining();
+      const bajo = restante <= 2000;
+      keyStatus.textContent = `✓ OCR en la nube activo. Consultas este mes: ${usado.toLocaleString("es-MX")} de ${OCR_LIMITE.toLocaleString("es-MX")} · quedan ${restante.toLocaleString("es-MX")}${bajo ? " ⚠️ (genera una nueva key pronto)" : ""}.`;
+      keyStatus.style.color = bajo ? "var(--danger)" : "var(--primary)";
+    } else {
+      keyStatus.textContent = "No configurado (se usa el lector local).";
+      keyStatus.style.color = "var(--muted)";
+    }
   };
   if (keyInput) keyInput.value = getCloudOcrKey();
   refreshKeyStatus();
@@ -1678,6 +1692,78 @@ function setupConnectivity() {
   window.addEventListener("online", () => { update(); notify("Conexión restablecida.", { type: "success" }); });
   window.addEventListener("offline", () => { update(); notify("Sin conexión: seguirás trabajando localmente (GPS y registros funcionan).", { type: "warn", timeout: 5000 }); });
   update();
+
+  // El badge es TOCABLE para TODOS los roles: al tocarlo prueba la conexión y
+  // muestra el resultado (así un operador que no ve la pestaña Agencias puede
+  // reintentar/diagnosticar sin permisos especiales).
+  if (badge) {
+    badge.style.cursor = "pointer";
+    badge.title = (badge.title || "") + " — Toca para probar la conexión.";
+    badge.addEventListener("click", async () => {
+      const r = await diagnosticarConexion();
+      update();
+      notify(`${r.estado}. ${r.detalle}`, {
+        type: r.ok ? "success" : "warn",
+        timeout: r.ok ? 5000 : 10000,
+      });
+    });
+  }
+}
+
+// Prueba el estado de conexión con el servidor y devuelve { ok, estado, detalle }.
+// Reutilizable por el badge superior (todos los roles) y la pestaña Agencias.
+async function diagnosticarConexion() {
+  if (!navigator.onLine) {
+    return { ok: false, estado: "⚠️ Sin internet (modo local)",
+      detalle: "Este dispositivo no tiene conexión. Los registros se guardan localmente y se subirán al reconectar." };
+  }
+  if (!apiHasToken()) {
+    return { ok: false, estado: "⚠️ Modo local (sin sesión de servidor)",
+      detalle: "Entraste en modo local o de emergencia. Lo que registres NO se sube al servidor ni se ve en otros equipos. Cierra sesión y entra con tu usuario del servidor." };
+  }
+  try {
+    const ok = await apiPing();
+    if (!ok) {
+      return { ok: false, estado: "⚠️ El servidor no responde (modo local)",
+        detalle: `Hay internet pero el servidor (${apiBase()}) no contesta. Revisa que el Synology esté encendido y accesible (DDNS y puerto 443). Mientras tanto se trabaja localmente y se sincroniza al volver.` };
+    }
+    await apiMe();   // valida el token contra el servidor
+    return { ok: true, estado: "✅ Conectado al servidor",
+      detalle: "Sesión válida. Los cambios se sincronizan entre equipos." };
+  } catch (e) {
+    if (e && e.status === 401) {
+      return { ok: false, estado: "⚠️ Sesión expirada (modo local)",
+        detalle: "El servidor respondió pero tu sesión caducó. Cierra sesión y vuelve a entrar." };
+    }
+    return { ok: false, estado: "⚠️ El servidor no está disponible (modo local)",
+      detalle: `No se pudo confirmar la conexión con el servidor (${apiBase()}). Se trabaja localmente por ahora.` };
+  }
+}
+
+// Aviso de CUOTA del OCR en la nube: cuando quedan ~2000 consultas del plan
+// gratuito (25,000/mes). Explica cómo generar una nueva API key y lleva a la
+// pantalla para pegarla. Se dispara una sola vez (al cruzar el umbral).
+async function avisarCuotaOcr(restante) {
+  const choice = await confirmDialog({
+    icon: "⚠️", title: "OCR en la nube: cuota casi agotada",
+    message: `Quedan aproximadamente ${restante} lecturas del OCR en la nube este mes ` +
+      `(el plan gratuito da ${OCR_LIMITE.toLocaleString("es-MX")} al mes y se reinicia el día 1).\n\n` +
+      `Cuando se agote, el lector QR/código de barras y la captura manual siguen funcionando normal.\n\n` +
+      `Para no quedarte sin OCR puedes generar GRATIS una nueva API key:\n` +
+      `1) Entra a ocr.space/ocrapi y regístrate con otro correo.\n` +
+      `2) Copia la nueva API key que te envían.\n` +
+      `3) Pégala en Agencias → “OCR en la nube” → Guardar.`,
+    buttons: [
+      { label: "Ir a configurar la key", value: "go", variant: "primary" },
+      { label: "Más tarde", value: null, variant: "ghost" },
+    ],
+  });
+  if (choice === "go") {
+    const tab = document.querySelector('[data-tab="settings"]');
+    if (tab) tab.click();
+    const ki = document.getElementById("cloud-ocr-key");
+    if (ki) { ki.focus(); ki.scrollIntoView({ behavior: "smooth", block: "center" }); }
+  }
 }
 
 // ---------- Diagnóstico de conexión con el servidor (pestaña Agencias) ----------
@@ -1698,35 +1784,8 @@ function setupServerDiagnostic() {
 
   async function probar() {
     set("Comprobando…", "var(--muted)", "");
-    if (!navigator.onLine) {
-      set("⚠️ Sin internet (modo local)", "#b45309",
-        "Este dispositivo no tiene conexión. Los registros se guardan localmente y se subirán al reconectar.");
-      return;
-    }
-    if (!apiHasToken()) {
-      set("⚠️ Modo local (sin sesión de servidor)", "#b45309",
-        "Entraste en modo local o de emergencia. Lo que registres NO se sube al servidor ni se ve en otros equipos. Cierra sesión y entra con tu usuario del servidor.");
-      return;
-    }
-    try {
-      const ok = await apiPing();
-      if (!ok) {
-        set("⚠️ El servidor no responde (modo local)", "#b45309",
-          `Hay internet pero el servidor (${apiBase()}) no contesta. Revisa que el Synology esté encendido y accesible desde internet (DDNS y redireccionamiento del puerto 443 en el módem). Mientras tanto se trabaja localmente y se sincroniza al volver.`);
-        return;
-      }
-      await apiMe();   // valida el token contra el servidor
-      set("✅ Conectado al servidor", "#059669",
-        `Sesión válida. Los cambios se sincronizan entre equipos (${apiBase()}).`);
-    } catch (e) {
-      if (e && e.status === 401) {
-        set("⚠️ Sesión expirada (modo local)", "#b45309",
-          "El servidor respondió pero tu sesión caducó. Cierra sesión y vuelve a entrar.");
-      } else {
-        set("⚠️ El servidor no está disponible (modo local)", "#b45309",
-          `No se pudo confirmar la conexión con el servidor (${apiBase()}). Revisa el Synology / DDNS / puerto 443. Se trabaja localmente por ahora.`);
-      }
-    }
+    const r = await diagnosticarConexion();
+    set(r.estado, r.ok ? "#059669" : "#b45309", r.detalle);
   }
 
   btn.addEventListener("click", probar);
