@@ -1887,13 +1887,20 @@ function setupServerDiagnostic() {
         const svUsu = Array.isArray(su) ? su.length : "?";
         const alerta = (svVeh !== "?" && svVeh !== locVeh);
         diagRes.style.color = alerta ? "#b45309" : "#059669";
+        let veredicto;
+        if (svVeh === "?") {
+          veredicto = "⚠️ El servidor no devolvió la lista de vehículos (revisa permisos/backend).";
+        } else if (svVeh === locVeh) {
+          veredicto = "✅ Coinciden: este equipo está sincronizado con el servidor.";
+        } else if (svVeh > locVeh) {
+          veredicto = "⚠️ El servidor tiene MÁS: faltan por bajar aquí. Toca 'Probar conexión' o espera la sincronización.";
+        } else {
+          veredicto = "⚠️ El servidor tiene MENOS: lo registrado aquí NO subió al servidor (revisa avisos de sincronización).";
+        }
         diagRes.innerHTML =
           `Vehículos → <b>este equipo: ${locVeh}</b> · <b>servidor: ${svVeh}</b><br>` +
           `Usuarios → <b>este equipo: ${locUsu}</b> · <b>servidor: ${svUsu}</b><br>` +
-          (svVeh === "?" ? "⚠️ El servidor no devolvió la lista de vehículos (revisa permisos/backend)." :
-            (svVeh === locVeh ? "✅ Coinciden: este equipo está sincronizado con el servidor." :
-              (svVeh > locVeh ? "⚠️ El servidor tiene MÁS: faltan por bajar aquí. Toca 'Probar conexión' o espera la sincronización." :
-                "⚠️ El servidor tiene MENOS: lo registrado aquí NO subió al servidor (revisa avisos de sincronización)."));
+          veredicto;
       } catch (e) {
         diagRes.style.color = "#b45309";
         diagRes.textContent = "⚠️ No se pudo consultar al servidor: " + (e && e.message ? e.message : "error") + ".";
