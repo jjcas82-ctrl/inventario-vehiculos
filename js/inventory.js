@@ -3,9 +3,9 @@ import { store } from "./storage.js";
 import { escapeHtml } from "./agencies.js";
 import { EVENT_LABELS } from "./events.js";
 import * as auth from "./auth.js";
-import { notify, confirmDialog } from "./ui.js";
+import { notify, confirmDialog, promptDialog } from "./ui.js";
 import { decodeVin } from "./vin.js";
-import { pushVehicle as syncPushVehicle } from "./sync.js";
+import { pushVehicle as syncPushVehicle, pushDeleteVehicle } from "./sync.js";
 import { stagesFor, isClosed } from "./stages.js";
 import { logAction } from "./syslog.js";
 import { makeVinQrDataUrl, printVinLabel } from "./label.js";
@@ -511,6 +511,11 @@ export function openVehicle(vin) {
       <ul>${v.stageHistory.slice().reverse().map(h =>
         `<li><b>${escapeHtml(h.stage)}</b>${h.from ? ` <span class="muted">(desde ${escapeHtml(h.from)})</span>` : ""}<br>
          <span class="muted">${new Date(h.at).toLocaleString()} · 👤 ${escapeHtml(h.by || "—")}</span></li>`).join("")}</ul>` : ""}
+    ${auth.isAdmin() ? `
+      <hr />
+      <h3 style="color:var(--danger)">Zona de peligro</h3>
+      <p class="hint">Eliminar la unidad borra su ficha y <b>todo su historial de movimientos</b>, en este equipo y en el servidor. No se puede deshacer. Solo el administrador puede hacerlo.</p>
+      <button id="del-veh" class="btn btn-danger">🗑️ Eliminar unidad del inventario</button>` : ""}
   `;
 
   // Al cambiar la condición, actualizar las opciones de etapa (nuevo/usado difieren).
@@ -635,6 +640,44 @@ export function openVehicle(vin) {
     renderInventory();
     onChange();
     notify("VIN actualizado correctamente.", { type: "success" });
+  });
+
+  // Eliminar unidad (SOLO admin). Doble confirmación por ser irreversible.
+  const delVehBtn = body.querySelector("#del-veh");
+  if (delVehBtn) delVehBtn.addEventListener("click", async () => {
+    if (!auth.isAdmin()) { notify("Solo el administrador puede eliminar unidades.", { type: "warn" }); return; }
+    const nEventos = store.eventsForVin(vin).length;
+    // 1ª confirmación.
+    const c1 = await confirmDialog({
+      icon: "🗑️", title: "Eliminar unidad",
+      message: `Vas a eliminar la unidad:\n\n${vin}\n${[v.make, v.model, v.year].filter(Boolean).join(" ")}\n\n` +
+        `Se borrará su ficha y ${nEventos} evento(s) de historial, en este equipo y en el servidor. Esta acción NO se puede deshacer.`,
+      buttons: [
+        { label: "Cancelar", value: null, variant: "ghost" },
+        { label: "Continuar", value: "ok", variant: "danger" },
+      ],
+    });
+    if (c1 !== "ok") return;
+    // 2ª confirmación: escribir el VIN para evitar borrados accidentales.
+    const tecleado = await promptDialog({
+      icon: "⚠️", title: "Confirmar eliminación",
+      message: `Para confirmar, escribe el VIN completo de la unidad:\n\n${vin}`,
+      placeholder: "VIN de 17 caracteres", okLabel: "Eliminar definitivamente",
+    });
+    if (tecleado === null) return;
+    if ((tecleado || "").toUpperCase().trim() !== vin.toUpperCase()) {
+      notify("El VIN no coincide. No se eliminó la unidad.", { type: "warn" });
+      return;
+    }
+    const res = store.removeVehicle(vin);
+    if (!res.ok) { notify(res.error, { type: "error" }); return; }
+    logAction("vehicle.delete", `Unidad eliminada: ${vin} (${[v.make, v.model].filter(Boolean).join(" ")})`, auth.currentUser()?.name || "—", vin);
+    // Propaga el borrado al servidor (o encola si no hay red).
+    try { pushDeleteVehicle(vin); } catch (e) {}
+    closeModal();
+    renderInventory();
+    onChange();
+    notify("Unidad eliminada del inventario.", { type: "success", timeout: 6000 });
   });
 
   // Genera el QR del VIN dentro de la ficha (para verlo/escanearlo).

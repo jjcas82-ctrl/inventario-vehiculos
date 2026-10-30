@@ -68,6 +68,9 @@ export async function pushVehicle(vin) {
   if (!v) return;
   await trySend({ type: "vehicle", key: vin, data: v }, () => api.putVehicle(vin, v));
 }
+export async function pushDeleteVehicle(vin) {
+  await trySend({ type: "vehicleDelete", key: vin, data: { vin } }, () => api.deleteVehicle(vin));
+}
 export async function pushEvent(ev) {
   await trySend({ type: "event", data: ev }, () => api.postEvent(ev));
 }
@@ -95,6 +98,7 @@ export async function pushAgencies() {
 function opLabel(op) {
   switch (op && op.type) {
     case "vehicle":    return "la unidad " + (op.key || "");
+    case "vehicleDelete": return "el borrado de la unidad " + (op.key || "");
     case "event":      return "un movimiento";
     case "stage":      return "la etapa de " + (op.key || "");
     case "part":       return "la refacción " + (op.key || "");
@@ -123,6 +127,7 @@ async function trySend(op, fn) {
 async function runOp(op) {
   switch (op.type) {
     case "vehicle":    return api.putVehicle(op.data.vin, op.data);
+    case "vehicleDelete": return api.deleteVehicle(op.data.vin);
     case "event":      return api.postEvent(op.data);
     case "stage":      return api.setVehicleStage(op.data.vin, op.data.stage);
     case "part":       return api.putPart(op.data.numParte, op.data);
