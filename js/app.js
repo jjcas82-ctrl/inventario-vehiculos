@@ -26,7 +26,8 @@ import { initCdoUpload } from "./cdoui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
 import { initSync, onSyncStatus, onSyncError, syncStatus, pullAll } from "./sync.js";
-import { ping as apiPing, me as apiMe, hasToken as apiHasToken, apiBase } from "./api.js";
+import { ping as apiPing, me as apiMe, hasToken as apiHasToken, apiBase,
+  listVehicles as apiListVehicles, listUsers as apiListUsers } from "./api.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
 import { getAlerts, getThresholds, setThresholds } from "./alerts.js";
@@ -1864,6 +1865,41 @@ function setupServerDiagnostic() {
   // Al abrir la pestaña Agencias, comprobar automáticamente (sin bloquear).
   const tabBtn = document.querySelector('[data-tab="settings"]');
   if (tabBtn) tabBtn.addEventListener("click", () => { setTimeout(probar, 50); });
+
+  // Comparar datos LOCALES vs SERVIDOR: dice cuántos vehículos/usuarios hay en
+  // este equipo y cuántos tiene el servidor. Revela si el problema es que los
+  // datos NO subieron (servidor con menos) o NO bajan (local con menos).
+  const diagBtn = document.getElementById("conn-diag-datos");
+  const diagRes = document.getElementById("conn-diag-datos-res");
+  if (diagBtn && diagRes) {
+    diagBtn.addEventListener("click", async () => {
+      diagRes.style.color = "var(--muted)";
+      diagRes.textContent = "Consultando al servidor…";
+      if (!apiHasToken()) { diagRes.style.color = "#b45309"; diagRes.textContent = "⚠️ No hay sesión de servidor (modo local). No se puede comparar."; return; }
+      try {
+        const [sv, su] = await Promise.all([
+          apiListVehicles().catch(e => { throw e; }),
+          apiListUsers().catch(() => null),
+        ]);
+        const locVeh = store.listVehicles().length;
+        const locUsu = auth.listUsers().filter(u => u.username !== "emergencia").length;
+        const svVeh = Array.isArray(sv) ? sv.length : "?";
+        const svUsu = Array.isArray(su) ? su.length : "?";
+        const alerta = (svVeh !== "?" && svVeh !== locVeh);
+        diagRes.style.color = alerta ? "#b45309" : "#059669";
+        diagRes.innerHTML =
+          `Vehículos → <b>este equipo: ${locVeh}</b> · <b>servidor: ${svVeh}</b><br>` +
+          `Usuarios → <b>este equipo: ${locUsu}</b> · <b>servidor: ${svUsu}</b><br>` +
+          (svVeh === "?" ? "⚠️ El servidor no devolvió la lista de vehículos (revisa permisos/backend)." :
+            (svVeh === locVeh ? "✅ Coinciden: este equipo está sincronizado con el servidor." :
+              (svVeh > locVeh ? "⚠️ El servidor tiene MÁS: faltan por bajar aquí. Toca 'Probar conexión' o espera la sincronización." :
+                "⚠️ El servidor tiene MENOS: lo registrado aquí NO subió al servidor (revisa avisos de sincronización)."));
+      } catch (e) {
+        diagRes.style.color = "#b45309";
+        diagRes.textContent = "⚠️ No se pudo consultar al servidor: " + (e && e.message ? e.message : "error") + ".";
+      }
+    });
+  }
 }
 
 // ---------- Service Worker ----------
