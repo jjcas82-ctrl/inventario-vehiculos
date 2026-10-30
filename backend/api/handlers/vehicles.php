@@ -57,25 +57,65 @@ function handle_vehicles(array $user, string $method, array $parts): void {
     $exists->execute([$vin]);
     $mileage = (isset($b['mileage']) && $b['mileage'] !== '') ? (int)$b['mileage'] : null;
 
+    // Campos de ESTADO/ubicación. Se guardan también desde el PUT para que al
+    // sincronizar un vehículo (pushVehicle del frontend: CDO, ediciones, etc.)
+    // NO se pierda su estado (status, agencia, entradas/salidas). Antes el PUT
+    // solo guardaba la ficha y dejaba status/current_agency vacíos en el server,
+    // por lo que otros equipos lo bajaban "incompleto" y el dashboard lo contaba
+    // en 0. Si el body no trae un campo, usamos "" (o el existente en UPDATE).
+    $status  = (string)($b['status'] ?? '');
+    $cAgency = (string)($b['currentAgency'] ?? '');
+    $cArea   = (string)($b['currentArea'] ?? '');
+    $cLoc    = (string)($b['currentLocation'] ?? '');
+    $stage   = (string)($b['stage'] ?? '');
+    $entryAt = ($b['entryAt'] ?? null) ?: null;
+    $entryBy = (string)($b['entryBy'] ?? '');
+    $exitAt  = ($b['exitAt'] ?? null) ?: null;
+    $exitBy  = (string)($b['exitBy'] ?? '');
+    $lastBy  = (string)($b['lastBy'] ?? '');
+    $stageHistory = isset($b['stageHistory']) ? json_encode($b['stageHistory'], JSON_UNESCAPED_UNICODE) : null;
+
     if ($exists->fetch()) {
+      // En UPDATE, solo pisamos los campos de estado si el body los trae
+      // (COALESCE con NULLIF: si llega "", conserva el valor actual del server).
       db()->prepare(
         'UPDATE vehiculos SET make=?, model=?, year=?, color=?, engine_no=?, mileage=?, veh_type=?,
-         plate=?, country=?, condition_=?, notes=? WHERE vin=?')
+         plate=?, country=?, condition_=?, notes=?,
+         status=COALESCE(NULLIF(?,""), status),
+         current_agency=COALESCE(NULLIF(?,""), current_agency),
+         current_area=COALESCE(NULLIF(?,""), current_area),
+         current_location=COALESCE(NULLIF(?,""), current_location),
+         stage=COALESCE(NULLIF(?,""), stage),
+         entry_at=COALESCE(?, entry_at),
+         entry_by=COALESCE(NULLIF(?,""), entry_by),
+         exit_at=COALESCE(?, exit_at),
+         exit_by=COALESCE(NULLIF(?,""), exit_by),
+         last_by=COALESCE(NULLIF(?,""), last_by),
+         stage_history=COALESCE(?, stage_history)
+         WHERE vin=?')
         ->execute([
           (string)($b['make'] ?? ''), (string)($b['model'] ?? ''), (string)($b['year'] ?? ''),
           (string)($b['color'] ?? ''), (string)($b['engineNo'] ?? ''), $mileage,
           (string)($b['vehType'] ?? ''), (string)($b['plate'] ?? ''), (string)($b['country'] ?? ''),
-          (string)($b['condition'] ?? 'nuevo'), (string)($b['notes'] ?? ''), $vin,
+          (string)($b['condition'] ?? 'nuevo'), (string)($b['notes'] ?? ''),
+          $status, $cAgency, $cArea, $cLoc, $stage,
+          $entryAt, $entryBy, $exitAt, $exitBy, $lastBy, $stageHistory,
+          $vin,
         ]);
     } else {
       db()->prepare(
         'INSERT INTO vehiculos (vin, make, model, year, color, engine_no, mileage, veh_type, plate,
-         country, condition_, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+         country, condition_, notes, status, current_agency, current_area, current_location,
+         stage, entry_at, entry_by, exit_at, exit_by, last_by, stage_history)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
         ->execute([
           $vin, (string)($b['make'] ?? ''), (string)($b['model'] ?? ''), (string)($b['year'] ?? ''),
           (string)($b['color'] ?? ''), (string)($b['engineNo'] ?? ''), $mileage,
           (string)($b['vehType'] ?? ''), (string)($b['plate'] ?? ''), (string)($b['country'] ?? ''),
           (string)($b['condition'] ?? 'nuevo'), (string)($b['notes'] ?? ''),
+          ($status ?: null), ($cAgency ?: null), ($cArea ?: null), ($cLoc ?: null),
+          ($stage ?: null), $entryAt, ($entryBy ?: null), $exitAt, ($exitBy ?: null),
+          ($lastBy ?: null), $stageHistory,
         ]);
     }
     $st = db()->prepare('SELECT * FROM vehiculos WHERE vin=?'); $st->execute([$vin]);
