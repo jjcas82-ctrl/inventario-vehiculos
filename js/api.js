@@ -134,6 +134,7 @@ export async function me() {
 export async function listVehicles() { return (await apiFetch("vehicles")).vehicles || []; }
 export async function putVehicle(vin, data) { return apiFetch(`vehicles/${encodeURIComponent(vin)}`, { method: "PUT", body: data }); }
 export async function setVehicleStage(vin, stage) { return apiFetch(`vehicles/${encodeURIComponent(vin)}/stage`, { method: "POST", body: { stage } }); }
+export async function deleteVehicle(vin) { return apiFetch(`vehicles/${encodeURIComponent(vin)}`, { method: "DELETE" }); }
 
 // Eventos
 export async function listEvents(vin) { return (await apiFetch("events" + (vin ? `?vin=${encodeURIComponent(vin)}` : ""))).events || []; }

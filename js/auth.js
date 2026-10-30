@@ -63,7 +63,7 @@ const PERMISSIONS = {
   // Rol dedicado a refacciones: solo el inventario de partes (ver + editar).
   refacciones: ["refacciones.view", "refacciones.edit"],
   admin:       ["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view",
-                "vehicle.edit", "vehicle.editVin", "agencies.manage", "users.manage", "data.wipe",
+                "vehicle.edit", "vehicle.editVin", "vehicle.delete", "agencies.manage", "users.manage", "data.wipe",
                 "audit.run", "audit.override", "audit.schedule", "refacciones.view", "refacciones.edit"],
 };
 

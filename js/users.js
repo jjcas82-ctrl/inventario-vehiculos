@@ -134,6 +134,9 @@ export function renderUsers() {
 
   tbody.querySelectorAll(".del-user").forEach(btn =>
     btn.addEventListener("click", async () => {
+      // Solo el administrador puede eliminar usuarios (defensa en profundidad:
+      // la pestaña ya está restringida por permiso, pero reforzamos aquí).
+      if (!auth.isAdmin()) { notify("Solo el administrador puede eliminar usuarios.", { type: "warn" }); return; }
       const users2 = auth.listUsers();
       const target = users2.find(u => u.id === btn.dataset.id);
       const admins = users2.filter(u => u.role === "admin");

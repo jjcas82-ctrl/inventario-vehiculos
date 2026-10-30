@@ -381,6 +381,17 @@ export const store = {
     return { ok: true };
   },
 
+  // Elimina un vehículo y TODOS sus eventos del dispositivo. Devuelve {ok} o
+  // {ok:false,error}. La UI debe restringir esto al administrador.
+  removeVehicle(vin) {
+    const db = read();
+    if (!db.vehicles[vin]) return { ok: false, error: "El vehículo no existe." };
+    delete db.vehicles[vin];
+    db.events = (db.events || []).filter(e => e.vin !== vin);
+    write(db);
+    return { ok: true };
+  },
+
   // ---- Usuarios y roles ----
   listUsers() { return read().users || []; },
   addUser(data) {

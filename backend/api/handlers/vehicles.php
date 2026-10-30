@@ -112,5 +112,15 @@ function handle_vehicles(array $user, string $method, array $parts): void {
     json_ok();
   }
 
+  // DELETE /vehicles/{vin} — eliminar unidad y sus eventos (solo admin).
+  if ($method === 'DELETE' && $vin) {
+    require_perm($user, 'vehicle.delete');
+    // La FK de eventos tiene ON DELETE CASCADE → los eventos se borran solos.
+    // (Por si acaso, borramos eventos explícitamente antes del vehículo.)
+    db()->prepare('DELETE FROM eventos WHERE vin=?')->execute([$vin]);
+    db()->prepare('DELETE FROM vehiculos WHERE vin=?')->execute([$vin]);
+    json_ok();
+  }
+
   json_error(405, 'Método no permitido.');
 }
