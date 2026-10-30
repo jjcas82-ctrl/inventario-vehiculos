@@ -25,7 +25,7 @@ import { initCatalogAdmin } from "./catalogadmin.js";
 import { initCdoUpload } from "./cdoui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
-import { initSync, onSyncStatus, onSyncError, syncStatus } from "./sync.js";
+import { initSync, onSyncStatus, onSyncError, syncStatus, pullAll } from "./sync.js";
 import { ping as apiPing, me as apiMe, hasToken as apiHasToken, apiBase } from "./api.js";
 import { initDashboard, renderDashboard } from "./dashboard.js";
 import { initSyslog, renderSyslog } from "./syslogview.js";
@@ -126,10 +126,16 @@ async function submitLoginScreen(e) {
   renderUsers();
   notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
   resetInactivityTimer();              // arranca el control de inactividad
+  // Si el navegador bloquea el almacenamiento (incógnito), avisarlo: es la causa
+  // de que no guarde sesión/key y quede en modo local.
+  if (!storageDisponible()) {
+    notify("⚠️ Este navegador NO está guardando datos (modo incógnito o almacenamiento bloqueado). La sesión no se recordará, pedirá contraseña cada vez y no sincronizará. Abre la app en una ventana NORMAL y permite cookies/datos del sitio.",
+      { type: "error", timeout: 14000 });
+  }
   // Avisa si la sesión quedó en MODO LOCAL (sin token de servidor): los datos NO
   // se compartirán con otros equipos. Pasa con la cuenta de emergencia o si el
   // servidor no respondió al entrar.
-  if (navigator.onLine && !syncStatus().authed) {
+  else if (navigator.onLine && !syncStatus().authed) {
     notify("⚠️ Entraste en MODO LOCAL (sin servidor). Lo que registres no se sube ni se ve en otros equipos. Si no es intencional, cierra sesión y entra con tu usuario del servidor.",
       { type: "warn", timeout: 11000 });
   }
@@ -219,7 +225,7 @@ function setupTabs() {
       if (name === "map") { refreshMapVinOptions(); drawMap(); }
       if (name === "reports") { refreshReportAgencies(); renderReports(); }
       if (name === "inventory") renderInventory();
-      if (name === "users") renderUsers();
+      if (name === "users") { renderUsers(); refrescarDesdeServidor(); }
       if (name === "syslog") renderSyslog();
       if (name === "labels") renderLabels();
       if (name === "audit") window.__initAudit && window.__initAudit();
@@ -1055,10 +1061,17 @@ function setupScanner() {
   refreshKeyStatus();
   const saveKeyBtn = document.getElementById("save-cloud-ocr");
   if (saveKeyBtn) saveKeyBtn.addEventListener("click", () => {
-    setCloudOcrKey(keyInput.value);
+    const ok = setCloudOcrKey(keyInput.value);
     refreshKeyStatus();
     refreshCloudButton();
-    notify("Configuración de OCR en la nube guardada.", { type: "success" });
+    if (ok) {
+      notify("Configuración de OCR en la nube guardada.", { type: "success" });
+    } else {
+      // El navegador NO permitió guardar (modo incógnito o datos bloqueados).
+      // Es la misma causa por la que el equipo se queda en "modo local".
+      notify("⚠️ El navegador NO permitió guardar la key. Casi siempre es por MODO INCÓGNITO o porque el navegador tiene bloqueado el almacenamiento de datos del sitio. Abre la app en una ventana NORMAL (no incógnito) y permite cookies/datos para este sitio; eso también soluciona el 'modo local' y que pida la contraseña cada vez.",
+        { type: "error", timeout: 14000 });
+    }
   });
   const clearKeyBtn = document.getElementById("clear-cloud-ocr");
   if (clearKeyBtn) clearKeyBtn.addEventListener("click", () => {
@@ -1699,20 +1712,74 @@ function setupConnectivity() {
   if (badge) {
     badge.style.cursor = "pointer";
     badge.title = (badge.title || "") + " — Toca para probar la conexión.";
+    let _probando = false;
     badge.addEventListener("click", async () => {
-      const r = await diagnosticarConexion();
-      update();
-      notify(`${r.estado}. ${r.detalle}`, {
-        type: r.ok ? "success" : "warn",
-        timeout: r.ok ? 5000 : 10000,
-      });
+      if (_probando) return;          // evita toques repetidos mientras comprueba
+      _probando = true;
+      notify("Comprobando conexión con el servidor…", { type: "info", timeout: 3000 });
+      try {
+        const r = await diagnosticarConexion();
+        update();
+        notify(`${r.estado}. ${r.detalle}`, {
+          type: r.ok ? "success" : "warn",
+          timeout: r.ok ? 5000 : 11000,
+        });
+      } catch (e) {
+        notify("No se pudo comprobar la conexión: " + (e && e.message ? e.message : "error inesperado"),
+          { type: "warn", timeout: 8000 });
+      } finally {
+        _probando = false;
+      }
     });
   }
+}
+
+// Dispara un pull del servidor (bajar novedades) sin bloquear ni molestar si
+// falla. Lo usan la apertura de pestañas y el pull periódico. pullAll ya llama a
+// refreshAll al terminar, que repinta inventario y usuarios.
+function refrescarDesdeServidor() {
+  try {
+    if (apiHasToken() && navigator.onLine) pullAll();
+  } catch (e) {}
+}
+
+// Pull PERIÓDICO: mientras la app está abierta y con sesión de servidor, baja
+// novedades cada 60 s para que los cambios hechos en otros equipos (usuarios,
+// unidades) aparezcan solos sin reabrir. Se detiene si no hay sesión.
+let _pullTimer = null;
+function startPeriodicPull() {
+  if (_pullTimer) return;
+  _pullTimer = setInterval(() => {
+    if (document.visibilityState === "visible" && apiHasToken() && navigator.onLine) {
+      refrescarDesdeServidor();
+    }
+  }, 60000);
+  // Además, al volver a enfocar la pestaña/app, refrescar de inmediato.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refrescarDesdeServidor();
+  });
+}
+
+// ¿El navegador permite guardar datos (localStorage)? Si NO (modo incógnito o
+// almacenamiento bloqueado), la app no puede guardar el token de sesión → queda
+// en modo local, pide contraseña cada vez y no guarda la key del OCR.
+function storageDisponible() {
+  try {
+    const k = "__inv_test__";
+    localStorage.setItem(k, "1");
+    const ok = localStorage.getItem(k) === "1";
+    localStorage.removeItem(k);
+    return ok;
+  } catch (e) { return false; }
 }
 
 // Prueba el estado de conexión con el servidor y devuelve { ok, estado, detalle }.
 // Reutilizable por el badge superior (todos los roles) y la pestaña Agencias.
 async function diagnosticarConexion() {
+  if (!storageDisponible()) {
+    return { ok: false, estado: "⚠️ El navegador bloquea el almacenamiento",
+      detalle: "Estás en modo incógnito o con los datos del sitio bloqueados. Por eso no se guarda la sesión (modo local), pide contraseña cada vez y no guarda la key del OCR. Abre la app en una ventana NORMAL y permite cookies/datos para este sitio." };
+  }
   if (!navigator.onLine) {
     return { ok: false, estado: "⚠️ Sin internet (modo local)",
       detalle: "Este dispositivo no tiene conexión. Los registros se guardan localmente y se subirán al reconectar." };
@@ -1784,8 +1851,13 @@ function setupServerDiagnostic() {
 
   async function probar() {
     set("Comprobando…", "var(--muted)", "");
-    const r = await diagnosticarConexion();
-    set(r.estado, r.ok ? "#059669" : "#b45309", r.detalle);
+    try {
+      const r = await diagnosticarConexion();
+      set(r.estado, r.ok ? "#059669" : "#b45309", r.detalle);
+    } catch (e) {
+      set("⚠️ No se pudo comprobar", "#b45309",
+        "Error inesperado al probar la conexión: " + (e && e.message ? e.message : "desconocido") + ". Intenta de nuevo.");
+    }
   }
 
   btn.addEventListener("click", probar);
@@ -1841,6 +1913,9 @@ function refreshAll() {
   if (document.getElementById("tab-map").classList.contains("is-active")) drawMap();
   if (document.getElementById("tab-reports").classList.contains("is-active")) renderReports();
   if (document.getElementById("tab-dashboard").classList.contains("is-active")) renderDashboard();
+  // Repinta la lista de usuarios tras un pull: así los usuarios creados en otro
+  // equipo aparecen sin tener que reabrir la app.
+  try { if (auth.currentUser()) renderUsers(); } catch (e) {}
   updateAlertBell();
   fillEventSelectors();
 }
@@ -1898,6 +1973,7 @@ function main() {
   // Sincronización con el servidor (pull inicial + cola de pendientes + reintento
   // al reconectar). No bloquea el arranque y degrada a modo local si no hay red.
   initSync(refreshAll);
+  startPeriodicPull();   // baja novedades cada 60 s y al reenfocar la pestaña
 
   initAgencies(refreshAll);
   initInventory(refreshAll);

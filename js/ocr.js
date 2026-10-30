@@ -484,8 +484,17 @@ const OCRSPACE_URL = "https://api.ocr.space/parse/image";
 export function getCloudOcrKey() {
   try { return localStorage.getItem("inv_ocrspace_key") || ""; } catch (e) { return ""; }
 }
+// Guarda la key. Devuelve true si realmente quedó guardada (para detectar
+// navegadores que bloquean localStorage, p. ej. modo incógnito o cookies/datos
+// bloqueados, que es la causa de "no se guarda la key" y del "modo local").
 export function setCloudOcrKey(k) {
-  try { localStorage.setItem("inv_ocrspace_key", (k || "").trim()); } catch (e) {}
+  const val = (k || "").trim();
+  try {
+    localStorage.setItem("inv_ocrspace_key", val);
+    return localStorage.getItem("inv_ocrspace_key") === val;   // verificar que persistió
+  } catch (e) {
+    return false;
+  }
 }
 export function hasCloudOcr() { return !!getCloudOcrKey(); }
 
