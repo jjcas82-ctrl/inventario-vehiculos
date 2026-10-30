@@ -51,6 +51,7 @@ body.locked .topbar, body.locked .tabs, body.locked main { display: none !import
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .brand-mark { font-size: 20px; }
+.brand-logo { height: 28px; width: auto; display: block; border-radius: 4px; background: #fff; padding: 2px; }
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 .badge { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.2); }
 .badge-offline { background: rgba(255,255,255,.25); }

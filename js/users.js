@@ -77,6 +77,7 @@ export function renderUsers() {
           : `<span class="muted" title="La edición de este rol no es opcional">—</span>`}
       </td>
       <td class="row gap">
+        <button class="btn edit-user" data-id="${u.id}">✏️ Editar datos</button>
         <button class="btn reset-pass" data-id="${u.id}">Restablecer contraseña</button>
         <button class="btn btn-danger del-user" data-id="${u.id}">Eliminar</button>
       </td>
@@ -115,6 +116,40 @@ export function renderUsers() {
     chk.addEventListener("change", () => {
       auth.updateUser(chk.dataset.id, { canEdit: chk.checked });
       notify(chk.checked ? "Edición activada para el usuario." : "Edición desactivada.", { type: "success" });
+    })
+  );
+
+  // Editar DATOS personales del usuario (nombre, apellidos, correo).
+  tbody.querySelectorAll(".edit-user").forEach(btn =>
+    btn.addEventListener("click", async () => {
+      if (!auth.isAdmin()) { notify("Solo el administrador puede editar usuarios.", { type: "warn" }); return; }
+      const u = auth.listUsers().find(x => x.id === btn.dataset.id);
+      if (!u) return;
+      const first = await promptDialog({
+        icon: "✏️", title: "Editar usuario — Nombre(s)",
+        message: `Usuario: ${u.username}`,
+        placeholder: "Nombre(s)", value: u.firstName || "", okLabel: "Siguiente",
+      });
+      if (first === null) return;
+      const last = await promptDialog({
+        icon: "✏️", title: "Editar usuario — Apellidos",
+        message: `Usuario: ${u.username}`,
+        placeholder: "Apellidos", value: u.lastName || "", okLabel: "Siguiente",
+      });
+      if (last === null) return;
+      const email = await promptDialog({
+        icon: "✏️", title: "Editar usuario — Correo",
+        message: `Usuario: ${u.username}`,
+        placeholder: "correo@empresa.com", value: u.email || "", okLabel: "Guardar",
+      });
+      if (email === null) return;
+      if (!first.trim()) { notify("El nombre no puede quedar vacío.", { type: "warn" }); return; }
+      if (email.trim() && !/^\S+@\S+\.\S+$/.test(email.trim())) { notify("Correo no válido.", { type: "warn" }); return; }
+      auth.updateUser(u.id, {
+        firstName: first.trim(), lastName: last.trim(), email: email.trim(),
+      });
+      renderUsers();
+      notify("Datos del usuario actualizados.", { type: "success" });
     })
   );
 

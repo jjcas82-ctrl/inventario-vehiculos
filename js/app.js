@@ -1912,7 +1912,12 @@ function refreshAll() {
   refreshMapVinOptions();
   if (document.getElementById("tab-map").classList.contains("is-active")) drawMap();
   if (document.getElementById("tab-reports").classList.contains("is-active")) renderReports();
-  if (document.getElementById("tab-dashboard").classList.contains("is-active")) renderDashboard();
+  // Repinta SIEMPRE el dashboard tras un pull/cambio. Antes solo se repintaba si
+  // la pestaña estaba activa, y por una carrera de tiempos (el dashboard se
+  // pintaba con el store vacío ANTES de que terminara la sincronización inicial)
+  // quedaba en ceros en algunos equipos hasta tocar la pestaña. Repintar siempre
+  // es barato y elimina la inconsistencia entre navegadores.
+  try { renderDashboard(); } catch (e) {}
   // Repinta la lista de usuarios tras un pull: así los usuarios creados en otro
   // equipo aparecen sin tener que reabrir la app.
   try { if (auth.currentUser()) renderUsers(); } catch (e) {}
