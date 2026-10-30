@@ -1907,12 +1907,18 @@ function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").then((reg) => {
-      // Cuando se detecta una versión nueva, recargar una vez para tomarla.
+      // Cuando se detecta una versión nueva, recargar UNA sola vez para tomarla.
+      // Guard anti-bucle: usamos sessionStorage para no recargar más de una vez
+      // por sesión (evitaba un parpadeo/recarga infinita al cambiar de versión).
       reg.addEventListener("updatefound", () => {
         const nw = reg.installing;
         if (!nw) return;
         nw.addEventListener("statechange", () => {
           if (nw.state === "installed" && navigator.serviceWorker.controller) {
+            let yaRecargo = false;
+            try { yaRecargo = sessionStorage.getItem("inv_sw_reloaded") === "1"; } catch (e) {}
+            if (yaRecargo) return;   // ya recargamos una vez en esta sesión → no repetir
+            try { sessionStorage.setItem("inv_sw_reloaded", "1"); } catch (e) {}
             notify("Nueva versión disponible, actualizando…", { type: "info", timeout: 2000 });
             setTimeout(() => location.reload(), 800);
           }
