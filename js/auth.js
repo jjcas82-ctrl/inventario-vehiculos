@@ -240,8 +240,15 @@ async function cacheServerUser(serverUser, plainPassword) {
 //     credencial local todavía): podrá hacer su primer login contra el servidor, que
 //     cacheará la contraseña vía cacheServerUser.
 //   - Salta SIEMPRE la cuenta de emergencia.
+// Candado anti-revertido: tras un cambio local de usuario (crear/editar/borrar)
+// suprimimos el merge del pull unos segundos, para que un pull periódico no pise
+// el cambio recién hecho antes de que el servidor lo refleje.
+let _userMergeSuppressUntil = 0;
+function suppressUserMerge(ms = 8000) { _userMergeSuppressUntil = Date.now() + ms; }
+
 export function mergeServerUsers(list) {
   if (!Array.isArray(list)) return;
+  if (Date.now() < _userMergeSuppressUntil) return;   // cambio local reciente: no pisar
   const locals = store.listUsers();
   for (const su of list) {
     const uname = String(su.username || "").toLowerCase();
@@ -374,6 +381,7 @@ export async function createUser(data) {
     canEdit: roleHasOptionalEdit(role) ? !!data.canEdit : undefined,
     salt, passHash,
   });
+  suppressUserMerge();   // no dejar que el pull revierta el alta recién hecha
   logAction("user.create", `${username} (${user.role})`, currentUser()?.name || "—");
   // Push al servidor (fire-and-forget): manda la contraseña EN CLARO (el server la
   // re-hashea con bcrypt). Al volver guarda el serverId para futuras ediciones/borrados.
@@ -388,6 +396,7 @@ export async function createUser(data) {
 
 export function updateUser(id, patch) {
   const r = store.updateUser(id, patch);
+  suppressUserMerge();   // no dejar que el pull revierta este cambio
   logAction("user.edit", `Usuario ${r?.username || id}`, currentUser()?.name || "—");
   // Push de metadatos al servidor (nunca la credencial local).
   const sid = serverIdFor(id);
@@ -404,6 +413,7 @@ export function updateUser(id, patch) {
 }
 export function removeUser(id) {
   const u = store.listUsers().find(x => x.id === id);
+  suppressUserMerge();
   logAction("user.delete", `Usuario ${u?.username || id}`, currentUser()?.name || "—");
   const sid = u && u.serverId != null ? Number(u.serverId) : null;
   if (sid != null) pushDeleteUser(sid);
