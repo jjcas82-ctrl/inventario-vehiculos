@@ -237,7 +237,11 @@ export const store = {
       ...prev,
       ...v,
       createdAt: prev?.createdAt || now,
-      updatedAt: now,
+      // Conserva el updatedAt que traiga el objeto (p. ej. el del SERVIDOR al
+      // sincronizar). Antes siempre se ponía `now`, lo que corrompía la fusión
+      // last-write-wins (el registro local quedaba "más nuevo" que el servidor y
+      // el servidor ya nunca ganaba el merge). Solo usamos `now` si no viene.
+      updatedAt: v.updatedAt || now,
     };
     write(db);
     return db.vehicles[v.vin];
