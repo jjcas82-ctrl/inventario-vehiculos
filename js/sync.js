@@ -176,7 +176,13 @@ export async function pullAll() {
       api.listUsers().catch(() => null),
     ]);
 
-    if (Array.isArray(vehicles)) mergeVehicles(vehicles);
+    if (Array.isArray(vehicles)) {
+      const serverVins = mergeVehicles(vehicles);
+      // Sube los vehículos locales que faltan en el servidor (p. ej. registrados
+      // en modo local antes de tener sesión). Resuelve "este equipo tiene más
+      // que el servidor" sin intervención manual.
+      pushMissingVehicles(serverVins);
+    }
     if (Array.isArray(parts)) mergeParts(parts);
     // Usuarios: merge ADITIVO solo-metadatos (ver auth.mergeServerUsers). Nunca
     // toca credenciales locales (salt/passHash) ni borra la cuenta de emergencia.
@@ -206,11 +212,28 @@ export async function pullAll() {
 // Fusión last-write-wins por updatedAt. El servidor gana solo si su updatedAt es
 // más reciente que el local (o si la entidad no existe en local).
 function mergeVehicles(serverList) {
+  const serverVins = new Set();
   for (const sv of serverList) {
     if (!sv || !sv.vin) continue;
+    serverVins.add(sv.vin);
     const local = store.getVehicle(sv.vin);
     if (!local || isNewer(sv.updatedAt, local.updatedAt)) {
       store.upsertVehicle(sv);
+    }
+  }
+  return serverVins;
+}
+
+// Reconciliación de SUBIDA: sube al servidor los vehículos LOCALES que NO están
+// en el servidor. Cubre el caso de unidades registradas en modo local (sin token)
+// que nunca se subieron: al recuperar sesión, el pull las detecta y las empuja.
+// No bloquea (cada push es best-effort y encola si falla).
+function pushMissingVehicles(serverVins) {
+  if (!(serverVins instanceof Set)) return;
+  for (const v of store.listVehicles()) {
+    if (!v || !v.vin) continue;
+    if (!serverVins.has(v.vin)) {
+      try { pushVehicle(v.vin); } catch (e) {}
     }
   }
 }
