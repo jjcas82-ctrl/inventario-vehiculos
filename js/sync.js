@@ -118,8 +118,11 @@ async function trySend(op, fn) {
     if (e && e.offline) { enqueue(op); return; }   // sin conexión → pendiente
     // Error de la API (400/500): NO encolamos en bucle (evita colas envenenadas),
     // pero AVISAMOS al usuario para que no crea que se guardó en el servidor.
+    // Incluimos el DETALLE técnico (p. ej. el error SQL del backend) para poder
+    // diagnosticar errores 500 sin adivinar.
     const motivo = (e && e.message) ? e.message : "el servidor rechazó la operación";
-    try { _onError(`No se pudo sincronizar ${opLabel(op)} con el servidor: ${motivo}. El cambio quedó guardado solo en este equipo.`); } catch (e2) {}
+    const det = (e && e.detail) ? ` [detalle: ${e.detail}]` : "";
+    try { _onError(`No se pudo sincronizar ${opLabel(op)} con el servidor: ${motivo}${det}. El cambio quedó guardado solo en este equipo.`); } catch (e2) {}
   }
 }
 
