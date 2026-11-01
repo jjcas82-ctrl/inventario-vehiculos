@@ -129,9 +129,11 @@ function handle_vehicles(array $user, string $method, array $parts): void {
           (string)($b['color'] ?? ''), (string)($b['engineNo'] ?? ''), $mileage,
           (string)($b['vehType'] ?? ''), (string)($b['plate'] ?? ''), (string)($b['country'] ?? ''),
           (string)($b['condition'] ?? 'nuevo'), (string)($b['notes'] ?? ''),
-          ($status ?: null), ($cAgency ?: null), ($cArea ?: null), ($cLoc ?: null),
-          ($stage ?: null), $entryAt, ($entryBy ?: null), $exitAt, ($exitBy ?: null),
-          ($lastBy ?: null), $stageHistory,
+          // Columnas de TEXTO son NOT NULL DEFAULT '' → mandamos "" (no NULL).
+          // Solo las fechas (entry_at/exit_at) y stage_history admiten NULL.
+          $status, $cAgency, $cArea, $cLoc,
+          $stage, $entryAt, $entryBy, $exitAt, $exitBy,
+          $lastBy, $stageHistory,
         ]);
     }
     $st = db()->prepare('SELECT * FROM vehiculos WHERE vin=?'); $st->execute([$vin]);
