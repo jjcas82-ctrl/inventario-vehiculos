@@ -31,6 +31,19 @@ function vehicle_row_to_api(array $r): array {
   ];
 }
 
+// Convierte una fecha ISO 8601 (del frontend, p. ej. "2026-10-30T13:26:00.000Z")
+// a formato DATETIME de MySQL ("2026-10-30 13:26:00"). Devuelve null si viene
+// vacía o no se puede parsear (para no romper el INSERT con un valor inválido).
+function iso_to_mysql_datetime($v): ?string {
+  if ($v === null || $v === '' ) return null;
+  $s = (string)$v;
+  // Ya viene en formato MySQL.
+  if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $s)) return $s;
+  $ts = strtotime($s);
+  if ($ts === false) return null;
+  return date('Y-m-d H:i:s', $ts);
+}
+
 function handle_vehicles(array $user, string $method, array $parts): void {
   $vin = isset($parts[1]) ? strtoupper(trim($parts[1])) : null;
 
@@ -68,9 +81,12 @@ function handle_vehicles(array $user, string $method, array $parts): void {
     $cArea   = (string)($b['currentArea'] ?? '');
     $cLoc    = (string)($b['currentLocation'] ?? '');
     $stage   = (string)($b['stage'] ?? '');
-    $entryAt = ($b['entryAt'] ?? null) ?: null;
+    // Las fechas llegan en ISO 8601 ("2026-10-30T13:26:00.000Z") pero la columna
+    // es DATETIME de MySQL ("2026-10-30 13:26:00"). Insertar el ISO directo
+    // provoca ERROR INTERNO (500) en modo estricto. Convertimos a DATETIME.
+    $entryAt = iso_to_mysql_datetime($b['entryAt'] ?? null);
     $entryBy = (string)($b['entryBy'] ?? '');
-    $exitAt  = ($b['exitAt'] ?? null) ?: null;
+    $exitAt  = iso_to_mysql_datetime($b['exitAt'] ?? null);
     $exitBy  = (string)($b['exitBy'] ?? '');
     $lastBy  = (string)($b['lastBy'] ?? '');
     $stageHistory = isset($b['stageHistory']) ? json_encode($b['stageHistory'], JSON_UNESCAPED_UNICODE) : null;
