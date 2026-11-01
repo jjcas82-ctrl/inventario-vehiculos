@@ -244,7 +244,7 @@ async function cacheServerUser(serverUser, plainPassword) {
 // suprimimos el merge del pull unos segundos, para que un pull periódico no pise
 // el cambio recién hecho antes de que el servidor lo refleje.
 let _userMergeSuppressUntil = 0;
-function suppressUserMerge(ms = 8000) { _userMergeSuppressUntil = Date.now() + ms; }
+function suppressUserMerge(ms = 4000) { _userMergeSuppressUntil = Date.now() + ms; }
 
 export function mergeServerUsers(list) {
   if (!Array.isArray(list)) return;

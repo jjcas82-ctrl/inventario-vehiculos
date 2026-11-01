@@ -127,6 +127,9 @@ async function submitLoginScreen(e) {
   renderUsers();
   notify(`Bienvenido, ${res.user.name} (${auth.ROLES[res.user.role]?.label}).`, { type: "success" });
   resetInactivityTimer();              // arranca el control de inactividad
+  // Baja los datos del servidor (vehículos, usuarios, etc.) con varios intentos
+  // espaciados para que aparezcan solos poco después de entrar, sin tocar nada.
+  pullInicialRobusto();
   // Si el navegador bloquea el almacenamiento (incógnito), avisarlo: es la causa
   // de que no guarde sesión/key y quede en modo local.
   if (!storageDisponible()) {
@@ -1745,8 +1748,8 @@ function refrescarDesdeServidor() {
 }
 
 // Pull PERIÓDICO: mientras la app está abierta y con sesión de servidor, baja
-// novedades cada 60 s para que los cambios hechos en otros equipos (usuarios,
-// unidades) aparezcan solos sin reabrir. Se detiene si no hay sesión.
+// novedades cada 20 s para que los cambios hechos en otros equipos (usuarios,
+// unidades) aparezcan solos sin reabrir ni tocar nada. Se detiene si no hay sesión.
 let _pullTimer = null;
 function startPeriodicPull() {
   if (_pullTimer) return;
@@ -1754,10 +1757,19 @@ function startPeriodicPull() {
     if (document.visibilityState === "visible" && apiHasToken() && navigator.onLine) {
       refrescarDesdeServidor();
     }
-  }, 60000);
+  }, 20000);
   // Además, al volver a enfocar la pestaña/app, refrescar de inmediato.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") refrescarDesdeServidor();
+  });
+}
+
+// Pull inicial ROBUSTO al arrancar/iniciar sesión: hace varios intentos
+// espaciados (3 s, 8 s, 15 s) para que los datos (incluidos usuarios) aparezcan
+// solos poco después de entrar, sin esperar el ciclo periódico ni tocar botones.
+function pullInicialRobusto() {
+  [1500, 5000, 12000].forEach((ms) => {
+    setTimeout(() => refrescarDesdeServidor(), ms);
   });
 }
 
