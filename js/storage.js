@@ -116,6 +116,38 @@ function cloneAreas(list) {
 }
 function defaultAreas() { return cloneAreas(DEFAULT_AREAS); }
 
+// --- REFACCIONES: agencias de inventario ---
+// Las 3 agencias reales entre las que se separa TODO el inventario de refacciones.
+// El mismo nº de parte puede existir en varias con existencias distintas: NUNCA
+// se mezclan. Promovida aquí (antes vivía solo en refaccionesui.js) para que el
+// store sea la única fuente de verdad.
+export const AGENCIAS_REF = ["Aeroplasa Auto", "Aeroplasa Aeropuerto", "Aeroplasa Automotriz"];
+
+// Cajón especial donde queda el inventario/historial de refacciones que existía
+// ANTES del rediseño por agencia (no sabíamos a qué agencia pertenecía). No se
+// pierde: queda consultable y se puede reasignar a una agencia real después.
+export const ARCHIVO_PREVIO = "__archivo_previo__";
+export const ARCHIVO_PREVIO_LABEL = "📦 Archivo anterior (sin agencia)";
+
+// ¿Es `agency` una agencia de refacciones válida (o el archivo previo)?
+function isAgencyRef(agency) {
+  return agency === ARCHIVO_PREVIO || AGENCIAS_REF.includes(agency);
+}
+// Normaliza la agencia recibida por los métodos de refacciones. Si no viene o no
+// es válida, cae a la primera agencia real (evita escribir en claves basura).
+function partsAgency(agency) {
+  return isAgencyRef(agency) ? agency : AGENCIAS_REF[0];
+}
+// Devuelve (creándolo si hace falta) el sub-diccionario de partes de una agencia.
+// Función libre (no depende de `this`) para que funcione aunque los métodos del
+// store se desestructuren.
+function partsBucket(db, agency) {
+  const a = partsAgency(agency);
+  if (!db.parts || typeof db.parts !== "object") db.parts = {};
+  if (!db.parts[a] || typeof db.parts[a] !== "object") db.parts[a] = {};
+  return db.parts[a];
+}
+
 function seed() {
   return {
     vehicles: {},
@@ -128,9 +160,13 @@ function seed() {
     audits: [],
     openAudits: {},  // auditorías en curso por agencia (congelar/retomar)
     scheduledAudits: [], // agenda de auditorías programadas
-    parts: {},   // inventario de REFACCIONES (por número de parte)
-    partsAudit: null, // sesión de auditoría de refacciones (rondas, firmantes)
-    partsAuditHistory: [], // snapshots de inventarios de refacciones cerrados
+    // REFACCIONES separadas POR AGENCIA:
+    //   parts:             { [agency]: { [numParte]: {parte} } }
+    //   partsAudit:        { [agency]: {sesión} | null }
+    //   partsAuditHistory: [ { ..., agency } ]  (plano, con etiqueta de agencia)
+    parts: {},
+    partsAudit: {},
+    partsAuditHistory: [],
   };
 }
 
@@ -143,6 +179,59 @@ function migrateAgency(a) {
     a.areas = defaultAreas();
   }
   return a;
+}
+
+// Migra el inventario de REFACCIONES al modelo separado por agencia.
+//  - Formato VIEJO (global): parts = { [numParte]: {} }, partsAudit = {sesión}|null,
+//    partsAuditHistory = [ {} ].  Todo lo global se mueve al "archivo anterior".
+//  - Formato NUEVO: parts = { [agency]: { [numParte]: {} } }, partsAudit = { [agency]: {} },
+//    partsAuditHistory = [ {..., agency} ].
+// La detección es defensiva: si `parts` tiene como valores objetos-parte (traen
+// numParte) en vez de sub-diccionarios por agencia, es el formato viejo.
+function migratePartsByAgency(db) {
+  // ---- parts ----
+  if (!db.parts || typeof db.parts !== "object") db.parts = {};
+  const keys = Object.keys(db.parts);
+  // ¿Formato viejo? Alguna clave de primer nivel NO es una agencia conocida y su
+  // valor parece una PARTE (tiene numParte) en vez de un sub-diccionario.
+  const looksFlat = keys.some(k => {
+    if (isAgencyRef(k)) return false;
+    const v = db.parts[k];
+    return v && typeof v === "object" && ("numParte" in v);
+  });
+  if (looksFlat) {
+    const prev = db.parts;
+    db.parts = {};
+    db.parts[ARCHIVO_PREVIO] = prev;   // todo lo global → archivo anterior
+  }
+  // Asegurar un sub-diccionario por cada agencia real (+ archivo previo si existe).
+  for (const a of AGENCIAS_REF) {
+    if (!db.parts[a] || typeof db.parts[a] !== "object") db.parts[a] = {};
+  }
+
+  // ---- partsAudit ----
+  // Viejo: null u objeto de sesión plano (tiene rondas/rondaActual/by/…).
+  // Nuevo: { [agency]: {sesión} }.
+  if (!db.partsAudit || typeof db.partsAudit !== "object") {
+    db.partsAudit = {};
+  } else {
+    const ak = Object.keys(db.partsAudit);
+    const auditFlat = ak.length > 0 && ak.every(k => !isAgencyRef(k));
+    if (auditFlat) {
+      // Era una sesión plana → pasa al archivo anterior.
+      const prevAudit = db.partsAudit;
+      db.partsAudit = {};
+      db.partsAudit[ARCHIVO_PREVIO] = prevAudit;
+    }
+  }
+
+  // ---- partsAuditHistory ----
+  // Se mantiene como array plano, pero cada entrada lleva `agency`. Las que no la
+  // tengan (historial viejo) se marcan como ARCHIVO_PREVIO.
+  if (!Array.isArray(db.partsAuditHistory)) db.partsAuditHistory = [];
+  db.partsAuditHistory.forEach(h => {
+    if (h && !h.agency) h.agency = ARCHIVO_PREVIO;
+  });
 }
 
 export function cryptoId() {
@@ -168,9 +257,7 @@ function read() {
   if (!Array.isArray(_cache.audits)) _cache.audits = [];
   if (!_cache.openAudits || typeof _cache.openAudits !== "object") _cache.openAudits = {};
   if (!Array.isArray(_cache.scheduledAudits)) _cache.scheduledAudits = [];
-  if (!_cache.parts || typeof _cache.parts !== "object") _cache.parts = {};
-  if (_cache.partsAudit === undefined) _cache.partsAudit = null;
-  if (!Array.isArray(_cache.partsAuditHistory)) _cache.partsAuditHistory = [];
+  migratePartsByAgency(_cache);
 
   // Precarga/actualización de sitios con sus direcciones y coordenadas reales.
   // Matching por nombre EXACTO (sin heurística ambigua, para no confundir
@@ -492,29 +579,35 @@ export const store = {
     write(db);
   },
 
-  // ---- Refacciones (inventario de partes) ----
+  // ---- Refacciones (inventario de partes) · SEPARADO POR AGENCIA ----
+  // Todo el inventario de refacciones vive en db.parts[agency][numParte]. El mismo
+  // numParte puede existir en varias agencias con existencias distintas y NUNCA se
+  // mezcla. Todos los métodos reciben `agency` como PRIMER parámetro.
   // Cada parte: { numParte, descripcion, ubicacion, grupo, existencia (número),
   //   marbete, conteo (número|null), origin, createdAt, updatedAt }
-  listParts() { return Object.values(read().parts || {}); },
-  getPart(numParte) { return (read().parts || {})[numParte] || null; },
-  upsertPart(p) {
+
+  listParts(agency) { return Object.values(partsBucket(read(), agency)); },
+  getPart(agency, numParte) { return partsBucket(read(), agency)[numParte] || null; },
+  upsertPart(agency, p) {
     const db = read();
+    const bucket = partsBucket(db, agency);
     const now = new Date().toISOString();
-    const prev = db.parts[p.numParte];
-    db.parts[p.numParte] = { ...prev, ...p, createdAt: prev?.createdAt || now, updatedAt: now };
+    const prev = bucket[p.numParte];
+    bucket[p.numParte] = { ...prev, ...p, createdAt: prev?.createdAt || now, updatedAt: now };
     write(db);
-    return db.parts[p.numParte];
+    return bucket[p.numParte];
   },
   // Alta/actualización MASIVA en una sola escritura (cargar cientos de partes).
-  bulkUpsertParts(arr, { merge = true } = {}) {
+  bulkUpsertParts(agency, arr, { merge = true } = {}) {
     const db = read();
+    const bucket = partsBucket(db, agency);
     const now = new Date().toISOString();
     let added = 0, updated = 0;
     for (const p of (arr || [])) {
       if (!p || !p.numParte) continue;
-      const prev = db.parts[p.numParte];
-      if (prev) { db.parts[p.numParte] = { ...(merge ? prev : {}), ...p, createdAt: prev.createdAt || now, updatedAt: now }; updated++; }
-      else { db.parts[p.numParte] = { ...p, createdAt: now, updatedAt: now }; added++; }
+      const prev = bucket[p.numParte];
+      if (prev) { bucket[p.numParte] = { ...(merge ? prev : {}), ...p, createdAt: prev.createdAt || now, updatedAt: now }; updated++; }
+      else { bucket[p.numParte] = { ...p, createdAt: now, updatedAt: now }; added++; }
     }
     write(db);
     return { added, updated };
@@ -522,9 +615,9 @@ export const store = {
   // Guarda el conteo físico de una parte en la RONDA indicada (1, 2 o 3).
   // Mantiene el histórico por ronda en p.conteos = { "1": n, "2": n, "3": n } y
   // deja p.conteo = el valor de la ronda recién capturada (vista rápida).
-  setPartConteo(numParte, conteo, by, ronda = 1) {
+  setPartConteo(agency, numParte, conteo, by, ronda = 1) {
     const db = read();
-    const p = db.parts[numParte];
+    const p = partsBucket(db, agency)[numParte];
     if (!p) return null;
     const r = String(ronda || 1);
     p.conteos = p.conteos || {};
@@ -541,12 +634,13 @@ export const store = {
   // "libreta"). Se guarda por punto (p.exhibiciones = { "Punto X": n }) y el
   // total p.exhibicion. Estas piezas SUMAN al conteo físico para cuadrar contra
   // la existencia del sistema (Opción A). Si la parte no existe, se da de alta.
-  setPartExhibicion(numParte, punto, cantidad, by) {
+  setPartExhibicion(agency, numParte, punto, cantidad, by) {
     const db = read();
-    let p = db.parts[numParte];
+    const bucket = partsBucket(db, agency);
+    let p = bucket[numParte];
     const now = new Date().toISOString();
     if (!p) {
-      p = db.parts[numParte] = { numParte, descripcion: "", ubicacion: "", existencia: null,
+      p = bucket[numParte] = { numParte, descripcion: "", ubicacion: "", existencia: null,
         enMarbetes: false, enExistencias: false, origin: "exhibicion", createdAt: now };
     }
     p.exhibiciones = p.exhibiciones || {};
@@ -562,42 +656,83 @@ export const store = {
     write(db);
     return p;
   },
-  clearParts() { const db = read(); db.parts = {}; write(db); },
-
-  // ---- Auditoría de REFACCIONES (sesión: nº de rondas, ronda actual, firmantes) ----
-  // partsAudit = { rondas (1-3), rondaActual, by, startedAt, finishedAt,
-  //   firmaAdmin, firmaRefacciones, firmaAuditor, note }
-  getPartsAudit() { return read().partsAudit || null; },
-  setPartsAudit(patch) {
+  // Elimina del inventario de una agencia las partes cuyo numParte NO esté en
+  // `keepSet` (un Set). Se usa en el flujo ROTATIVO: tras muestrear, se conserva
+  // SOLO el subconjunto a auditar. Devuelve cuántas se eliminaron.
+  retainParts(agency, keepSet) {
     const db = read();
-    db.partsAudit = { ...(db.partsAudit || {}), ...patch };
+    const bucket = partsBucket(db, agency);
+    let removed = 0;
+    for (const k of Object.keys(bucket)) {
+      if (!keepSet.has(k)) { delete bucket[k]; removed++; }
+    }
     write(db);
-    return db.partsAudit;
+    return removed;
   },
-  clearPartsAudit() { const db = read(); db.partsAudit = null; write(db); },
-
-  // ---- Histórico de inventarios de refacciones CERRADOS ----
-  // Cada entrada es un snapshot al cerrar: { id, fecha, by, rondas, valorInventario,
-  //   valorDiferencia, faltantes, sobrantes, noComprobadas, totalPartes,
-  //   firmaAdmin, firmaRefacciones, firmaPosventa, firmaAuditor, porClasificacion }
-  listPartsAuditHistory() {
+  clearParts(agency) {
     const db = read();
-    return (db.partsAuditHistory || []).slice().sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
+    db.parts[partsAgency(agency)] = {};
+    write(db);
+  },
+
+  // ---- Auditoría de REFACCIONES por agencia (sesión: tipo, nº de rondas, etc.) ----
+  // partsAudit[agency] = { tipo:'completo'|'rotativo', rondas (1-3), rondaActual,
+  //   cantidadRotativo, by, startedAt, finishedAt, firmas…, note }
+  getPartsAudit(agency) {
+    const db = read();
+    return (db.partsAudit && db.partsAudit[partsAgency(agency)]) || null;
+  },
+  setPartsAudit(agency, patch) {
+    const db = read();
+    const a = partsAgency(agency);
+    if (!db.partsAudit || typeof db.partsAudit !== "object") db.partsAudit = {};
+    db.partsAudit[a] = { ...(db.partsAudit[a] || {}), ...patch };
+    write(db);
+    return db.partsAudit[a];
+  },
+  clearPartsAudit(agency) {
+    const db = read();
+    if (db.partsAudit) db.partsAudit[partsAgency(agency)] = null;
+    write(db);
+  },
+
+  // ---- Histórico de inventarios de refacciones CERRADOS (plano, con agency) ----
+  // Cada entrada es un snapshot al cerrar: { id, fecha, agency, by, rondas,
+  //   valorInventario, valorDiferencia, faltantes, sobrantes, noComprobadas,
+  //   totalPartes, firmaAdmin, firmaRefacciones, firmaPosventa, firmaAuditor,
+  //   porClasificacion }
+  // Si se pasa `agency`, devuelve SOLO el historial de esa agencia; si no, todo.
+  listPartsAuditHistory(agency) {
+    const db = read();
+    let list = (db.partsAuditHistory || []).slice();
+    if (agency != null) list = list.filter(h => (h.agency || ARCHIVO_PREVIO) === agency);
+    return list.sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")));
   },
   addPartsAuditHistory(entry) {
     const db = read();
     db.partsAuditHistory = db.partsAuditHistory || [];
     const rec = { id: cryptoId(), fecha: new Date().toISOString(), ...entry };
+    if (!rec.agency) rec.agency = ARCHIVO_PREVIO;
     db.partsAuditHistory.push(rec);
     write(db);
     return rec;
+  },
+  // Reasigna una entrada del histórico a otra agencia (p. ej. mover algo del
+  // "archivo anterior" a su agencia real una vez identificado).
+  reassignPartsAuditHistory(id, newAgency) {
+    const db = read();
+    const h = (db.partsAuditHistory || []).find(x => x.id === id);
+    if (h) { h.agency = partsAgency(newAgency); write(db); }
+    return h;
   },
 
   // ---- Respaldo ----
   export() { return JSON.stringify(read(), null, 2); },
   import(json) {
     const data = typeof json === "string" ? JSON.parse(json) : json;
-    write({ ...seed(), ...data });
+    const merged = { ...seed(), ...data };
+    migratePartsByAgency(merged);  // normaliza refacciones al modelo por agencia
+    write(merged);
   },
   wipe() { write(seed()); },
 };
