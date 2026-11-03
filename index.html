@@ -695,6 +695,42 @@
 
     <!-- ================= REFACCIONES (inventario de partes) ================= -->
     <section id="tab-refacciones" class="tab-panel" role="tabpanel">
+      <!-- 0) ASISTENTE DE INICIO: primero AGENCIA, luego TIPO de inventario.
+           Todo el inventario de refacciones se separa por agencia; el mismo
+           número de parte puede existir en varias con existencias distintas y
+           NUNCA se mezcla. -->
+      <div class="card" id="ref-wizard">
+        <h2>🧭 Iniciar inventario de refacciones</h2>
+
+        <!-- Paso 0: AGENCIA -->
+        <div class="loc-card" style="margin-bottom:10px">
+          <label><b>Paso 1 · Agencia</b></label>
+          <p class="hint" style="margin:4px 0">Elige la agencia del inventario. Todo lo que cargues, cuentes y cierres queda separado por agencia.</p>
+          <div class="row gap wrap" style="align-items:center">
+            <select id="ref-wizard-agencia" style="min-width:230px">
+              <option value="">— Selecciona la agencia —</option>
+            </select>
+            <span id="ref-wizard-agencia-actual" class="tag" style="background:#e0e7ff;color:#3730a3;font-weight:700" hidden></span>
+          </div>
+        </div>
+
+        <!-- Paso 1: TIPO DE INVENTARIO -->
+        <div class="loc-card" id="ref-wizard-tipo-box" style="margin-bottom:10px" hidden>
+          <label><b>Paso 2 · Tipo de inventario</b></label>
+          <p class="hint" style="margin:4px 0">¿Vas a contar TODO el inventario (completo) o solo una muestra de números de parte (rotativo)?</p>
+          <div class="row gap wrap" role="group" aria-label="Tipo de inventario">
+            <button class="btn" id="ref-tipo-completo" data-tipo="completo">📋 Completo (todo)</button>
+            <button class="btn" id="ref-tipo-rotativo" data-tipo="rotativo">🎲 Rotativo (muestra)</button>
+          </div>
+          <p id="ref-wizard-tipo-actual" class="hint" style="margin:6px 0 0"></p>
+        </div>
+
+        <div id="ref-wizard-aviso" class="hint" style="color:#b45309"></div>
+      </div>
+
+      <!-- Contenedor de todo el inventario (se oculta hasta elegir agencia+tipo) -->
+      <div id="ref-inventario" hidden>
+
       <!-- 1) CARGA: existencias (CSV) + marbetes (PDF) → cruce -->
       <div class="card">
         <h2>🔧 Inventario de refacciones · Carga</h2>
@@ -713,10 +749,23 @@
         <div class="row gap wrap" style="margin-top:10px">
           <button id="ref-confirmar" class="btn btn-primary" hidden>✓ Cargar al inventario</button>
         </div>
+
+        <!-- Panel ROTATIVO: elegir cuántas partes auditar y muestrear al azar. -->
+        <div class="loc-card ref-only-rotativo" id="ref-rotativo-box" style="margin-top:12px" hidden>
+          <label><b>🎲 Muestreo rotativo</b></label>
+          <p class="hint" style="margin:4px 0">Tras cargar las existencias, indica cuántos números de parte vas a auditar. El sistema elige esa cantidad <b>al azar</b> entre las partes con existencia y arma la plantilla de conteo.</p>
+          <div class="row gap wrap" style="align-items:center">
+            <label for="ref-rotativo-cant">Cantidad a auditar:</label>
+            <input id="ref-rotativo-cant" type="number" min="1" step="1" placeholder="p. ej. 50" style="max-width:120px" />
+            <button id="ref-rotativo-muestrear" class="btn btn-primary">🎲 Elegir al azar y cargar</button>
+          </div>
+          <p id="ref-rotativo-status" class="hint" style="margin:6px 0 0"></p>
+        </div>
       </div>
 
-      <!-- 2) ETIQUETAS QR (Janel 32×64, 12/hoja) -->
-      <div class="card">
+      <!-- 2) ETIQUETAS / PLANTILLA -->
+      <!-- Completo: marbetes QR (Janel 32×64). Rotativo: plantilla de conteo. -->
+      <div class="card ref-only-completo">
         <h2>🏷️ Etiquetas QR (Janel 32×64 mm · 12 por hoja)</h2>
         <p class="hint">Imprime una etiqueta por parte. Cada etiqueta lleva un <b>QR</b> (número de parte + descripción + ubicación) y muestra el <b>número de parte y la descripción</b>. Usa «Hoja de prueba» para calibrar los márgenes antes de gastar etiquetas.</p>
         <div class="filters">
@@ -728,6 +777,15 @@
         <div class="row gap wrap" style="margin-top:8px">
           <button id="ref-etiquetas" class="btn btn-primary">🖨️ Imprimir etiquetas</button>
           <button id="ref-etiquetas-prueba" class="btn">🧪 Hoja de prueba (con bordes)</button>
+        </div>
+      </div>
+
+      <!-- 2-bis) PLANTILLA DE CONTEO (solo rotativo) -->
+      <div class="card ref-only-rotativo">
+        <h2>📝 Plantilla de conteo</h2>
+        <p class="hint">Imprime la hoja con las partes muestreadas y un espacio para <b>anotar la cantidad contada</b> a mano. Luego captura los conteos en la sección siguiente.</p>
+        <div class="row gap wrap" style="margin-top:8px">
+          <button id="ref-plantilla-print" class="btn btn-primary">🖨️ Imprimir plantilla de conteo</button>
         </div>
       </div>
 
@@ -888,10 +946,18 @@
         <p id="ref-backup-status" class="hint"></p>
       </div>
 
-      <!-- 7) HISTÓRICO DE INVENTARIOS CERRADOS -->
+      </div><!-- /#ref-inventario -->
+
+      <!-- 7) HISTÓRICO DE INVENTARIOS CERRADOS (por agencia + archivo anterior) -->
       <div class="card">
-        <h2>📚 Histórico de inventarios</h2>
-        <p class="hint">Inventarios de refacciones cerrados anteriormente, para comparar tendencias (valor, diferencias) entre auditorías.</p>
+        <div class="row between wrap" style="align-items:center">
+          <h2>📚 Histórico de inventarios</h2>
+          <div class="row gap wrap" style="align-items:center">
+            <label for="ref-hist-agencia" class="muted" style="font-size:13px">Ver:</label>
+            <select id="ref-hist-agencia" style="min-width:200px"></select>
+          </div>
+        </div>
+        <p class="hint">Inventarios de refacciones cerrados, separados por agencia. El «Archivo anterior» guarda los cierres previos al rediseño; puedes reasignarlos a su agencia real.</p>
         <div id="ref-historial"></div>
       </div>
     </section>

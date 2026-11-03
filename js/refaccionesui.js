@@ -9,7 +9,7 @@
 // Es un módulo autónomo que vive dentro del mismo sistema que el inventario de
 // vehículos; usa su propio namespace de almacenamiento (store.*Parts).
 
-import { store } from "./storage.js";
+import { store, AGENCIAS_REF, ARCHIVO_PREVIO, ARCHIVO_PREVIO_LABEL } from "./storage.js";
 import {
   parseExistenciasCsv, parseMarbetesFile, cruzar,
   parsePartQr, printPartLabels,
@@ -28,6 +28,30 @@ let lastCruce = null;        // resultado del último cruce (para confirmar carg
 let existencias = [];        // existencias parseadas pendientes de cruzar
 let marbetes = [];           // marbetes parseados pendientes de cruzar
 let audioCtx = null;
+
+// ======================= AGENCIA ACTIVA (maestro) =======================
+// Todo el módulo opera sobre la agencia elegida en el asistente de inicio. Se
+// persiste para retomar el inventario tras recargar. El TIPO (completo/rotativo)
+// vive en la sesión de auditoría de esa agencia (store.getPartsAudit(agency)).
+const AGENCIA_KEY = "inv_ref_agencia_activa";
+let agencyActual = (() => { try { return localStorage.getItem(AGENCIA_KEY) || ""; } catch (e) { return ""; } })();
+
+function setAgenciaActual(a) {
+  agencyActual = a || "";
+  try { localStorage.setItem(AGENCIA_KEY, agencyActual); } catch (e) {}
+}
+// La agencia con la que se llama al store. Si aún no se eligió, cae a la 1ª real
+// solo para lecturas defensivas (la UI bloquea las escrituras sin agencia).
+function ag() { return agencyActual || AGENCIAS_REF[0]; }
+
+// Tipo de inventario de la agencia activa ('completo' | 'rotativo' | "").
+function tipoActual() {
+  if (!agencyActual) return "";
+  const a = store.getPartsAudit(agencyActual) || {};
+  return a.tipo || "";
+}
+function esRotativo() { return tipoActual() === "rotativo"; }
+function esCompleto() { return tipoActual() === "completo"; }
 
 export function initRefacciones() {
   if (initialized) return;
@@ -111,8 +135,8 @@ export function initRefacciones() {
   const selRondas = document.getElementById("ref-rondas-sel");
   if (selRondas) selRondas.addEventListener("change", () => {
     const rondas = Number(selRondas.value) || 1;
-    const a = store.getPartsAudit() || {};
-    store.setPartsAudit({ rondas, rondaActual: a.rondaActual || 1 });
+    const a = store.getPartsAudit(ag()) || {};
+    store.setPartsAudit(ag(), { rondas, rondaActual: a.rondaActual || 1 });
     renderRondas();
   });
   const btnRondaSig = document.getElementById("ref-ronda-siguiente");
@@ -154,6 +178,30 @@ export function initRefacciones() {
   const btnConnProbar = document.getElementById("ref-conn-probar");
   if (btnConnProbar) btnConnProbar.addEventListener("click", probarConexion);
 
+  // --- Asistente de inicio: agencia + tipo ---
+  const selWizAg = document.getElementById("ref-wizard-agencia");
+  if (selWizAg) selWizAg.addEventListener("change", () => {
+    const a = selWizAg.value;
+    if (!a) { setAgenciaActual(""); renderRefacciones(); return; }
+    setAgenciaActual(a);
+    logAction("parts.agency.select", `Agencia de refacciones seleccionada: ${a}`, auth.currentUser()?.name || "—");
+    renderRefacciones();
+  });
+  const btnTipoComp = document.getElementById("ref-tipo-completo");
+  if (btnTipoComp) btnTipoComp.addEventListener("click", () => elegirTipo("completo"));
+  const btnTipoRot = document.getElementById("ref-tipo-rotativo");
+  if (btnTipoRot) btnTipoRot.addEventListener("click", () => elegirTipo("rotativo"));
+
+  // --- Rotativo: muestreo + plantilla ---
+  const btnMuestrear = document.getElementById("ref-rotativo-muestrear");
+  if (btnMuestrear) btnMuestrear.addEventListener("click", muestrearRotativo);
+  const btnPlantilla = document.getElementById("ref-plantilla-print");
+  if (btnPlantilla) btnPlantilla.addEventListener("click", imprimirPlantillaConteo);
+
+  // --- Histórico: cambiar de agencia a ver ---
+  const selHistAg = document.getElementById("ref-hist-agencia");
+  if (selHistAg) selHistAg.addEventListener("change", renderHistorialAuditorias);
+
   const video = document.getElementById("ref-video");
   if (video) {
     scanner = new Scanner(video, {
@@ -166,15 +214,104 @@ export function initRefacciones() {
 // Se llama cada vez que se abre la pestaña de refacciones.
 export function renderRefacciones() {
   if (!initialized) return;
+  renderWizard();
+  // El histórico se ve siempre (incluso sin agencia elegida).
+  renderHistorialAuditorias();
+
+  // El resto del inventario solo cuando ya hay agencia + tipo elegidos.
+  const listo = !!agencyActual && !!tipoActual();
+  const inv = document.getElementById("ref-inventario");
+  if (inv) inv.hidden = !listo;
+  if (!listo) return;
+
+  aplicarVisibilidadTipo();
   renderRondas();
   renderCargaResumen();
   renderConteo();
   renderExhibicion();
   renderDiferencias();
   renderFinal();
-  renderHistorialAuditorias();
   // Comprueba el estado de conexión al abrir la pestaña (no bloquea).
   try { probarConexion(); } catch (e) {}
+}
+
+// ======================= ASISTENTE DE INICIO (WIZARD) =======================
+
+// Pinta el selector de agencia, el paso de tipo y los avisos del asistente.
+function renderWizard() {
+  const selAg = document.getElementById("ref-wizard-agencia");
+  if (selAg) {
+    // Solo las agencias de refacciones que existan dadas de alta como sitio.
+    const existentes = new Set(store.listAgencies().map(a => a.name));
+    const lista = AGENCIAS_REF.filter(a => existentes.has(a));
+    const opciones = (lista.length ? lista : AGENCIAS_REF);
+    selAg.innerHTML = `<option value="">— Selecciona la agencia —</option>` +
+      opciones.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+    selAg.value = agencyActual || "";
+  }
+  const badge = document.getElementById("ref-wizard-agencia-actual");
+  if (badge) {
+    badge.hidden = !agencyActual;
+    badge.textContent = agencyActual ? `Agencia activa: ${agencyActual}` : "";
+  }
+
+  // Paso 2 (tipo) solo visible tras elegir agencia.
+  const tipoBox = document.getElementById("ref-wizard-tipo-box");
+  if (tipoBox) tipoBox.hidden = !agencyActual;
+  const tipo = tipoActual();
+  const btnC = document.getElementById("ref-tipo-completo");
+  const btnR = document.getElementById("ref-tipo-rotativo");
+  if (btnC) btnC.classList.toggle("btn-primary", tipo === "completo");
+  if (btnR) btnR.classList.toggle("btn-primary", tipo === "rotativo");
+  const tipoActualEl = document.getElementById("ref-wizard-tipo-actual");
+  if (tipoActualEl) {
+    tipoActualEl.textContent = tipo === "completo"
+      ? "Inventario COMPLETO: se cargan existencias + marbetes, se cruzan y se cuentan todas las partes (hasta 3 conteos)."
+      : tipo === "rotativo"
+        ? "Inventario ROTATIVO: cargas existencias, eliges cuántas partes auditar al azar y haces un solo conteo."
+        : "";
+  }
+
+  const aviso = document.getElementById("ref-wizard-aviso");
+  if (aviso) {
+    aviso.textContent = !agencyActual
+      ? "Selecciona una agencia para comenzar."
+      : (!tipo ? "Elige el tipo de inventario para habilitar la carga y el conteo." : "");
+  }
+}
+
+// Elige el tipo de inventario para la agencia activa. Si ya había un tipo
+// distinto con datos cargados, avisa (cambiar de tipo no borra, pero el flujo
+// cambia). En rotativo fijamos 1 conteo; en completo, por defecto 3.
+function elegirTipo(tipo) {
+  if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
+  if (!puedeEditar() && !puedeContar()) {
+    notify("Tu rol no permite iniciar inventarios de refacciones.", { type: "warn" });
+    return;
+  }
+  const prev = store.getPartsAudit(agencyActual) || {};
+  if (prev.tipo && prev.tipo !== tipo) {
+    const hayDatos = store.listParts(agencyActual).length > 0;
+    const msg = hayDatos
+      ? `Esta agencia ya tiene un inventario ${prev.tipo.toUpperCase()} en curso con datos cargados.\n\n` +
+        `¿Cambiar a ${tipo.toUpperCase()}? Los datos cargados se conservan, pero el flujo cambia.`
+      : `¿Cambiar el tipo de inventario a ${tipo.toUpperCase()}?`;
+    if (!confirm(msg)) return;
+  }
+  const patch = { tipo };
+  if (tipo === "rotativo") { patch.rondas = 1; patch.rondaActual = 1; }
+  else if (!prev.rondas) { patch.rondas = 3; patch.rondaActual = prev.rondaActual || 1; }
+  store.setPartsAudit(agencyActual, patch);
+  logAction("parts.type.select", `Tipo de inventario (${agencyActual}): ${tipo}`, auth.currentUser()?.name || "—");
+  renderRefacciones();
+}
+
+// Muestra/oculta las secciones específicas de cada tipo (clases
+// .ref-only-completo / .ref-only-rotativo) según el tipo activo.
+function aplicarVisibilidadTipo() {
+  const rot = esRotativo();
+  document.querySelectorAll(".ref-only-rotativo").forEach(el => { el.hidden = !rot; });
+  document.querySelectorAll(".ref-only-completo").forEach(el => { el.hidden = rot; });
 }
 
 // ======================= EXHIBICIÓN / PUNTOS DE VENTA =======================
@@ -188,33 +325,27 @@ const PUNTOS_POR_AGENCIA = {
   "Aeroplasa Aeropuerto":  ["Exhibición", "Punto de Venta Calzada del Hueso", "Punto de Venta Miramontes"],
   "Aeroplasa Automotriz":  ["Exhibición", "Punto de Venta Calzada del Hueso", "Punto de Venta Miramontes"],
 };
-const AGENCIAS_REF = ["Aeroplasa Auto", "Aeroplasa Aeropuerto", "Aeroplasa Automotriz"];
+// NOTA: AGENCIAS_REF se importa de storage.js (fuente única de verdad).
 
-// Agencia del inventario de refacciones seleccionada (para filtrar exhibición).
-function agenciaExhSeleccionada() {
-  const sel = document.getElementById("ref-exh-agencia");
-  return (sel && sel.value) || AGENCIAS_REF[0];
-}
-
-// Llena el selector de AGENCIA de la sección exhibición (las 3 agencias).
+// Refleja la agencia ACTIVA (del asistente) en el selector de la sección
+// exhibición y lo deja como indicador (no es un selector independiente: la
+// agencia maestra manda). Devuelve la agencia activa.
 function fillAgenciasExh() {
   const sel = document.getElementById("ref-exh-agencia");
-  if (!sel) return;
-  // Solo las agencias de refacciones que existan dadas de alta (por si acaso).
-  const existentes = new Set(store.listAgencies().map(a => a.name));
-  const opciones = AGENCIAS_REF.filter(a => existentes.has(a));
-  const lista = opciones.length ? opciones : AGENCIAS_REF;
-  const prev = sel.value;
-  sel.innerHTML = lista.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
-  if (prev && lista.includes(prev)) sel.value = prev;
+  if (sel) {
+    sel.innerHTML = AGENCIAS_REF.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+    if (agencyActual) sel.value = agencyActual;
+    sel.disabled = true;  // la agencia se elige en el asistente, no aquí
+  }
+  return agencyActual || AGENCIAS_REF[0];
 }
 
 // Llena el desplegable de puntos de venta SOLO con los sitios de la agencia
-// seleccionada (según PUNTOS_POR_AGENCIA). Sin bodegas ni talleres.
+// ACTIVA (según PUNTOS_POR_AGENCIA). Sin bodegas ni talleres.
 function fillPuntosVenta() {
   const sel = document.getElementById("ref-exh-punto");
   if (!sel) return;
-  const agencia = agenciaExhSeleccionada();
+  const agencia = agencyActual || AGENCIAS_REF[0];
   const sitios = PUNTOS_POR_AGENCIA[agencia] || ["Exhibición"];
   const prev = sel.value;
   sel.innerHTML = `<option value="">— Punto de venta / exhibidor —</option>` +
@@ -238,9 +369,9 @@ function registrarExhibicion() {
   if (!Number.isFinite(cant) || cant < 0) { notify("La cantidad debe ser 0 o más.", { type: "warn" }); cantEl?.focus(); return; }
 
   const by = auth.currentUser()?.name || "—";
-  const p = store.setPartExhibicion(numParte, punto, cant, by);
-  logAction("parts.exhibicion", `Exhibición de ${numParte}: ${cant} en ${punto}`, by);
-  try { pushPart(numParte); } catch (e) {}
+  const p = store.setPartExhibicion(ag(), numParte, punto, cant, by);
+  logAction("parts.exhibicion", `Exhibición de ${numParte} (${ag()}): ${cant} en ${punto}`, by);
+  try { pushPart(ag(), numParte); } catch (e) {}
   setExhStatus(`✓ ${numParte}: ${cant} en ${punto} (total en exhibición: ${p.exhibicion}).`, "ok");
   if (parteEl) parteEl.value = "";
   if (cantEl) cantEl.value = "";
@@ -256,7 +387,7 @@ function renderExhibicion() {
   fillPuntosVenta();
   const el = document.getElementById("ref-exh-resumen");
   const tbody = document.querySelector("#ref-exh-table tbody");
-  const all = store.listParts();
+  const all = store.listParts(ag());
   const conExh = all.filter(p => Number(p.exhibicion || 0) > 0);
   const totalPiezas = conExh.reduce((s, p) => s + Number(p.exhibicion || 0), 0);
   if (el) el.innerHTML = `
@@ -285,7 +416,7 @@ function setExhStatus(msg, kind) { setStatusEl("ref-exh-status", msg, kind); }
 
 // Devuelve la ronda actual (1-3) y el total de rondas configurado.
 function rondaInfo() {
-  const a = store.getPartsAudit() || {};
+  const a = store.getPartsAudit(ag()) || {};
   const rondas = Math.min(3, Math.max(1, Number(a.rondas) || 1));
   const rondaActual = Math.min(rondas, Math.max(1, Number(a.rondaActual) || 1));
   return { rondas, rondaActual };
@@ -293,10 +424,21 @@ function rondaInfo() {
 
 function renderRondas() {
   const { rondas, rondaActual } = rondaInfo();
+  const rot = esRotativo();
+  // En rotativo el nº de conteos es fijo (1): se oculta el selector de rondas.
+  const rondasBox = document.getElementById("ref-rondas-box");
+  if (rondasBox) {
+    const ctl = rondasBox.querySelector(".row");
+    if (ctl) {
+      // Oculta el selector y botones de rondas en rotativo; deja el badge.
+      rondasBox.querySelectorAll("#ref-rondas-sel, #ref-ronda-siguiente, #ref-ronda-finalizar, label")
+        .forEach(el => { el.style.display = rot ? "none" : ""; });
+    }
+  }
   const sel = document.getElementById("ref-rondas-sel");
   if (sel && Number(sel.value) !== rondas) sel.value = String(rondas);
   const badge = document.getElementById("ref-ronda-actual");
-  if (badge) badge.textContent = `Conteo ${rondaActual} de ${rondas}`;
+  if (badge) badge.textContent = rot ? "Conteo único (rotativo)" : `Conteo ${rondaActual} de ${rondas}`;
   const btnSig = document.getElementById("ref-ronda-siguiente");
   if (btnSig) {
     btnSig.hidden = rondaActual >= rondas;   // en la última ronda no hay "siguiente"
@@ -315,7 +457,9 @@ function renderRondas() {
 //  - Ronda 1: pendiente si aún no tiene conteo en la ronda 1 (y tiene marbete).
 //  - Ronda ≥2: pendiente solo si en la ronda anterior quedó con DIFERENCIA.
 function pendienteEnRonda(p, ronda) {
-  if (p.enMarbetes === false) return false;       // sin marbete no entra al conteo físico
+  // En COMPLETO, solo entran al conteo las partes con marbete. En ROTATIVO todas
+  // las partes de la muestra entran (vienen de existencias, sin marbete).
+  if (!esRotativo() && p.enMarbetes === false) return false;
   const conteos = p.conteos || {};
   if (ronda === 1) return conteos["1"] == null;
   // Para rondas ≥2: solo las que la ronda anterior dejó con diferencia vs
@@ -335,7 +479,7 @@ function avanzarRonda() {
   // Resumen de la ronda que se cierra.
   const difs = listaDiferencias().filter(d => d.tipo === "faltante" || d.tipo === "sobrante").length;
   logAction("parts.count.round", `Conteo ${rondaActual} terminado · ${difs} con diferencia`, by);
-  store.setPartsAudit({ rondaActual: rondaActual + 1, rondas });
+  store.setPartsAudit(ag(), { rondaActual: rondaActual + 1, rondas });
   notify(`Conteo ${rondaActual} terminado. Ahora el conteo ${rondaActual + 1} recuenta solo las diferencias.`, { type: "success", timeout: 6000 });
   renderRondas();
   renderConteo();
@@ -353,7 +497,7 @@ function finalizarConteos() {
     : `¿Finalizar los conteos y pasar al resultado final?`;
   if (!confirm(msg)) return;
   const by = auth.currentUser()?.name || "—";
-  store.setPartsAudit({ rondas: rondaActual, rondaActual });
+  store.setPartsAudit(ag(), { rondas: rondaActual, rondaActual });
   logAction("parts.count.finish", `Conteos finalizados en el conteo ${rondaActual} (de ${rondas} configurados)`, by);
   notify(`Conteos finalizados en el conteo ${rondaActual}. Revisa las diferencias y el resultado final.`, { type: "success", timeout: 6000 });
   renderRondas();
@@ -406,8 +550,131 @@ function hacerCruce() {
   if (btnConfirmar) btnConfirmar.hidden = !(lastCruce.items.length || lastCruce.soloExistencia.length);
 }
 
+// ======================= FLUJO ROTATIVO =======================
+
+// Muestreo al azar (Fisher–Yates parcial) de `n` elementos de un array.
+function muestraAlAzar(arr, n) {
+  const a = arr.slice();
+  const m = Math.min(n, a.length);
+  for (let i = 0; i < m; i++) {
+    const j = i + Math.floor(Math.random() * (a.length - i));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, m);
+}
+
+// Rotativo: con las existencias ya cargadas (buffer `existencias`), el auditor
+// elige CUÁNTOS números de parte auditar. Se eligen al azar entre las partes con
+// existencia (>0) y se cargan SOLO esas al inventario de la agencia (se descarta
+// lo demás con retainParts). Luego se imprime la plantilla de conteo.
+function muestrearRotativo() {
+  if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
+  if (!esRotativo()) { notify("Este paso es solo para inventario rotativo.", { type: "warn" }); return; }
+  if (!puedeEditar()) { notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" }); return; }
+  if (!existencias.length) {
+    setRotativoStatus("Primero carga el archivo de existencias (CSV).", "error");
+    notify("Carga el archivo de existencias antes de muestrear.", { type: "warn" });
+    return;
+  }
+  const cantEl = document.getElementById("ref-rotativo-cant");
+  const n = Number((cantEl?.value || "").trim());
+  // Candidatos: partes con número y existencia > 0 (las que tiene sentido auditar).
+  const candidatos = existencias.filter(e => e.numParte && Number(e.existencia) > 0);
+  if (!candidatos.length) {
+    setRotativoStatus("No hay partes con existencia (>0) para muestrear en el archivo cargado.", "error");
+    return;
+  }
+  if (!Number.isFinite(n) || n < 1) {
+    setRotativoStatus("Indica cuántos números de parte vas a auditar (1 o más).", "error");
+    cantEl?.focus();
+    return;
+  }
+  const total = candidatos.length;
+  const pedir = Math.min(n, total);
+  if (n > total && !confirm(`Pediste ${n} pero solo hay ${total} partes con existencia. ¿Auditar las ${total}?`)) return;
+
+  const muestra = muestraAlAzar(candidatos, pedir);
+  const by = auth.currentUser()?.name || "—";
+  const toSave = muestra.map(e => ({
+    numParte: e.numParte,
+    descripcion: e.descripcion || "",
+    ubicacion: e.ubicacion || "",
+    grupo: e.grupo || "",
+    marbete: "",
+    existencia: e.existencia,
+    precioUnit: e.precioUnit ?? null,
+    clasificacion: e.clasificacion || "",
+    enMarbetes: false,
+    enExistencias: true,
+    origin: "rotativo",
+  }));
+
+  // El inventario rotativo contiene SOLO la muestra: cargamos y conservamos solo
+  // esos números de parte (descartamos cualquier parte previa de otra muestra).
+  store.clearParts(ag());
+  store.bulkUpsertParts(ag(), toSave, { merge: false });
+  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir });
+  logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar`, by);
+  try { pushParts(ag(), toSave); } catch (e) {}
+  setRotativoStatus(`✓ Muestra creada: ${pedir} número(s) de parte al azar de ${total}. Imprime la plantilla de conteo.`, "ok");
+  notify(`Muestra rotativa creada: ${pedir} partes.`, { type: "success", timeout: 6000 });
+  // Limpia buffers de carga (ya quedó en el store).
+  existencias = []; marbetes = []; lastCruce = null;
+  renderRefacciones();
+}
+
+function setRotativoStatus(msg, kind) { setStatusEl("ref-rotativo-status", msg, kind); }
+
+// Imprime la PLANTILLA DE CONTEO del rotativo: lista de las partes muestreadas,
+// ordenada por ubicación, con una columna en blanco para anotar a mano la
+// cantidad contada. La existencia del sistema NO se muestra (para no sesgar el
+// conteo físico).
+function imprimirPlantillaConteo() {
+  const lista = store.listParts(ag())
+    .filter(p => p.numParte)
+    .sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
+  if (!lista.length) { notify("No hay partes muestreadas. Primero genera la muestra rotativa.", { type: "warn" }); return; }
+  const by = auth.currentUser()?.name || "—";
+  const fecha = new Date().toLocaleString("es-MX");
+  const filas = lista.map((p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${esc(p.numParte)}</td>
+      <td>${esc((p.descripcion || "").slice(0, 55))}</td>
+      <td>${esc(p.ubicacion || "")}</td>
+      <td class="anota">&nbsp;</td>
+    </tr>`).join("");
+
+  const win = window.open("", "_blank", "width=900,height=1000");
+  if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Plantilla de conteo — Rotativo</title>
+    <style>
+      *{box-sizing:border-box} body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}
+      h1{font-size:18px;margin:0 0 4px} .meta{color:#555;font-size:12px;margin-bottom:12px}
+      table{width:100%;border-collapse:collapse;font-size:12px}
+      th,td{border:1px solid #ccc;padding:5px 7px;text-align:left}
+      th{background:#0f204a;color:#fff}
+      tr:nth-child(even){background:#f6f8fc}
+      .anota{width:90px;background:#fff}
+      .barra{margin-bottom:12px}
+      .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;background:#0f204a;color:#fff;cursor:pointer}
+      @media print{.barra{display:none}}
+    </style></head><body>
+    <div class="barra"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+    <h1>Plantilla de conteo (rotativo) — ${esc(ag())}</h1>
+    <div class="meta">Generada: ${esc(fecha)} · Por: ${esc(by)} · ${lista.length} número(s) de parte a auditar</div>
+    <table><thead><tr>
+      <th>#</th><th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Conteo físico</th>
+    </tr></thead><tbody>${filas}</tbody></table>
+    </body></html>`);
+  win.document.close();
+  logAction("parts.rotativo.plantilla", `Plantilla de conteo impresa (${ag()}, ${lista.length} partes)`, by);
+}
+
 function confirmarCarga() {
   if (!lastCruce) return;
+  if (!agencyActual) { notify("Primero selecciona la agencia en el asistente.", { type: "warn" }); return; }
   if (!puedeEditar()) {
     notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" });
     return;
@@ -450,10 +717,10 @@ function confirmarCarga() {
     });
   }
 
-  const res = store.bulkUpsertParts(toSave, { merge: true });
-  logAction("parts.load", `Refacciones cargadas: ${res.added} nuevas · ${res.updated} actualizadas`, by);
+  const res = store.bulkUpsertParts(ag(), toSave, { merge: true });
+  logAction("parts.load", `Refacciones cargadas (${ag()}): ${res.added} nuevas · ${res.updated} actualizadas`, by);
   // SINCRONIZACIÓN: sube el lote de refacciones al servidor (o encola si no hay red).
-  try { pushParts(toSave); } catch (e) {}
+  try { pushParts(ag(), toSave); } catch (e) {}
   notify(`Inventario de refacciones cargado: ${res.added} nuevas, ${res.updated} actualizadas.`,
     { type: "success", timeout: 6000 });
 
@@ -479,7 +746,7 @@ function limpiarCarga() {
 function renderCargaResumen() {
   const el = document.getElementById("ref-carga-resumen");
   if (!el) return;
-  const enStore = store.listParts().length;
+  const enStore = store.listParts(ag()).length;
   el.innerHTML = `
     <div class="stat"><b>${existencias.length}</b><span>Existencias cargadas</span></div>
     <div class="stat"><b>${marbetes.filter(m => !m.enBlanco).length}</b><span>Marbetes leídos</span></div>
@@ -536,7 +803,7 @@ function renderCrucePreview(c) {
 // ======================= ETIQUETAS =======================
 
 async function imprimirEtiquetas(prueba = false) {
-  const lista = store.listParts().filter(p => p.numParte);
+  const lista = store.listParts(ag()).filter(p => p.numParte);
   if (!lista.length) { notify("No hay partes en el inventario. Carga existencias/marbetes primero.", { type: "warn" }); return; }
   try {
     await printPartLabels(lista, {
@@ -586,7 +853,7 @@ function handleScan(text) {
   const inp = document.getElementById("ref-conteo-parte");
   const cant = document.getElementById("ref-conteo-cant");
   if (inp) inp.value = p.numParte;
-  const existente = store.getPart(p.numParte);
+  const existente = store.getPart(ag(), p.numParte);
   if (existente) {
     beep("ok");  // sonido/vibración de ÉXITO: la parte está en el inventario
     setScanStatus(`✓ ${p.numParte} — ${existente.descripcion || p.descripcion || ""}. Teclea la cantidad contada.`, "ok");
@@ -611,7 +878,7 @@ function registrarConteoManual() {
 
   const by = auth.currentUser()?.name || "—";
   const { rondaActual } = rondaInfo();
-  let p = store.getPart(numParte);
+  let p = store.getPart(ag(), numParte);
 
   // AVISO: si esta parte YA fue contada en la ronda ACTUAL, confirmar antes de
   // reemplazar el valor (opción A). En las rondas ≥2 recontar es lo esperado, así
@@ -631,13 +898,21 @@ function registrarConteoManual() {
       }
     }
   } else {
-    // Parte contada que no estaba en el inventario cargado: se da de alta.
-    store.upsertPart({ numParte, descripcion: "", ubicacion: "", existencia: null, enMarbetes: false, enExistencias: false, origin: "conteo" });
+    // En ROTATIVO solo se cuentan las partes muestreadas: no se dan de alta nuevas.
+    if (esRotativo()) {
+      beep("warn");
+      setScanStatus(`⚠️ ${numParte} no está en la muestra de este inventario rotativo. No se registra.`, "warn");
+      if (inp) { inp.value = ""; inp.focus(); }
+      if (cantEl) cantEl.value = "";
+      return;
+    }
+    // Completo: una parte contada que no estaba en el inventario cargado se da de alta.
+    store.upsertPart(ag(), { numParte, descripcion: "", ubicacion: "", existencia: null, enMarbetes: false, enExistencias: false, origin: "conteo" });
   }
-  p = store.setPartConteo(numParte, conteo, by, rondaActual);
-  logAction("parts.count", `Conteo ${rondaActual} de ${numParte}: ${conteo}`, by);
+  p = store.setPartConteo(ag(), numParte, conteo, by, rondaActual);
+  logAction("parts.count", `Conteo ${rondaActual} de ${numParte} (${ag()}): ${conteo}`, by);
   // SINCRONIZACIÓN: sube el conteo al servidor (o encola si no hay internet).
-  try { pushPartConteo(numParte, conteo); } catch (e) {}
+  try { pushPartConteo(ag(), numParte, conteo); } catch (e) {}
   beep(true);
   setScanStatus(`✓ Contada ${numParte}: ${conteo} (conteo ${rondaActual}).`, "ok");
   if (inp) inp.value = "";
@@ -649,16 +924,16 @@ function registrarConteoManual() {
 }
 
 function reiniciarConteo() {
-  const partes = store.listParts().filter(p => p.conteo != null || (p.conteos && Object.keys(p.conteos).length));
+  const partes = store.listParts(ag()).filter(p => p.conteo != null || (p.conteos && Object.keys(p.conteos).length));
   if (!partes.length) { notify("No hay conteos registrados.", { type: "info" }); return; }
   if (!confirm(`¿Borrar TODOS los conteos (todas las rondas) de ${partes.length} parte(s)? El inventario cargado (existencias) se conserva.`)) return;
   const by = auth.currentUser()?.name || "—";
   for (const p of partes) {
-    store.upsertPart({ numParte: p.numParte, conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null });
+    store.upsertPart(ag(), { numParte: p.numParte, conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null });
   }
   // Reiniciar la ronda a 1 (conserva el nº de rondas configurado).
-  const a = store.getPartsAudit() || {};
-  store.setPartsAudit({ rondas: a.rondas || 1, rondaActual: 1 });
+  const a = store.getPartsAudit(ag()) || {};
+  store.setPartsAudit(ag(), { rondas: a.rondas || 1, rondaActual: 1 });
   logAction("parts.count.reset", `Conteo reiniciado (${partes.length} partes)`, by);
   notify("Conteo físico reiniciado (vuelve al conteo 1).", { type: "success" });
   renderRondas();
@@ -669,7 +944,7 @@ function reiniciarConteo() {
 function renderConteo() {
   const el = document.getElementById("ref-conteo-resumen");
   if (!el) return;
-  const all = store.listParts();
+  const all = store.listParts(ag());
   const { rondaActual } = rondaInfo();
   // Contadas EN ESTA RONDA y pendientes de contar EN ESTA RONDA.
   const contadas = all.filter(p => (p.conteos || {})[String(rondaActual)] != null).length;
@@ -727,7 +1002,7 @@ function renderPendientesUbicacion() {
   if (_pendColapsado) { cont.innerHTML = ""; return; }
 
   const { rondaActual } = rondaInfo();
-  const pend = store.listParts().filter(p => pendienteEnRonda(p, rondaActual));
+  const pend = store.listParts(ag()).filter(p => pendienteEnRonda(p, rondaActual));
   if (!pend.length) {
     cont.innerHTML = `<p class="muted" style="margin:4px 0">✓ No hay partes pendientes en el conteo ${rondaActual}.</p>`;
     return;
@@ -777,7 +1052,7 @@ function difBadge(dif) {
 // Devuelve SOLO las partes con diferencia (conteo ≠ existencia) o sin dato para
 // comparar (contada sin existencia, o con existencia pero sin contar).
 function listaDiferencias() {
-  const all = store.listParts();
+  const all = store.listParts(ag());
   const out = [];
   for (const p of all) {
     const dif = diffValor(p);
@@ -849,8 +1124,8 @@ function renderDiferencias() {
 
 function tipoLabel(t) {
   return {
-    faltante: `<span style="color:var(--danger)">Faltante</span>`,
-    sobrante: `<span style="color:#b45309">Sobrante</span>`,
+    faltante: `<span style="color:var(--danger)">Ajuste negativo (faltan)</span>`,
+    sobrante: `<span style="color:#b45309">Ajuste positivo (sobran)</span>`,
     "sin-contar": `<span class="muted">Sin contar</span>`,
     "sin-existencia": `<span class="muted">Contada sin existencia</span>`,
   }[t] || t;
@@ -899,7 +1174,7 @@ function imprimirDiferencias() {
 }
 
 function tipoTexto(t) {
-  return { faltante: "Faltante", sobrante: "Sobrante", "sin-contar": "Sin contar", "sin-existencia": "Contada sin existencia" }[t] || t;
+  return { faltante: "Ajuste negativo (faltan)", sobrante: "Ajuste positivo (sobran)", "sin-contar": "Sin contar", "sin-existencia": "Contada sin existencia" }[t] || t;
 }
 
 function exportarDiferenciasCsv() {
@@ -931,25 +1206,28 @@ function exportarDiferenciasCsv() {
 // Exporta el inventario de refacciones (partes + sesión de auditoría) a un
 // archivo JSON descargable. Respaldo de seguridad por si falla el servidor.
 function exportarRespaldo() {
-  const parts = store.listParts();
-  if (!parts.length) { notify("No hay inventario de refacciones que respaldar.", { type: "warn" }); return; }
+  if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
+  const parts = store.listParts(ag());
+  if (!parts.length) { notify("No hay inventario de refacciones que respaldar en esta agencia.", { type: "warn" }); return; }
   const data = {
     tipo: "respaldo-refacciones",
-    version: 1,
+    version: 2,                       // v2: respaldo POR AGENCIA
+    agency: ag(),
     generadoEn: new Date().toISOString(),
     generadoPor: auth.currentUser()?.name || "—",
     parts,
-    partsAudit: store.getPartsAudit(),
+    partsAudit: store.getPartsAudit(ag()),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const fecha = new Date().toISOString().slice(0, 10);
+  const slug = ag().toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const a = document.createElement("a");
-  a.href = url; a.download = `respaldo-refacciones-${fecha}.json`;
+  a.href = url; a.download = `respaldo-refacciones-${slug}-${fecha}.json`;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
-  logAction("parts.backup.export", `Respaldo exportado: ${parts.length} partes`, data.generadoPor);
-  setBackupStatus(`✓ Respaldo exportado: ${parts.length} partes.`, "ok");
+  logAction("parts.backup.export", `Respaldo exportado (${ag()}): ${parts.length} partes`, data.generadoPor);
+  setBackupStatus(`✓ Respaldo exportado: ${parts.length} partes de ${ag()}.`, "ok");
 }
 
 // Importa un respaldo JSON y restaura las partes (merge) y, opcionalmente, la
@@ -967,37 +1245,77 @@ async function importarRespaldo(file) {
     setBackupStatus("El archivo no es un respaldo de refacciones válido.", "error");
     return;
   }
-  if (!confirm(`¿Importar el respaldo con ${data.parts.length} parte(s)?\n` +
-      `Se combinarán con el inventario actual (las partes del respaldo actualizan las existentes).`)) return;
+  // La agencia destino: la del respaldo (v2) o, si es v1 sin agencia, la activa.
+  // Si no hay agencia activa y el respaldo no la trae, no sabemos dónde ponerlo.
+  const destino = data.agency && AGENCIAS_REF.includes(data.agency) ? data.agency : agencyActual;
+  if (!destino) {
+    setBackupStatus("Este respaldo no indica agencia. Selecciona primero la agencia a la que quieres importarlo.", "error");
+    return;
+  }
+  const avisoAgencia = (data.agency && data.agency !== destino)
+    ? `\n\n⚠️ El respaldo es de "${data.agency}" pero se importará a "${destino}".`
+    : (!data.agency ? `\n\n(Respaldo antiguo sin agencia: se importará a "${destino}".)` : "");
+  if (!confirm(`¿Importar el respaldo con ${data.parts.length} parte(s) a la agencia "${destino}"?\n` +
+      `Se combinarán con el inventario actual de esa agencia.${avisoAgencia}`)) return;
 
-  const res = store.bulkUpsertParts(data.parts, { merge: true });
+  const res = store.bulkUpsertParts(destino, data.parts, { merge: true });
   if (data.partsAudit && typeof data.partsAudit === "object") {
-    store.setPartsAudit(data.partsAudit);
+    store.setPartsAudit(destino, data.partsAudit);
   }
   const by = auth.currentUser()?.name || "—";
-  logAction("parts.backup.import", `Respaldo importado: ${res.added} nuevas, ${res.updated} actualizadas`, by);
+  logAction("parts.backup.import", `Respaldo importado a ${destino}: ${res.added} nuevas, ${res.updated} actualizadas`, by);
   // Sube lo importado al servidor (o encola si no hay red).
-  try { pushParts(data.parts); } catch (e) {}
-  setBackupStatus(`✓ Respaldo importado: ${res.added} nuevas, ${res.updated} actualizadas.`, "ok");
+  try { pushParts(destino, data.parts); } catch (e) {}
+  setBackupStatus(`✓ Respaldo importado a ${destino}: ${res.added} nuevas, ${res.updated} actualizadas.`, "ok");
   notify("Respaldo de refacciones importado.", { type: "success", timeout: 6000 });
-  renderRondas(); renderCargaResumen(); renderConteo(); renderDiferencias(); renderFinal();
+  renderRefacciones();
 }
 
 function setBackupStatus(msg, kind) { setStatusEl("ref-backup-status", msg, kind); }
 
-// Histórico de inventarios de refacciones cerrados: tabla con fecha, valor,
-// diferencia y firmantes, para comparar entre auditorías.
+// Opciones del selector de agencia del histórico: las 3 reales + "archivo
+// anterior" solo si tiene entradas. Devuelve [{value,label}].
+function opcionesHistAgencia() {
+  const opts = AGENCIAS_REF.map(a => ({ value: a, label: a }));
+  if (store.listPartsAuditHistory(ARCHIVO_PREVIO).length) {
+    opts.push({ value: ARCHIVO_PREVIO, label: ARCHIVO_PREVIO_LABEL });
+  }
+  return opts;
+}
+
+// Llena y gobierna el selector de agencia del histórico. Por defecto sigue a la
+// agencia activa; si no hay, la primera opción disponible.
+function fillHistAgenciaSel() {
+  const sel = document.getElementById("ref-hist-agencia");
+  if (!sel) return (agencyActual || AGENCIAS_REF[0]);
+  const opts = opcionesHistAgencia();
+  const prev = sel.value;
+  sel.innerHTML = opts.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("");
+  // Prioridad: selección previa válida → agencia activa → primera opción.
+  const valido = (v) => opts.some(o => o.value === v);
+  sel.value = valido(prev) ? prev : (valido(agencyActual) ? agencyActual : opts[0].value);
+  return sel.value;
+}
+
+// Histórico de inventarios de refacciones cerrados de UNA agencia: tabla con
+// fecha, valor, diferencia y firmantes. En el "archivo anterior" muestra un
+// botón para reasignar cada cierre a su agencia real.
 function renderHistorialAuditorias() {
   const cont = document.getElementById("ref-historial");
   if (!cont) return;
-  const hist = store.listPartsAuditHistory();
+  const agSel = fillHistAgenciaSel();
+  const esArchivo = agSel === ARCHIVO_PREVIO;
+  const hist = store.listPartsAuditHistory(agSel);
   if (!hist.length) {
-    cont.innerHTML = `<p class="muted">Aún no hay inventarios cerrados. Cuando cierres una auditoría, se guardará aquí.</p>`;
+    cont.innerHTML = `<p class="muted">Sin inventarios cerrados en ${escapeHtml(esArchivo ? "el archivo anterior" : agSel)}. Cuando cierres una auditoría de esta agencia, aparecerá aquí.</p>`;
     return;
   }
   const filas = hist.map(h => {
     const fecha = h.fecha ? new Date(h.fecha).toLocaleString("es-MX") : "—";
     const firmas = [h.firmaAdmin, h.firmaRefacciones, h.firmaPosventa, h.firmaAuditor].filter(Boolean).length;
+    const accion = esArchivo
+      ? `<td><button class="btn btn-ghost ref-reasignar" data-id="${escapeHtml(h.id)}" style="padding:2px 8px;font-size:12px">Reasignar…</button></td>`
+      : "";
     return `<tr>
       <td>${escapeHtml(fecha)}</td>
       <td style="text-align:right">${h.totalPartes ?? "—"}</td>
@@ -1006,6 +1324,7 @@ function renderHistorialAuditorias() {
       <td style="text-align:right">${h.faltantes ?? 0}/${h.sobrantes ?? 0}</td>
       <td style="text-align:right">${firmas}/4</td>
       <td>${escapeHtml(h.by || "—")}</td>
+      ${accion}
     </tr>`;
   }).join("");
   cont.innerHTML = `
@@ -1017,10 +1336,35 @@ function renderHistorialAuditorias() {
           <th style="text-align:right">Diferencia $</th>
           <th style="text-align:right">Falt./Sobr.</th>
           <th style="text-align:right">Firmas</th><th>Responsable</th>
+          ${esArchivo ? "<th></th>" : ""}
         </tr></thead>
         <tbody>${filas}</tbody>
       </table>
     </div>`;
+
+  // Enganchar los botones de reasignación (solo en el archivo anterior).
+  if (esArchivo) {
+    cont.querySelectorAll(".ref-reasignar").forEach(btn => {
+      btn.addEventListener("click", () => reasignarHistorial(btn.getAttribute("data-id")));
+    });
+  }
+}
+
+// Reasigna una entrada del histórico del "archivo anterior" a una agencia real.
+function reasignarHistorial(id) {
+  if (!puedeEditar()) { notify("Tu rol no permite reasignar inventarios.", { type: "warn" }); return; }
+  const opciones = AGENCIAS_REF.map((a, i) => `${i + 1}) ${a}`).join("\n");
+  const resp = (prompt(`¿A qué agencia pertenece este inventario?\n\n${opciones}\n\nEscribe 1, 2 o 3:`, "") || "").trim();
+  const idx = Number(resp) - 1;
+  if (!(idx >= 0 && idx < AGENCIAS_REF.length)) {
+    if (resp !== "") notify("Opción no válida. No se reasignó.", { type: "warn" });
+    return;
+  }
+  const destino = AGENCIAS_REF[idx];
+  store.reassignPartsAuditHistory(id, destino);
+  logAction("parts.history.reassign", `Cierre de inventario reasignado al archivo → ${destino}`, auth.currentUser()?.name || "—");
+  notify(`Inventario reasignado a ${destino}.`, { type: "success" });
+  renderHistorialAuditorias();
 }
 
 // Diagnóstico de conexión: dice claramente si está conectado al SERVIDOR o en
@@ -1083,7 +1427,7 @@ const CLASIF_ORDEN = ["R", "L", "E", "P", "O", "I"];
 // inventario y monto de diferencia por cada clasificación. Útil para contabilidad
 // (p. ej. cuánto valor hay en obsoletos, cuánta merma en rápidos).
 function resumenPorClasificacion() {
-  const all = store.listParts();
+  const all = store.listParts(ag());
   const difs = listaDiferencias();
   // Mapa numParte → impacto $ de su diferencia (faltante/sobrante).
   const impactoPorParte = new Map();
@@ -1123,7 +1467,7 @@ function clasifNombre(k) {
 //   valorInventario: suma de existencia × precioUnit de todas las partes.
 //   valorDiferencia: suma de |diferencia| × precioUnit de las partes con diferencia.
 function resumenFinal() {
-  const all = store.listParts();
+  const all = store.listParts(ag());
   let valorInventario = 0, partesConPrecio = 0;
   for (const p of all) {
     if (p.precioUnit != null && p.existencia != null) {
@@ -1135,16 +1479,28 @@ function resumenFinal() {
   const conDif = difs.filter(d => d.tipo === "faltante" || d.tipo === "sobrante");
   let valorDiferencia = 0;
   for (const d of conDif) {
-    const p = store.getPart(d.numParte);
+    const p = store.getPart(ag(), d.numParte);
     const precio = p && p.precioUnit != null ? Number(p.precioUnit) : 0;
     valorDiferencia += Math.abs(Number(d.dif) || 0) * precio;
   }
   const noComprobadas = difs.filter(d => d.tipo === "sin-contar").length;
+
+  // AJUSTES (lo que hay que capturar en el sistema):
+  //   - Ajuste NEGATIVO: existencia > contado  (faltan piezas físicas). dif < 0.
+  //   - Ajuste POSITIVO: contado > existencia  (sobran piezas físicas). dif > 0.
+  // Para cada uno: nº de partes y suma de unidades a ajustar (magnitud).
+  const posit = conDif.filter(d => Number(d.dif) > 0);
+  const negat = conDif.filter(d => Number(d.dif) < 0);
+  const uds = (arr) => arr.reduce((s, d) => s + Math.abs(Number(d.dif) || 0), 0);
+  const ajustePositivo = { partes: posit.length, unidades: uds(posit) };
+  const ajusteNegativo = { partes: negat.length, unidades: uds(negat) };
+
   return {
     totalPartes: all.length, partesConPrecio,
     valorInventario, valorDiferencia,
-    faltantes: conDif.filter(d => d.tipo === "faltante").length,
-    sobrantes: conDif.filter(d => d.tipo === "sobrante").length,
+    faltantes: negat.length,   // faltante = ajuste negativo
+    sobrantes: posit.length,   // sobrante = ajuste positivo
+    ajustePositivo, ajusteNegativo,
     noComprobadas, difs, conDif,
   };
 }
@@ -1171,8 +1527,8 @@ function renderFinal() {
     ${aviso}
     <div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario${r.partesConPrecio < r.totalPartes ? " (parcial)" : ""}</span></div>
     <div class="stat"><b style="color:var(--danger)">${money(r.valorDiferencia)}</b><span>Monto de la diferencia</span></div>
-    <div class="stat"><b style="color:var(--danger)">${r.faltantes}</b><span>Faltantes</span></div>
-    <div class="stat"><b style="color:#b45309">${r.sobrantes}</b><span>Sobrantes</span></div>
+    <div class="stat"><b style="color:#b45309">${r.ajustePositivo.partes} · +${r.ajustePositivo.unidades}</b><span>Ajuste positivo (sobran)</span></div>
+    <div class="stat"><b style="color:var(--danger)">${r.ajusteNegativo.partes} · −${r.ajusteNegativo.unidades}</b><span>Ajuste negativo (faltan)</span></div>
     <div class="stat"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>`;
 
   renderClasificacion();
@@ -1219,8 +1575,9 @@ function imprimirResultadoFinal() {
   const fPosventa = (document.getElementById("ref-firma-posventa")?.value || "").trim();
   const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
 
-  const filas = r.difs.map(d => {
-    const p = store.getPart(d.numParte);
+  // Construye las filas de un conjunto de diferencias (para cada sección).
+  const filasDe = (arr) => arr.map(d => {
+    const p = store.getPart(ag(), d.numParte);
     const precio = p && p.precioUnit != null ? Number(p.precioUnit) : null;
     const impacto = (d.dif != null && precio != null) ? Math.abs(d.dif) * precio : null;
     return `<tr>
@@ -1232,9 +1589,27 @@ function imprimirResultadoFinal() {
       <td style="text-align:right">${d.dif == null ? "—" : (d.dif > 0 ? "+" : "") + d.dif}</td>
       <td style="text-align:right">${precio == null ? "—" : money(precio)}</td>
       <td style="text-align:right">${impacto == null ? "—" : money(impacto)}</td>
-      <td>${esc(tipoTexto(d.tipo))}</td>
     </tr>`;
   }).join("");
+
+  // Separar: ajuste POSITIVO (dif>0, sobran) y NEGATIVO (dif<0, faltan). Las "sin
+  // contar / contadas sin existencia" van en una tercera sección informativa.
+  const posit = r.conDif.filter(d => Number(d.dif) > 0);
+  const negat = r.conDif.filter(d => Number(d.dif) < 0);
+  const otras = r.difs.filter(d => d.tipo === "sin-contar" || d.tipo === "sin-existencia");
+
+  const cabTabla = `<thead><tr>
+      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Exist.</th><th>Conteo</th><th>Dif.</th>
+      <th>Precio U.</th><th>Impacto $</th>
+    </tr></thead>`;
+  const seccion = (titulo, arr, color) => arr.length
+    ? `<h2 style="color:${color}">${titulo} — ${arr.length} parte(s)</h2>
+       <table>${cabTabla}<tbody>${filasDe(arr)}</tbody></table>`
+    : "";
+  const seccionOtras = otras.length
+    ? `<h2>Otras (no comprobadas / sin existencia) — ${otras.length}</h2>
+       <table>${cabTabla}<tbody>${filasDe(otras)}</tbody></table>`
+    : "";
 
   const win = window.open("", "_blank", "width=1000,height=1100");
   if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
@@ -1262,16 +1637,16 @@ function imprimirResultadoFinal() {
     <div class="resumen">
       <div class="box"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>
       <div class="box"><b>${money(r.valorDiferencia)}</b><span>Monto total de la diferencia</span></div>
-      <div class="box"><b>${r.faltantes}</b><span>Faltantes</span></div>
-      <div class="box"><b>${r.sobrantes}</b><span>Sobrantes</span></div>
+      <div class="box"><b>${r.ajustePositivo.partes} · +${r.ajustePositivo.unidades} u.</b><span>Ajuste positivo (sobran)</span></div>
+      <div class="box"><b>${r.ajusteNegativo.partes} · −${r.ajusteNegativo.unidades} u.</b><span>Ajuste negativo (faltan)</span></div>
       <div class="box"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>
       <div class="box"><b>${r.difs.length}</b><span>Partes en el reporte</span></div>
     </div>
-    <h2>Partes con diferencia / no comprobadas</h2>
-    ${r.difs.length ? `<table><thead><tr>
-      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Exist.</th><th>Conteo</th><th>Dif.</th>
-      <th>Precio U.</th><th>Impacto $</th><th>Tipo</th>
-    </tr></thead><tbody>${filas}</tbody></table>` : "<p>Sin diferencias. El inventario cuadra. 🎉</p>"}
+    ${(posit.length || negat.length || otras.length)
+      ? `${seccion("➕ Ajuste POSITIVO (sobran piezas: contado &gt; existencia)", posit, "#b45309")}
+         ${seccion("➖ Ajuste NEGATIVO (faltan piezas: existencia &gt; contado)", negat, "#b91c1c")}
+         ${seccionOtras}`
+      : "<p>Sin diferencias. El inventario cuadra. 🎉</p>"}
     <div class="firmas">
       <div class="firma"><div class="linea">${esc(fAdmin || "&nbsp;")}</div><div class="cargo">Gte. Administrativo</div></div>
       <div class="firma"><div class="linea">${esc(fRefa || "&nbsp;")}</div><div class="cargo">Gte. de Refacciones</div></div>
@@ -1294,25 +1669,29 @@ function cerrarAuditoria() {
   if (!confirm("¿Cerrar la auditoría de refacciones y guardarla en la bitácora?")) return;
 
   const { rondas, rondaActual } = rondaInfo();
-  store.setPartsAudit({
+  const tipo = tipoActual();
+  store.setPartsAudit(ag(), {
     finishedAt: new Date().toISOString(),
     firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
   });
-  // Guarda un SNAPSHOT en el histórico (para comparar con futuras auditorías).
+  // Guarda un SNAPSHOT en el histórico (para comparar con futuras auditorías),
+  // ETIQUETADO con la agencia activa (clave del rediseño por agencia).
   store.addPartsAuditHistory({
+    agency: ag(), tipo,
     by, rondas, rondasHechas: rondaActual,
     totalPartes: r.totalPartes,
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
+    ajustePositivo: r.ajustePositivo, ajusteNegativo: r.ajusteNegativo,
     firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
     porClasificacion: resumenPorClasificacion(),
   });
   logAction("parts.audit.close",
-    `Auditoría cerrada · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
+    `Auditoría cerrada (${ag()}) · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
     `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · firmas: ${[fAdmin, fRefa, fPosventa, fAud].filter(Boolean).length}/4`, by);
-  notify("Auditoría de refacciones cerrada y registrada en la bitácora.", { type: "success", timeout: 6000 });
+  notify(`Auditoría de refacciones de ${ag()} cerrada y registrada en la bitácora.`, { type: "success", timeout: 6000 });
   renderHistorialAuditorias();
 }
 

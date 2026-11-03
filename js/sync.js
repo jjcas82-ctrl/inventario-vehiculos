@@ -9,7 +9,7 @@
 // Diseño defensivo: NADA de esto debe romper el modo local. Si el servidor no
 // responde, todo sigue funcionando en local y queda pendiente de subir.
 
-import { store } from "./storage.js";
+import { store, ARCHIVO_PREVIO } from "./storage.js";
 import * as api from "./api.js";
 import { mergeServerUsers } from "./auth.js";
 
@@ -77,17 +77,26 @@ export async function pushEvent(ev) {
 export async function pushStage(vin, stage) {
   await trySend({ type: "stage", key: vin, data: { vin, stage } }, () => api.setVehicleStage(vin, stage));
 }
-export async function pushPart(numParte) {
-  const p = store.getPart(numParte);
+// REFACCIONES por agencia: todas las operaciones llevan `agency`. La clave de
+// deduplicación es `agency|numParte` para no colapsar la misma pieza entre dos
+// agencias (p. ej. el mismo nº de parte en Auto y en Aeropuerto). El payload
+// enviado incluye `agency` para que el backend (Fase B) lo persista; mientras el
+// backend siga siendo global, el campo viaja como dato extra sin romper.
+export async function pushPart(agency, numParte) {
+  const p = store.getPart(agency, numParte);
   if (!p) return;
-  await trySend({ type: "part", key: numParte, data: p }, () => api.putPart(numParte, p));
+  const data = { ...p, agency };
+  await trySend({ type: "part", key: `${agency}|${numParte}`, data }, () => api.putPart(numParte, data));
 }
-export async function pushParts(partsArr) {
+export async function pushParts(agency, partsArr) {
   // Carga masiva: se intenta en bloque; si falla, se encola como bulk.
-  await trySend({ type: "partsBulk", data: partsArr }, () => api.bulkParts(partsArr));
+  const data = (partsArr || []).map(p => ({ ...p, agency }));
+  await trySend({ type: "partsBulk", key: `bulk|${agency}`, data }, () => api.bulkParts(data));
 }
-export async function pushPartConteo(numParte, conteo) {
-  await trySend({ type: "partConteo", key: numParte, data: { numParte, conteo } }, () => api.setPartConteo(numParte, conteo));
+export async function pushPartConteo(agency, numParte, conteo) {
+  await trySend(
+    { type: "partConteo", key: `${agency}|${numParte}`, data: { numParte, conteo, agency } },
+    () => api.setPartConteo(numParte, conteo));
 }
 export async function pushAgencies() {
   const ag = store.listAgencies();
@@ -240,12 +249,16 @@ function pushMissingVehicles(serverVins) {
     }
   }
 }
+// Fusión de refacciones por (agency, numParte). Las partes que vienen del
+// servidor sin `agency` (datos globales previos a la Fase B) se colocan en el
+// archivo previo para no mezclarlas con ninguna agencia real.
 function mergeParts(serverList) {
   for (const sp of serverList) {
     if (!sp || !sp.numParte) continue;
-    const local = store.getPart(sp.numParte);
+    const agency = sp.agency || ARCHIVO_PREVIO;
+    const local = store.getPart(agency, sp.numParte);
     if (!local || isNewer(sp.updatedAt, local.updatedAt)) {
-      store.upsertPart(sp);
+      store.upsertPart(agency, sp);
     }
   }
 }
