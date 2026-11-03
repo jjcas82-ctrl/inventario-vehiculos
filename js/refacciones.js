@@ -140,28 +140,52 @@ function parseExistenciasDelimited(text) {
 // Cada renglón del PDF: Grupo  No.deParte  Descripción  Ubicación  Marbete  [Conteo]
 // Ej: "GM 19282628 FILTRO DE AIRE 2.4 01A0101 000001-8"
 // El marbete tiene forma dddddd-d (6 dígitos, guion, dígito verificador).
+// Marbete: 6 dígitos + guion + 1 dígito verificador (dddddd-d). TOLERANTE a
+// espacios alrededor del guion (el agrupador de PDF a veces deja "000001 - 8").
+const MARBETE_RE = /(\d{6})\s*-\s*(\d)\b/;
+// Fallback si el PDF no trae el guion: una corrida de EXACTAMENTE 7 dígitos
+// aislada (p. ej. "0000018"). Se usa solo si no hubo match con guion.
+const MARBETE_FALLBACK_RE = /\b(\d{7})\b/;
+// Ubicación: código tipo 01A0101, 03I01101 (8), ALT0119, ENTREGAS, Z999Z.
+const UBIC_RE = /\b([0-9]{2}[A-Z][0-9]{4,5}|ALT[0-9]{3,4}|ENTREGAS|Z999Z)\b/;
+
+// Busca el marbete en una línea. Devuelve { marbete, index, length } o null.
+// Normaliza "000001 - 8" → "000001-8".
+function matchMarbete(line) {
+  const m = line.match(MARBETE_RE);
+  if (m) return { marbete: `${m[1]}-${m[2]}`, index: m.index, length: m[0].length };
+  const f = line.match(MARBETE_FALLBACK_RE);
+  if (f) {
+    const d = f[1];
+    return { marbete: `${d.slice(0, 6)}-${d.slice(6)}`, index: f.index, length: f[0].length };
+  }
+  return null;
+}
+
 export async function parseMarbetesFile(file, onProgress) {
   const lines = await extractPdfLines(file, onProgress);
+  return parseMarbetesLines(lines);
+}
+
+// Separado para poder probar/diagnosticar con líneas ya extraídas.
+export function parseMarbetesLines(lines) {
   const out = [];
-  const MARBETE_RE = /\b(\d{6}-\d)\b/;
-  // Ubicación: código alfanumérico tipo 01A0101, 02B0104, ALT0101, o "ENTREGAS", "Z999Z".
-  // Ubicación: código tipo 01A0101, 03I01101 (8), ALT0119, ENTREGAS, Z999Z.
-  const UBIC_RE = /\b([0-9]{2}[A-Z][0-9]{4,5}|ALT[0-9]{3,4}|ENTREGAS|Z999Z)\b/;
 
   for (const raw of lines) {
     const line = String(raw || "").trim();
+    if (!line) continue;
 
     // "MARBETE EN BLANCO" se detecta primero (no trae nº de parte ni descripción normal).
-    if (/MARBETE EN BLANCO/i.test(line)) {
-      const mb = line.match(MARBETE_RE);
+    if (/MARBETE\s+EN\s+BLANCO/i.test(line)) {
+      const mb = matchMarbete(line);
       out.push({ grupo: "", numParte: "", descripcion: "MARBETE EN BLANCO",
-                 ubicacion: (line.match(UBIC_RE) || [,""])[1], marbete: mb ? mb[1] : "", enBlanco: true });
+                 ubicacion: (line.match(UBIC_RE) || [, ""])[1], marbete: mb ? mb.marbete : "", enBlanco: true });
       continue;
     }
 
-    const mm = line.match(MARBETE_RE);
+    const mm = matchMarbete(line);
     if (!mm) continue;                       // sin marbete → no es renglón de parte
-    const marbete = mm[1];
+    const marbete = mm.marbete;
 
     // Grupo: primera palabra si es corta en mayúsculas (GM, etc.).
     const tokens = line.split(/\s+/);
@@ -172,25 +196,51 @@ export async function parseMarbetesFile(file, onProgress) {
     const um = line.match(UBIC_RE);
     const ubicacion = um ? um[1] : "";
 
-    // Número de parte: token tras el grupo. Puede ser numérico (19282628) o
-    // alfanumérico (MMFR1LS, PF48M, SOEMX, BIRLOS, H431260C). Tomamos el token
-    // que esté entre el grupo y la descripción y que NO sea la ubicación/marbete.
+    // Número de parte: primer token (tras el grupo) que NO sea la ubicación ni
+    // forme parte del marbete. Más robusto que tomar solo tokens[startIdx]: si el
+    // primer candidato resulta ser la ubicación o un trozo del marbete, avanza al
+    // siguiente. Acepta numéricos (19282628) y alfanuméricos (MMFR1LS, H431260C).
     let numParte = "";
     const startIdx = grupo ? 1 : 0;
-    if (tokens[startIdx] && !UBIC_RE.test(tokens[startIdx]) && !MARBETE_RE.test(tokens[startIdx])) {
-      numParte = tokens[startIdx];
+    for (let i = startIdx; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (!t) continue;
+      if (UBIC_RE.test(t)) continue;                    // es la ubicación
+      if (/^\d{1,6}-?\d?$/.test(t) && /\d-\d/.test(t)) continue; // trozo de marbete
+      if (/^\d{6}$/.test(t) || /^\d$/.test(t)) continue; // mitades del marbete partido
+      // Debe parecer un número de parte: al menos 3 chars alfanuméricos.
+      if (/^[0-9A-Za-z][0-9A-Za-z\-./]{2,}$/.test(t)) { numParte = t; break; }
     }
 
     // Descripción: lo que queda entre el número de parte y la ubicación.
     let descripcion = "";
-    const afterParte = line.slice(line.indexOf(numParte) + numParte.length);
-    const cutUbic = um ? afterParte.indexOf(um[1]) : -1;
-    descripcion = (cutUbic >= 0 ? afterParte.slice(0, cutUbic) : afterParte)
-      .replace(MARBETE_RE, "").replace(/\s+/g, " ").trim();
+    if (numParte) {
+      const afterParte = line.slice(line.indexOf(numParte) + numParte.length);
+      const cutUbic = um ? afterParte.indexOf(um[1]) : -1;
+      descripcion = (cutUbic >= 0 ? afterParte.slice(0, cutUbic) : afterParte)
+        .replace(MARBETE_RE, "").replace(/\s+/g, " ").trim();
+    }
 
     out.push({ grupo, numParte, descripcion, ubicacion, marbete });
   }
   return out;
+}
+
+// DIAGNÓSTICO: extrae las primeras `max` líneas crudas del PDF (tal como las ve
+// el parser) + un resumen de cuántas contienen marbete/numParte. Sirve para ver
+// el formato real del PDF del usuario cuando el cruce da 0.
+export async function diagnosticarMarbetes(file, onProgress, max = 40) {
+  const lines = await extractPdfLines(file, onProgress);
+  const parsed = parseMarbetesLines(lines);
+  const conMarbete = lines.filter(l => matchMarbete(String(l || ""))).length;
+  return {
+    totalLineas: lines.length,
+    lineasConMarbete: conMarbete,
+    marbetesParseados: parsed.filter(p => !p.enBlanco && p.numParte).length,
+    sinNumParte: parsed.filter(p => !p.enBlanco && !p.numParte).length,
+    muestra: lines.slice(0, max),
+    muestraParseada: parsed.slice(0, Math.min(max, 15)),
+  };
 }
 
 // --- CRUCE por número de parte ---
@@ -289,22 +339,23 @@ export function parsePartQr(text) {
   return null;
 }
 
-// --- Generación de ETIQUETAS QR (Janel 32×64 mm, 12 por hoja: 3 col × 4 filas) ---
+// --- Generación de ETIQUETAS QR (3 columnas × 7 filas = 21 por hoja carta) ---
 // Abre una ventana imprimible. Cada etiqueta: QR (con numParte|desc|ubic) a la
-// izquierda + número de parte y descripción a la derecha. Incluye controles de
-// margen/separación para calibrar la impresión con las etiquetas físicas.
+// izquierda + número de parte y descripción a la derecha. La hoja adhesiva es
+// completa (sin troquel), por eso se mantienen los controles de margen/separación
+// para calibrar la impresión con la hoja física.
 import { qrDataUrl } from "./qrgen.js";
 
 export async function printPartLabels(parts, opts = {}) {
   const list = (parts || []).filter(p => p.numParte);
   if (!list.length) throw new Error("No hay partes con número para generar etiquetas.");
 
-  // Medidas por defecto (ajustables). Janel 32×64 mm, 3 columnas × 4 filas.
+  // Medidas por defecto (ajustables). 3 columnas × 7 filas = 21 por hoja carta.
   const cfg = {
-    etiqAncho: opts.etiqAncho ?? 64,   // mm (la etiqueta es 64 de ancho × 32 de alto)
-    etiqAlto:  opts.etiqAlto  ?? 32,
+    etiqAncho: opts.etiqAncho ?? 64,   // mm (ancho de cada etiqueta)
+    etiqAlto:  opts.etiqAlto  ?? 32,   // mm (alto de cada etiqueta)
     cols: opts.cols ?? 3,
-    filas: opts.filas ?? 4,
+    filas: opts.filas ?? 7,            // 7 filas → 21 etiquetas por hoja carta
     margenSup: opts.margenSup ?? 12,   // mm desde arriba a la 1ª fila
     margenIzq: opts.margenIzq ?? 6,    // mm desde la izquierda a la 1ª columna
     sepH: opts.sepH ?? 2,              // mm separación horizontal entre etiquetas
@@ -356,7 +407,7 @@ export async function printPartLabels(parts, opts = {}) {
       @media print{.barra{display:none}}
     </style></head><body>
     <div class="barra">
-      <span style="margin-right:12px">Etiquetas Janel 32×64 — ${list.length} partes · ${Math.ceil(list.length / porHoja)} hoja(s)</span>
+      <span style="margin-right:12px">Etiquetas QR (${cfg.cols}×${cfg.filas}) — ${list.length} partes · ${Math.ceil(list.length / porHoja)} hoja(s)</span>
       <button onclick="window.print()">🖨️ Imprimir</button>
     </div>
     ${hojas}
