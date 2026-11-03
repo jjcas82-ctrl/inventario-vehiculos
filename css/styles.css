@@ -393,12 +393,12 @@ body.locked .inv-type-bar { display: none !important; }
    ideal para código de barras/VIN). El QR se lee mejor con un recuadro grande
    y más cuadrado. */
 .scanner.scanner-qr {
-  aspect-ratio: 3 / 4;   /* más alto que ancho: cabe un QR grande */
+  aspect-ratio: 1 / 1;   /* cuadrado: el visor queda compacto */
 }
 .scanner.scanner-qr .scanner-frame {
-  width: 78%;
-  height: 58%;           /* recuadro grande y casi cuadrado para el QR */
-  border-radius: 14px;
+  width: 70%;
+  height: 70%;           /* recuadro cuadrado, ajustado al QR de la etiqueta */
+  border-radius: 12px;
 }
 @media (min-width: 640px) {
   /* En pantallas grandes, un cuadro más equilibrado. */

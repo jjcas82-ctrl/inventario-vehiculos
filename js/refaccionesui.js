@@ -12,7 +12,7 @@
 import { store, AGENCIAS_REF, ARCHIVO_PREVIO, ARCHIVO_PREVIO_LABEL } from "./storage.js";
 import {
   parseExistenciasCsv, parseMarbetesFile, cruzar,
-  parsePartQr, printPartLabels,
+  parsePartQr, printPartLabels, diagnosticarMarbetes,
 } from "./refacciones.js";
 import { Scanner } from "./scanner.js";
 import { notify } from "./ui.js";
@@ -27,6 +27,7 @@ let scanner = null;
 let lastCruce = null;        // resultado del último cruce (para confirmar carga)
 let existencias = [];        // existencias parseadas pendientes de cruzar
 let marbetes = [];           // marbetes parseados pendientes de cruzar
+let lastMarbetesFile = null; // último PDF de marbetes cargado (para diagnóstico)
 let audioCtx = null;
 
 // ======================= AGENCIA ACTIVA (maestro) =======================
@@ -74,9 +75,11 @@ export function initRefacciones() {
     btnMarb.addEventListener("click", () => { fileMarb.value = ""; fileMarb.click(); });
     fileMarb.addEventListener("change", async () => {
       const f = fileMarb.files && fileMarb.files[0];
-      if (f) await cargarMarbetes(f);
+      if (f) { lastMarbetesFile = f; await cargarMarbetes(f); }
     });
   }
+  const btnMarbDiag = document.getElementById("ref-marbetes-diag");
+  if (btnMarbDiag) btnMarbDiag.addEventListener("click", diagnosticarPdfMarbetes);
 
   // --- Acciones del cruce ---
   const btnCruzar = document.getElementById("ref-cruzar");
@@ -162,6 +165,8 @@ export function initRefacciones() {
   if (btnFinalPdf) btnFinalPdf.addEventListener("click", imprimirResultadoFinal);
   const btnFinalCerrar = document.getElementById("ref-final-cerrar");
   if (btnFinalCerrar) btnFinalCerrar.addEventListener("click", cerrarAuditoria);
+  const btnPartAdd = document.getElementById("ref-part-add");
+  if (btnPartAdd) btnPartAdd.addEventListener("click", () => { agregarFilaParticipante(); });
 
   // --- Respaldo y conexión ---
   const btnBackupExp = document.getElementById("ref-backup-exportar");
@@ -191,10 +196,17 @@ export function initRefacciones() {
   if (btnTipoComp) btnTipoComp.addEventListener("click", () => elegirTipo("completo"));
   const btnTipoRot = document.getElementById("ref-tipo-rotativo");
   if (btnTipoRot) btnTipoRot.addEventListener("click", () => elegirTipo("rotativo"));
+  const btnNuevoInv = document.getElementById("ref-nuevo-inventario");
+  if (btnNuevoInv) btnNuevoInv.addEventListener("click", iniciarNuevoInventario);
 
   // --- Rotativo: muestreo + plantilla ---
   const btnMuestrear = document.getElementById("ref-rotativo-muestrear");
   if (btnMuestrear) btnMuestrear.addEventListener("click", muestrearRotativo);
+  const btnCargarManual = document.getElementById("ref-rotativo-cargar-manual");
+  if (btnCargarManual) btnCargarManual.addEventListener("click", cargarRotativoManual);
+  document.querySelectorAll('input[name="ref-rotativo-modo"]').forEach(r => {
+    r.addEventListener("change", aplicarModoRotativo);
+  });
   const btnPlantilla = document.getElementById("ref-plantilla-print");
   if (btnPlantilla) btnPlantilla.addEventListener("click", imprimirPlantillaConteo);
 
@@ -278,6 +290,11 @@ function renderWizard() {
       ? "Selecciona una agencia para comenzar."
       : (!tipo ? "Elige el tipo de inventario para habilitar la carga y el conteo." : "");
   }
+
+  // Botón "Iniciar nuevo inventario": visible solo si la agencia activa ya tiene
+  // partes cargadas (si no, no hay nada que vaciar).
+  const nuevoBox = document.getElementById("ref-nuevo-inv-box");
+  if (nuevoBox) nuevoBox.hidden = !(agencyActual && store.listParts(ag()).length > 0);
 }
 
 // Elige el tipo de inventario para la agencia activa. Si ya había un tipo
@@ -306,12 +323,36 @@ function elegirTipo(tipo) {
   renderRefacciones();
 }
 
+// Inicia un inventario NUEVO para la agencia activa: vacía sus partes, conteos y
+// la sesión en curso (tipo/rondas/firmas), para empezar de cero. NO toca el
+// histórico de inventarios cerrados ni el archivo anterior. Acción sensible.
+function iniciarNuevoInventario() {
+  if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
+  if (!puedeEditar()) {
+    notify("Solo quien puede EDITAR refacciones (admin/refacciones) puede iniciar un nuevo inventario.", { type: "warn" });
+    return;
+  }
+  const n = store.listParts(ag()).length;
+  const resp = (prompt(
+    `Vas a VACIAR el inventario de trabajo de "${ag()}" (${n} parte(s) y sus conteos) para empezar de cero.\n` +
+    `El HISTÓRICO de inventarios cerrados NO se borra.\n\nEscribe NUEVO para confirmar:`, "") || "").trim().toUpperCase();
+  if (resp !== "NUEVO") { if (resp !== "") notify("Cancelado: no se escribió NUEVO.", { type: "info" }); return; }
+
+  store.clearParts(ag());
+  store.clearPartsAudit(ag());
+  existencias = []; marbetes = []; lastCruce = null; lastMarbetesFile = null;
+  logAction("parts.new", `Nuevo inventario iniciado (vaciado) en ${ag()}`, auth.currentUser()?.name || "—");
+  notify(`Inventario de ${ag()} vaciado. Elige el tipo y vuelve a cargar.`, { type: "success", timeout: 6000 });
+  renderRefacciones();
+}
+
 // Muestra/oculta las secciones específicas de cada tipo (clases
 // .ref-only-completo / .ref-only-rotativo) según el tipo activo.
 function aplicarVisibilidadTipo() {
   const rot = esRotativo();
   document.querySelectorAll(".ref-only-rotativo").forEach(el => { el.hidden = !rot; });
   document.querySelectorAll(".ref-only-completo").forEach(el => { el.hidden = rot; });
+  if (rot) aplicarModoRotativo();  // ajusta sub-paneles azar/manual
 }
 
 // ======================= EXHIBICIÓN / PUNTOS DE VENTA =======================
@@ -539,6 +580,59 @@ async function cargarMarbetes(file) {
   renderCargaResumen();
 }
 
+// Herramienta de diagnóstico: muestra en una ventana el texto CRUDO que el
+// sistema extrae del PDF de marbetes y cuántos renglones reconoce. Sirve para
+// ver el formato real cuando "Marbetes leídos" sale en 0.
+async function diagnosticarPdfMarbetes() {
+  if (!lastMarbetesFile) {
+    notify("Primero sube el PDF de marbetes y luego pulsa «Ver texto del PDF».", { type: "warn" });
+    return;
+  }
+  setCargaStatus("Analizando el PDF de marbetes…", "info");
+  let diag;
+  try {
+    diag = await diagnosticarMarbetes(lastMarbetesFile, null, 60);
+  } catch (e) {
+    setCargaStatus("No se pudo analizar el PDF: " + (e.message || e), "error");
+    return;
+  }
+  setCargaStatus("", "info");
+  const win = window.open("", "_blank", "width=820,height=900");
+  if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
+  const filasCrudas = diag.muestra.map((l, i) =>
+    `<tr><td style="color:#888">${i + 1}</td><td><code>${esc(l)}</code></td></tr>`).join("");
+  const filasParse = diag.muestraParseada.map(p =>
+    `<tr><td><code>${esc(p.numParte || "(vacío)")}</code></td><td>${esc((p.descripcion || "").slice(0, 40))}</td><td><code>${esc(p.ubicacion || "")}</code></td><td><code>${esc(p.marbete || "")}</code></td></tr>`).join("");
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>Diagnóstico del PDF de marbetes</title>
+    <style>
+      body{font-family:system-ui,Arial,sans-serif;margin:20px;color:#111;font-size:13px}
+      h1{font-size:17px} h2{font-size:14px;margin-top:18px}
+      table{width:100%;border-collapse:collapse;margin-top:6px}
+      td,th{border:1px solid #ddd;padding:3px 6px;text-align:left;vertical-align:top}
+      th{background:#0f204a;color:#fff}
+      code{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+      .res{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+      .b{border:1px solid #ccc;border-radius:8px;padding:8px 12px;min-width:130px}
+      .b b{display:block;font-size:18px} .b span{font-size:11px;color:#555}
+      .warn{color:#b45309}
+    </style></head><body>
+    <h1>Diagnóstico del PDF de marbetes</h1>
+    <div class="res">
+      <div class="b"><b>${diag.totalLineas}</b><span>Líneas extraídas</span></div>
+      <div class="b"><b>${diag.lineasConMarbete}</b><span>Líneas con marbete</span></div>
+      <div class="b"><b>${diag.marbetesParseados}</b><span>Marbetes con nº de parte</span></div>
+      <div class="b"><b class="${diag.sinNumParte ? "warn" : ""}">${diag.sinNumParte}</b><span>Con marbete pero sin nº de parte</span></div>
+    </div>
+    ${diag.lineasConMarbete === 0 ? `<p class="warn"><b>⚠️ No se detectó ningún marbete.</b> Revisa el texto crudo de abajo: puede que el marbete tenga un formato distinto a <code>dddddd-d</code>, o que el PDF no traiga texto seleccionable (sea una imagen escaneada).</p>` : ""}
+    <h2>Cómo se interpretó (primeras ${diag.muestraParseada.length})</h2>
+    <table><thead><tr><th>Nº parte</th><th>Descripción</th><th>Ubicación</th><th>Marbete</th></tr></thead><tbody>${filasParse || `<tr><td colspan="4">—</td></tr>`}</tbody></table>
+    <h2>Texto crudo extraído (primeras ${diag.muestra.length} líneas)</h2>
+    <table><thead><tr><th>#</th><th>Línea</th></tr></thead><tbody>${filasCrudas}</tbody></table>
+    </body></html>`);
+  win.document.close();
+}
+
 function hacerCruce() {
   if (!marbetes.length && !existencias.length) {
     notify("Primero carga el archivo de existencias y/o el PDF de marbetes.", { type: "warn" });
@@ -551,6 +645,30 @@ function hacerCruce() {
 }
 
 // ======================= FLUJO ROTATIVO =======================
+
+// Conjunto de números de parte YA auditados en inventarios rotativos cerrados
+// anteriores de la agencia activa, con la fecha del más reciente por parte.
+// Devuelve Map<numParte, fechaISO>.
+function partesAuditadasAntes(agency) {
+  const map = new Map();
+  for (const h of store.listPartsAuditHistory(agency)) {
+    if (!Array.isArray(h.partesAuditadas)) continue;
+    for (const np of h.partesAuditadas) {
+      const prev = map.get(np);
+      if (!prev || String(h.fecha || "") > prev) map.set(np, h.fecha || "");
+    }
+  }
+  return map;
+}
+
+// Muestra/oculta los sub-paneles del rotativo según el modo elegido (azar/manual).
+function aplicarModoRotativo() {
+  const modo = (document.querySelector('input[name="ref-rotativo-modo"]:checked') || {}).value || "azar";
+  const azar = document.getElementById("ref-rotativo-azar");
+  const manual = document.getElementById("ref-rotativo-manual");
+  if (azar) azar.hidden = modo !== "azar";
+  if (manual) manual.hidden = modo !== "manual";
+}
 
 // Muestreo al azar (Fisher–Yates parcial) de `n` elementos de un array.
 function muestraAlAzar(arr, n) {
@@ -579,7 +697,7 @@ function muestrearRotativo() {
   const cantEl = document.getElementById("ref-rotativo-cant");
   const n = Number((cantEl?.value || "").trim());
   // Candidatos: partes con número y existencia > 0 (las que tiene sentido auditar).
-  const candidatos = existencias.filter(e => e.numParte && Number(e.existencia) > 0);
+  let candidatos = existencias.filter(e => e.numParte && Number(e.existencia) > 0);
   if (!candidatos.length) {
     setRotativoStatus("No hay partes con existencia (>0) para muestrear en el archivo cargado.", "error");
     return;
@@ -589,9 +707,26 @@ function muestrearRotativo() {
     cantEl?.focus();
     return;
   }
+
+  // Evitar repetir partes ya auditadas en rotativos anteriores (si está marcado).
+  const evitar = document.getElementById("ref-rotativo-evitar")?.checked;
+  let excluidas = 0;
+  if (evitar) {
+    const yaAuditadas = partesAuditadasAntes(ag());
+    if (yaAuditadas.size) {
+      const frescas = candidatos.filter(e => !yaAuditadas.has(e.numParte));
+      excluidas = candidatos.length - frescas.length;
+      // Si al excluir no alcanzan para lo pedido, avisamos y usamos las que haya;
+      // si queda vacío, caemos a permitir repetidas para no bloquear.
+      if (frescas.length >= Math.min(n, 1)) candidatos = frescas;
+      else if (frescas.length) candidatos = frescas;
+      // (si frescas está vacío, se conserva `candidatos` completo)
+    }
+  }
+
   const total = candidatos.length;
   const pedir = Math.min(n, total);
-  if (n > total && !confirm(`Pediste ${n} pero solo hay ${total} partes con existencia. ¿Auditar las ${total}?`)) return;
+  if (n > total && !confirm(`Pediste ${n} pero solo hay ${total} partes disponibles${excluidas ? ` (se excluyeron ${excluidas} ya auditadas antes)` : ""}. ¿Auditar las ${total}?`)) return;
 
   const muestra = muestraAlAzar(candidatos, pedir);
   const by = auth.currentUser()?.name || "—";
@@ -614,11 +749,79 @@ function muestrearRotativo() {
   store.clearParts(ag());
   store.bulkUpsertParts(ag(), toSave, { merge: false });
   store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir });
-  logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar`, by);
+  logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""}`, by);
   try { pushParts(ag(), toSave); } catch (e) {}
-  setRotativoStatus(`✓ Muestra creada: ${pedir} número(s) de parte al azar de ${total}. Imprime la plantilla de conteo.`, "ok");
+  const nota = excluidas ? ` Se excluyeron ${excluidas} ya auditadas antes.` : "";
+  setRotativoStatus(`Muestra creada: ${pedir} número(s) de parte al azar de ${total}.${nota} Imprime la plantilla de conteo.`, "ok");
   notify(`Muestra rotativa creada: ${pedir} partes.`, { type: "success", timeout: 6000 });
   // Limpia buffers de carga (ya quedó en el store).
+  existencias = []; marbetes = []; lastCruce = null;
+  renderRefacciones();
+}
+
+// Rotativo MANUAL: el auditor pega/escribe los números de parte a auditar. Se
+// cruzan con las existencias cargadas para traer descripción/ubicación/existencia.
+// Si algún número ya se auditó en un rotativo anterior, se avisa (con fecha) pero
+// se permite continuar.
+function cargarRotativoManual() {
+  if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
+  if (!esRotativo()) { notify("Este paso es solo para inventario rotativo.", { type: "warn" }); return; }
+  if (!puedeEditar()) { notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" }); return; }
+  if (!existencias.length) {
+    setRotativoStatus("Primero carga el archivo de existencias (CSV) para traer descripción y existencia.", "error");
+    notify("Carga el archivo de existencias antes de agregar las partes.", { type: "warn" });
+    return;
+  }
+  const txt = (document.getElementById("ref-rotativo-lista")?.value || "").trim();
+  if (!txt) { setRotativoStatus("Escribe o pega al menos un número de parte.", "error"); return; }
+  // Separar por saltos de línea, comas o punto y coma; limpiar y deduplicar.
+  const pedidos = [...new Set(txt.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean))];
+  if (!pedidos.length) { setRotativoStatus("No se reconoció ningún número de parte.", "error"); return; }
+
+  // Índice de existencias por numParte (normalizado laxo para tolerar formato).
+  const normKey = (s) => String(s || "").toUpperCase().replace(/[\s\-.]/g, "");
+  const exIdx = new Map();
+  for (const e of existencias) if (e.numParte) exIdx.set(normKey(e.numParte), e);
+
+  const by = auth.currentUser()?.name || "—";
+  const yaAuditadas = partesAuditadasAntes(ag());
+  const toSave = [];
+  const noEncontradas = [];
+  const repetidas = [];
+  for (const np of pedidos) {
+    const e = exIdx.get(normKey(np));
+    if (!e) { noEncontradas.push(np); continue; }
+    if (yaAuditadas.has(e.numParte)) {
+      const f = yaAuditadas.get(e.numParte);
+      repetidas.push(`${e.numParte}${f ? ` (${new Date(f).toLocaleDateString("es-MX")})` : ""}`);
+    }
+    toSave.push({
+      numParte: e.numParte, descripcion: e.descripcion || "", ubicacion: e.ubicacion || "",
+      grupo: e.grupo || "", marbete: "", existencia: e.existencia,
+      precioUnit: e.precioUnit ?? null, clasificacion: e.clasificacion || "",
+      enMarbetes: false, enExistencias: true, origin: "rotativo-manual",
+    });
+  }
+  if (!toSave.length) {
+    setRotativoStatus(`Ninguno de los ${pedidos.length} número(s) está en las existencias cargadas.`, "error");
+    return;
+  }
+  // Aviso de repetidas (permite continuar).
+  if (repetidas.length) {
+    const lista = repetidas.slice(0, 10).join(", ") + (repetidas.length > 10 ? `, …(+${repetidas.length - 10})` : "");
+    if (!confirm(`Aviso: ${repetidas.length} número(s) de parte ya se auditaron en inventarios anteriores:\n\n${lista}\n\n¿Continuar de todos modos?`)) return;
+  }
+
+  store.clearParts(ag());
+  store.bulkUpsertParts(ag(), toSave, { merge: false });
+  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: toSave.length, modoMuestreo: "manual" });
+  logAction("parts.rotativo.manual", `Rotativo manual (${ag()}): ${toSave.length} partes${repetidas.length ? ` · ${repetidas.length} repetidas` : ""}${noEncontradas.length ? ` · ${noEncontradas.length} no encontradas` : ""}`, by);
+  try { pushParts(ag(), toSave); } catch (e) {}
+  let msg = `Cargadas ${toSave.length} parte(s) a auditar.`;
+  if (noEncontradas.length) msg += ` ${noEncontradas.length} no estaban en existencias (omitidas).`;
+  if (repetidas.length) msg += ` ${repetidas.length} ya auditadas antes.`;
+  setRotativoStatus(msg + " Imprime la plantilla de conteo.", "ok");
+  notify(`Rotativo manual: ${toSave.length} partes cargadas.`, { type: "success", timeout: 6000 });
   existencias = []; marbetes = []; lastCruce = null;
   renderRefacciones();
 }
@@ -924,9 +1127,17 @@ function registrarConteoManual() {
 }
 
 function reiniciarConteo() {
+  // Acción sensible: requiere permiso de edición (no solo contar) para evitar
+  // que un operador borre los conteos por error.
+  if (!puedeEditar()) {
+    notify("Solo quien puede EDITAR refacciones (admin/refacciones) puede reiniciar el conteo.", { type: "warn" });
+    return;
+  }
   const partes = store.listParts(ag()).filter(p => p.conteo != null || (p.conteos && Object.keys(p.conteos).length));
   if (!partes.length) { notify("No hay conteos registrados.", { type: "info" }); return; }
-  if (!confirm(`¿Borrar TODOS los conteos (todas las rondas) de ${partes.length} parte(s)? El inventario cargado (existencias) se conserva.`)) return;
+  // Confirmación reforzada: escribir la palabra para evitar ejecuciones por error.
+  const resp = (prompt(`Vas a BORRAR todos los conteos (todas las rondas) de ${partes.length} parte(s) en "${ag()}".\nEl inventario cargado (existencias) se conserva.\n\nEscribe BORRAR para confirmar:`, "") || "").trim().toUpperCase();
+  if (resp !== "BORRAR") { if (resp !== "") notify("Cancelado: no se escribió BORRAR.", { type: "info" }); return; }
   const by = auth.currentUser()?.name || "—";
   for (const p of partes) {
     store.upsertPart(ag(), { numParte: p.numParte, conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null });
@@ -1133,7 +1344,7 @@ function tipoLabel(t) {
 
 function imprimirDiferencias() {
   const difs = listaDiferencias();
-  if (!difs.length) { notify("No hay diferencias que reportar. ¡El conteo cuadra!", { type: "success" }); return; }
+  if (!difs.length) { notify("No hay diferencias que reportar. El conteo cuadra.", { type: "success" }); return; }
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString();
   const filas = difs.map(d => `
@@ -1312,7 +1523,10 @@ function renderHistorialAuditorias() {
   }
   const filas = hist.map(h => {
     const fecha = h.fecha ? new Date(h.fecha).toLocaleString("es-MX") : "—";
-    const firmas = [h.firmaAdmin, h.firmaRefacciones, h.firmaPosventa, h.firmaAuditor].filter(Boolean).length;
+    // Participantes del cierre nuevo; compat con cierres viejos (firmas fijas).
+    const firmas = Array.isArray(h.participantes)
+      ? h.participantes.length
+      : [h.firmaAdmin, h.firmaRefacciones, h.firmaPosventa, h.firmaAuditor].filter(Boolean).length;
     const accion = esArchivo
       ? `<td><button class="btn btn-ghost ref-reasignar" data-id="${escapeHtml(h.id)}" style="padding:2px 8px;font-size:12px">Reasignar…</button></td>`
       : "";
@@ -1322,7 +1536,7 @@ function renderHistorialAuditorias() {
       <td style="text-align:right">${money(h.valorInventario || 0)}</td>
       <td style="text-align:right;color:var(--danger)">${money(h.valorDiferencia || 0)}</td>
       <td style="text-align:right">${h.faltantes ?? 0}/${h.sobrantes ?? 0}</td>
-      <td style="text-align:right">${firmas}/4</td>
+      <td style="text-align:right">${firmas}</td>
       <td>${escapeHtml(h.by || "—")}</td>
       ${accion}
     </tr>`;
@@ -1335,7 +1549,7 @@ function renderHistorialAuditorias() {
           <th style="text-align:right">Valor inventario</th>
           <th style="text-align:right">Diferencia $</th>
           <th style="text-align:right">Falt./Sobr.</th>
-          <th style="text-align:right">Firmas</th><th>Responsable</th>
+          <th style="text-align:right">Firmantes</th><th>Responsable</th>
           ${esArchivo ? "<th></th>" : ""}
         </tr></thead>
         <tbody>${filas}</tbody>
@@ -1532,6 +1746,10 @@ function renderFinal() {
     <div class="stat"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>`;
 
   renderClasificacion();
+  // Solo inicializa participantes la primera vez (si el contenedor está vacío),
+  // para no borrar lo que el usuario está capturando en cada repintado.
+  const pc = document.getElementById("ref-participantes");
+  if (pc && !pc.children.length) renderParticipantes();
 }
 
 // Tabla de valor y diferencias por CLASIFICACIÓN (L/O/R/E/P/I) para contabilidad.
@@ -1564,16 +1782,13 @@ function renderClasificacion() {
 }
 
 // Imprime la hoja de resultado final con el resumen, las partes con diferencia y
-// el área de firmas (Gte. Administrativo, Gte. de Refacciones, Auditor).
+// el área de firmas (una por cada participante capturado: nombre y cargo).
 function imprimirResultadoFinal() {
   const r = resumenFinal();
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString();
   const { rondas, rondaActual } = rondaInfo();
-  const fAdmin = (document.getElementById("ref-firma-admin")?.value || "").trim();
-  const fRefa = (document.getElementById("ref-firma-refacciones")?.value || "").trim();
-  const fPosventa = (document.getElementById("ref-firma-posventa")?.value || "").trim();
-  const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
+  const participantes = leerParticipantes();
 
   // Construye las filas de un conjunto de diferencias (para cada sección).
   const filasDe = (arr) => arr.map(d => {
@@ -1611,6 +1826,15 @@ function imprimirResultadoFinal() {
        <table>${cabTabla}<tbody>${filasDe(otras)}</tbody></table>`
     : "";
 
+  // Área de firmas: una por participante (nombre + cargo). Si no hay ninguno,
+  // deja una línea genérica para firmar a mano.
+  const firmas = participantes.length ? participantes : [{ nombre: "", cargo: "" }];
+  const firmasHtml = `<div class="firmas">` + firmas.map(p => `
+      <div class="firma">
+        <div class="linea">${esc(p.nombre || "")}</div>
+        <div class="cargo">${esc(p.cargo || "Nombre y firma")}</div>
+      </div>`).join("") + `</div>`;
+
   const win = window.open("", "_blank", "width=1000,height=1100");
   if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
   win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
@@ -1643,36 +1867,74 @@ function imprimirResultadoFinal() {
       <div class="box"><b>${r.difs.length}</b><span>Partes en el reporte</span></div>
     </div>
     ${(posit.length || negat.length || otras.length)
-      ? `${seccion("➕ Ajuste POSITIVO (sobran piezas: contado &gt; existencia)", posit, "#b45309")}
-         ${seccion("➖ Ajuste NEGATIVO (faltan piezas: existencia &gt; contado)", negat, "#b91c1c")}
+      ? `${seccion("Ajuste POSITIVO (sobran piezas: contado &gt; existencia)", posit, "#b45309")}
+         ${seccion("Ajuste NEGATIVO (faltan piezas: existencia &gt; contado)", negat, "#b91c1c")}
          ${seccionOtras}`
-      : "<p>Sin diferencias. El inventario cuadra. 🎉</p>"}
-    <div class="firmas">
-      <div class="firma"><div class="linea">${esc(fAdmin || "&nbsp;")}</div><div class="cargo">Gte. Administrativo</div></div>
-      <div class="firma"><div class="linea">${esc(fRefa || "&nbsp;")}</div><div class="cargo">Gte. de Refacciones</div></div>
-      <div class="firma"><div class="linea">${esc(fPosventa || "&nbsp;")}</div><div class="cargo">Gte. de Posventa</div></div>
-      <div class="firma"><div class="linea">${esc(fAud || "&nbsp;")}</div><div class="cargo">Auditor (nombre y firma)</div></div>
-    </div>
+      : "<p>Sin diferencias. El inventario cuadra.</p>"}
+    ${firmasHtml}
     </body></html>`);
   win.document.close();
-  logAction("parts.audit.result", `Resultado impreso · dif ${money(r.valorDiferencia)} · ${r.conDif.length} partes`, by);
+  logAction("parts.audit.result", `Resultado impreso · dif ${money(r.valorDiferencia)} · ${r.conDif.length} partes · ${participantes.length} firmantes`, by);
 }
 
-// Cierra la auditoría: guarda firmantes y resumen en la bitácora y marca fin.
+// ======================= PARTICIPANTES / FIRMANTES =======================
+
+// Agrega una fila de participante (nombre + cargo) a la UI. Si se pasan valores,
+// precarga la fila (para restaurar los guardados en la sesión).
+function agregarFilaParticipante(nombre = "", cargo = "") {
+  const cont = document.getElementById("ref-participantes");
+  if (!cont) return;
+  const row = document.createElement("div");
+  row.className = "row gap wrap ref-part-row";
+  row.style.margin = "6px 0";
+  row.innerHTML = `
+    <input type="text" class="ref-part-nombre" placeholder="Nombre completo" style="flex:2;min-width:160px" value="${escapeHtml(nombre)}" />
+    <input type="text" class="ref-part-cargo" placeholder="Cargo / puesto" style="flex:1;min-width:130px" value="${escapeHtml(cargo)}" />
+    <button class="btn btn-ghost ref-part-del" type="button" title="Quitar" style="min-width:40px">✕</button>`;
+  row.querySelector(".ref-part-del").addEventListener("click", () => { row.remove(); });
+  cont.appendChild(row);
+}
+
+// Lee los participantes capturados en la UI: [{nombre, cargo}] (sin filas vacías).
+function leerParticipantes() {
+  const cont = document.getElementById("ref-participantes");
+  if (!cont) return [];
+  const out = [];
+  cont.querySelectorAll(".ref-part-row").forEach(row => {
+    const nombre = (row.querySelector(".ref-part-nombre")?.value || "").trim();
+    const cargo = (row.querySelector(".ref-part-cargo")?.value || "").trim();
+    if (nombre || cargo) out.push({ nombre, cargo });
+  });
+  return out;
+}
+
+// Repinta la sección de participantes a partir de la sesión guardada de la
+// agencia activa (o deja una fila vacía para empezar).
+function renderParticipantes() {
+  const cont = document.getElementById("ref-participantes");
+  if (!cont) return;
+  const a = store.getPartsAudit(ag()) || {};
+  const guardados = Array.isArray(a.participantes) ? a.participantes : [];
+  cont.innerHTML = "";
+  if (guardados.length) guardados.forEach(p => agregarFilaParticipante(p.nombre, p.cargo));
+  else agregarFilaParticipante();  // una fila vacía inicial
+}
+
+// Cierra la auditoría: guarda participantes y resumen en la bitácora y marca fin.
 function cerrarAuditoria() {
   const r = resumenFinal();
   const by = auth.currentUser()?.name || "—";
-  const fAdmin = (document.getElementById("ref-firma-admin")?.value || "").trim();
-  const fRefa = (document.getElementById("ref-firma-refacciones")?.value || "").trim();
-  const fPosventa = (document.getElementById("ref-firma-posventa")?.value || "").trim();
-  const fAud = (document.getElementById("ref-firma-auditor")?.value || "").trim();
   if (!confirm("¿Cerrar la auditoría de refacciones y guardarla en la bitácora?")) return;
 
   const { rondas, rondaActual } = rondaInfo();
   const tipo = tipoActual();
+  const participantes = leerParticipantes();   // [{nombre, cargo}]
+  // Lista de números de parte auditados en este inventario (para que un ROTATIVO
+  // futuro pueda evitar repetirlos).
+  const partesAuditadas = store.listParts(ag()).map(p => p.numParte).filter(Boolean);
   store.setPartsAudit(ag(), {
     finishedAt: new Date().toISOString(),
-    firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
+    participantes,
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
   });
@@ -1685,12 +1947,13 @@ function cerrarAuditoria() {
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
     ajustePositivo: r.ajustePositivo, ajusteNegativo: r.ajusteNegativo,
-    firmaAdmin: fAdmin, firmaRefacciones: fRefa, firmaPosventa: fPosventa, firmaAuditor: fAud,
+    participantes,
+    partesAuditadas,
     porClasificacion: resumenPorClasificacion(),
   });
   logAction("parts.audit.close",
-    `Auditoría cerrada (${ag()}) · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
-    `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · firmas: ${[fAdmin, fRefa, fPosventa, fAud].filter(Boolean).length}/4`, by);
+    `Auditoría cerrada (${ag()}, ${tipo}) · inventario ${money(r.valorInventario)} · diferencia ${money(r.valorDiferencia)} · ` +
+    `${r.faltantes} faltantes, ${r.sobrantes} sobrantes · participantes: ${participantes.length}`, by);
   notify(`Auditoría de refacciones de ${ag()} cerrada y registrada en la bitácora.`, { type: "success", timeout: 6000 });
   renderHistorialAuditorias();
 }
