@@ -146,6 +146,8 @@ export function initRefacciones() {
   if (btnRondaSig) btnRondaSig.addEventListener("click", avanzarRonda);
   const btnRondaFin = document.getElementById("ref-ronda-finalizar");
   if (btnRondaFin) btnRondaFin.addEventListener("click", finalizarConteos);
+  const btnHojaConteo = document.getElementById("ref-hoja-conteo");
+  if (btnHojaConteo) btnHojaConteo.addEventListener("click", () => imprimirHojaConteo());
 
   // --- Reporte de diferencias ---
   const btnDiffPdf = document.getElementById("ref-diff-pdf");
@@ -545,6 +547,84 @@ function finalizarConteos() {
   renderConteo();
   renderDiferencias();
   renderFinal();
+}
+
+// Imprime la HOJA DEL CONTEO para capturar en el sistema de la agencia. Muestra
+// nº de parte, MARBETE, descripción, ubicación y la CANTIDAD CONTADA (valores
+// reales, no en blanco). En el conteo 1 incluye TODAS las partes contadas en esa
+// ronda; en el conteo 2/3 solo las que SIGUEN con diferencia (son las que hay que
+// recapturar). Pensada para el flujo COMPLETO.
+function imprimirHojaConteo() {
+  const { rondas, rondaActual } = rondaInfo();
+  const all = store.listParts(ag());
+
+  // Conteo de referencia a imprimir: lo capturado en la ronda actual (o la última
+  // con datos). Para ronda 1 = todas las contadas; para ronda ≥2 = solo las que
+  // quedaron con diferencia tras esa ronda.
+  let lista;
+  if (rondaActual <= 1) {
+    lista = all.filter(p => (p.conteos || {})["1"] != null || p.conteo != null);
+  } else {
+    // Partes con diferencia considerando el conteo de la ronda actual (+exhibición).
+    lista = all.filter(p => {
+      const c = (p.conteos || {})[String(rondaActual)];
+      if (c == null || p.existencia == null) return false;
+      return (Number(c) + Number(p.exhibicion || 0)) !== Number(p.existencia);
+    });
+  }
+  if (!lista.length) {
+    notify(`No hay partes contadas en el conteo ${rondaActual} para imprimir.`, { type: "warn" });
+    return;
+  }
+  // Ordenar por ubicación para capturar en orden.
+  lista.sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
+
+  const by = auth.currentUser()?.name || "—";
+  const fecha = new Date().toLocaleString("es-MX");
+  const filas = lista.map((p, i) => {
+    const c = (p.conteos || {})[String(rondaActual)];
+    const cantidad = c != null ? c : (p.conteo != null ? p.conteo : "");
+    const total = cantidad === "" ? "" : Number(cantidad) + Number(p.exhibicion || 0);
+    return `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(p.numParte)}</td>
+      <td>${esc(p.marbete || "")}</td>
+      <td>${esc((p.descripcion || "").slice(0, 50))}</td>
+      <td>${esc(p.ubicacion || "")}</td>
+      <td style="text-align:right">${esc(String(cantidad))}</td>
+      <td style="text-align:right">${esc(String(total))}</td>
+    </tr>`;
+  }).join("");
+
+  const titulo = rondaActual <= 1
+    ? "Hoja del 1er conteo (para captura en el sistema)"
+    : `Hoja del conteo ${rondaActual} — solo diferencias (para captura)`;
+
+  const win = window.open("", "_blank", "width=900,height=1000");
+  if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <title>${esc(titulo)}</title>
+    <style>
+      *{box-sizing:border-box} body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}
+      h1{font-size:17px;margin:0 0 4px} .meta{color:#555;font-size:12px;margin-bottom:12px}
+      table{width:100%;border-collapse:collapse;font-size:12px}
+      th,td{border:1px solid #ccc;padding:5px 7px;text-align:left}
+      th{background:#0f204a;color:#fff}
+      tr:nth-child(even){background:#f6f8fc}
+      .barra{margin-bottom:12px}
+      .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;background:#0f204a;color:#fff;cursor:pointer}
+      @media print{.barra{display:none}}
+    </style></head><body>
+    <div class="barra"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+    <h1>${esc(titulo)} — ${esc(ag())}</h1>
+    <div class="meta">Generada: ${esc(fecha)} · Por: ${esc(by)} · Conteo ${rondaActual} de ${rondas} · ${lista.length} parte(s)</div>
+    <table><thead><tr>
+      <th>#</th><th>No. parte</th><th>Marbete</th><th>Descripción</th><th>Ubicación</th>
+      <th>Contado</th><th>Contado + exhib.</th>
+    </tr></thead><tbody>${filas}</tbody></table>
+    </body></html>`);
+  win.document.close();
+  logAction("parts.count.sheet", `Hoja de conteo ${rondaActual} impresa (${ag()}, ${lista.length} partes)`, by);
 }
 
 export function stopRefacciones() { try { stopScan(); } catch (e) {} }
@@ -971,6 +1051,7 @@ function renderCrucePreview(c) {
     return `<tr>
       <td>${i + 1}</td>
       <td><code>${escapeHtml(it.numParte || "—")}</code></td>
+      <td><code>${escapeHtml(it.marbete || "")}</code></td>
       <td>${escapeHtml((it.descripcion || "").slice(0, 50))}</td>
       <td><code>${escapeHtml(it.ubicacion || "")}</code></td>
       <td style="text-align:right">${it.existencia == null ? "—" : escapeHtml(String(it.existencia))}</td>
@@ -978,7 +1059,7 @@ function renderCrucePreview(c) {
     </tr>`;
   }).join("");
   const more = c.items.length > PAGE
-    ? `<tr><td colspan="6" class="muted">… y ${c.items.length - PAGE} más (todas se cargarán al confirmar).</td></tr>`
+    ? `<tr><td colspan="7" class="muted">… y ${c.items.length - PAGE} más (todas se cargarán al confirmar).</td></tr>`
     : "";
 
   const soloExist = c.soloExistencia.length
@@ -998,7 +1079,7 @@ function renderCrucePreview(c) {
     ${soloExist}
     <div class="table-wrap" style="max-height:340px;overflow:auto">
       <table class="table"><thead><tr>
-        <th>#</th><th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Estado</th>
+        <th>#</th><th>No. parte</th><th>Marbete</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Estado</th>
       </tr></thead><tbody>${filas}${more}</tbody></table>
     </div>`;
 }
@@ -1059,12 +1140,20 @@ function handleScan(text) {
   const existente = store.getPart(ag(), p.numParte);
   if (existente) {
     beep("ok");  // sonido/vibración de ÉXITO: la parte está en el inventario
-    setScanStatus(`✓ ${p.numParte} — ${existente.descripcion || p.descripcion || ""}. Teclea la cantidad contada.`, "ok");
+    setScanStatus(`✓ ${p.numParte} — ${existente.descripcion || p.descripcion || ""}. Teclea la cantidad y pulsa Registrar (o Enter).`, "ok");
   } else {
     beep("warn");  // sonido/vibración de AVISO: la parte NO está en el inventario
     setScanStatus(`⚠️ ${p.numParte} no está en el inventario cargado. Puedes contarla igual.`, "warn");
   }
+  // Enfoca la cantidad para teclear de inmediato. La cámara SIGUE encendida: tras
+  // registrar, el escáner queda listo para la siguiente parte sin reiniciar.
   if (cant) { cant.value = ""; cant.focus(); }
+}
+
+// Permite que el escáner vuelva a emitir el MISMO código tras registrar (si no,
+// el anti-ráfaga de 1.2s bloquearía re-escanear la misma parte a propósito).
+function resetScanDedupe() {
+  if (scanner) { scanner._lastEmit = null; scanner._lastEmitAt = 0; }
 }
 
 function registrarConteoManual() {
@@ -1117,10 +1206,18 @@ function registrarConteoManual() {
   // SINCRONIZACIÓN: sube el conteo al servidor (o encola si no hay internet).
   try { pushPartConteo(ag(), numParte, conteo); } catch (e) {}
   beep(true);
-  setScanStatus(`✓ Contada ${numParte}: ${conteo} (conteo ${rondaActual}).`, "ok");
   if (inp) inp.value = "";
   if (cantEl) cantEl.value = "";
-  if (inp) inp.focus();
+  // ESCANEO CONTINUO: si la cámara está activa, deja todo listo para escanear la
+  // siguiente parte SIN detener la cámara (y permite re-escanear la misma si hace
+  // falta). Si no, enfoca el campo de nº de parte para seguir capturando.
+  if (scanner && scanner.running) {
+    resetScanDedupe();
+    setScanStatus(`✓ Contada ${numParte}: ${conteo}. Escanea la SIGUIENTE parte…`, "ok");
+  } else {
+    setScanStatus(`✓ Contada ${numParte}: ${conteo} (conteo ${rondaActual}).`, "ok");
+    if (inp) inp.focus();
+  }
   renderConteo();
   renderDiferencias();
   renderFinal();
@@ -1193,6 +1290,7 @@ function renderConteo() {
       const dif = diffValor(p);
       return `<tr>
         <td><code>${escapeHtml(p.numParte)}</code></td>
+        <td><code>${escapeHtml(p.marbete || "")}</code></td>
         <td>${escapeHtml((p.descripcion || "").slice(0, 40))}</td>
         <td style="text-align:right">${p.existencia == null ? "—" : escapeHtml(String(p.existencia))}</td>
         <td style="text-align:right"><b>${escapeHtml(String(p.conteo))}</b></td>

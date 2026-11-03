@@ -833,6 +833,7 @@
             <span id="ref-ronda-actual" class="tag" style="background:#e0e7ff;color:#3730a3;font-weight:700">Conteo 1 de 3</span>
             <button id="ref-ronda-siguiente" class="btn">Terminar conteo y pasar al siguiente →</button>
             <button id="ref-ronda-finalizar" class="btn btn-primary">✓ Finalizar conteos</button>
+            <button id="ref-hoja-conteo" class="btn">🖨️ Imprimir hoja del conteo (para capturar)</button>
           </div>
           <p id="ref-ronda-hint" class="hint" style="margin:6px 0 0">1er conteo: todas las partes. Los siguientes recuentan solo las que sigan con diferencia.</p>
         </div>
@@ -866,12 +867,12 @@
             <button id="ref-cant-mas" class="btn" type="button" title="Sumar 1" style="font-size:22px;font-weight:700;min-width:52px;padding:6px 0">+</button>
             <button id="ref-conteo-manual-btn" class="btn btn-primary">Registrar conteo</button>
           </div>
-          <p class="hint" style="margin:6px 0 0">Escanea el QR o escribe el número de parte; ajusta la cantidad con <b>+ / −</b> o tecléala, y pulsa <b>Registrar</b>.</p>
+          <p class="hint" style="margin:6px 0 0">Escanea el QR (suena un <b>beep</b> al leer), teclea la cantidad y pulsa <b>Registrar</b> o <b>Enter</b>. La cámara <b>sigue encendida</b>: tras registrar, escanea directamente la siguiente parte sin detenerla.</p>
         </div>
         <p id="ref-scan-status" class="hint"></p>
         <div class="table-wrap" style="max-height:300px;overflow:auto">
           <table class="table" id="ref-conteo-table">
-            <thead><tr><th>No. parte</th><th>Descripción</th><th>Existencia</th><th>Conteo</th><th>Dif.</th></tr></thead>
+            <thead><tr><th>No. parte</th><th>Marbete</th><th>Descripción</th><th>Existencia</th><th>Conteo</th><th>Dif.</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
