@@ -137,28 +137,18 @@ function parseExistenciasDelimited(text) {
   return out;
 }
 
-// Repara ubicaciones que Excel corrompió a NOTACIÓN CIENTÍFICA al exportar.
-// El sistema interno emite códigos como "204E303"; Excel los interpreta como
-// número y los guarda "2.04E+303" (= 2.04 × 10^303). Reconstruimos el código:
-//   "2.04E+303"  → "204" + "E" + "0" + "303"  = "204E0303"
-//   "2.03E+206"  → "203E0206",  "2.05E+107" → "205E0107", etc.
-// La forma objetivo coincide con las ubicaciones normales (NNÁNN0NN / NNÁNNNN).
-// Devuelve { ubicacion, recuperada }: recuperada=true si se reconstruyó (para
-// poder marcarla en la UI y que el usuario la verifique).
+// Detecta ubicaciones que Excel corrompió a NOTACIÓN CIENTÍFICA al exportar
+// (p. ej. "2.04E+303"). NO intenta reconstruir el valor (no es fiable: el código
+// real puede ser distinto, confirmado contra el sistema). Se DEJA TAL CUAL y solo
+// se marca como "dañada" para avisar al usuario que la verifique. En el inventario
+// COMPLETO, el cruce la corrige con la ubicación del MARBETE (dato real).
+// Devuelve { ubicacion (sin cambios), danada }.
+function esUbicacionCientifica(s) {
+  return /^\d\.\d+E\+?\d+$/i.test(String(s || "").trim());
+}
 function repararUbicacion(s) {
   const t = String(s || "").trim();
-  // Patrón de Excel: d.ddE+ddd  (p. ej. 2.04E+303, 2.4E+303).
-  const m = t.match(/^(\d)\.(\d+)E\+?(\d+)$/i);
-  if (!m) return { ubicacion: t, recuperada: false };
-  // Dígitos de la "mantisa": el entero + los decimales → los 3 primeros del código.
-  const mant = (m[1] + m[2]);                 // "2" + "04" = "204"  |  "2"+"4" = "24"
-  const exp = m[3];                            // "303"
-  // Prefijo de 3 dígitos (rellena si la mantisa quedó corta).
-  const pref = (mant + "000").slice(0, 3);     // "204"
-  // La letra siempre es E en estos casos (el código tenía forma 20X E YZZ).
-  // Reconstrucción: PREF + 'E' + '0' + EXP  → 8 caracteres como las normales.
-  const recon = `${pref}E0${exp}`;
-  return { ubicacion: recon, recuperada: true };
+  return { ubicacion: t, recuperada: esUbicacionCientifica(t) };
 }
 
 // --- Parseo de MARBETES (PDF) ---
@@ -306,13 +296,27 @@ export function cruzar(marbetes, existencias) {
     if (m.enBlanco) { items.push({ ...m, existencia: null, enExistencias: false, enMarbetes: true }); continue; }
     const { ex } = resolverEx(m.numParte);
     if (ex) vistos.add(norm(ex.numParte));
+    // UBICACIÓN: en el inventario COMPLETO el marbete trae la ubicación REAL. Si
+    // la de existencias está dañada (notación científica de Excel) y el marbete
+    // tiene una válida, gana la del MARBETE. Reglas:
+    //   - marbete con ubicación válida          → usar la del marbete (correcta).
+    //   - sin marbete → usar la de existencias (aunque esté dañada) y marcarla.
+    const ubicMarb = (m.ubicacion || "").trim();
+    const ubicEx = ex ? (ex.ubicacion || "").trim() : "";
+    const exDanada = ex ? !!ex.ubicRecuperada : false;
+    let ubicFinal, danadaFinal;
+    if (ubicMarb && !esUbicacionCientifica(ubicMarb)) {
+      ubicFinal = ubicMarb; danadaFinal = false;          // el marbete corrige
+    } else {
+      ubicFinal = ubicMarb || ubicEx;                      // lo que haya
+      danadaFinal = esUbicacionCientifica(ubicFinal) || (!ubicMarb && exDanada);
+    }
     items.push({
       grupo: m.grupo || "",
       numParte: m.numParte,
       descripcion: m.descripcion || (ex ? ex.descripcion : ""),
-      ubicacion: m.ubicacion || (ex ? ex.ubicacion : ""),
-      // Si la ubicación proviene de la existencia reconstruida, hereda la marca.
-      ubicRecuperada: !m.ubicacion && ex ? !!ex.ubicRecuperada : false,
+      ubicacion: ubicFinal,
+      ubicRecuperada: danadaFinal,
       marbete: m.marbete,
       existencia: ex ? ex.existencia : null,
       // Datos económicos/clasificación del archivo de existencias (si cruzó).

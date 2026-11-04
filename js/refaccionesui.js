@@ -133,6 +133,10 @@ export function initRefacciones() {
   if (inpExhCant) inpExhCant.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); registrarExhibicion(); }
   });
+  const inpExhObs = document.getElementById("ref-exh-obs");
+  if (inpExhObs) inpExhObs.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); registrarExhibicion(); }
+  });
 
   // --- Rondas de conteo (1 a 3) ---
   const selRondas = document.getElementById("ref-rondas-sel");
@@ -391,11 +395,13 @@ function fillPuntosVenta() {
   const agencia = agencyActual || AGENCIAS_REF[0];
   const sitios = PUNTOS_POR_AGENCIA[agencia] || ["Exhibición"];
   const prev = sel.value;
-  sel.innerHTML = `<option value="">— Punto de venta / exhibidor —</option>` +
+  // Opciones fijas extra: "Sin ubicación" (refacciones fuera de su lugar) y "Otro".
+  sel.innerHTML = `<option value="">— Punto de venta / ubicación —</option>` +
     sitios.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("") +
+    `<option value="Sin ubicación">Sin ubicación (fuera de lugar)</option>` +
     `<option value="Otro">Otro…</option>`;
   // Conservar la selección previa solo si sigue siendo válida para esta agencia.
-  if (prev && (sitios.includes(prev) || prev === "Otro")) sel.value = prev;
+  if (prev && (sitios.includes(prev) || prev === "Otro" || prev === "Sin ubicación")) sel.value = prev;
 }
 
 function registrarExhibicion() {
@@ -411,13 +417,17 @@ function registrarExhibicion() {
   const cant = Number(cantRaw);
   if (!Number.isFinite(cant) || cant < 0) { notify("La cantidad debe ser 0 o más.", { type: "warn" }); cantEl?.focus(); return; }
 
+  const obsEl = document.getElementById("ref-exh-obs");
+  const observacion = (obsEl?.value || "").trim();
   const by = auth.currentUser()?.name || "—";
-  const p = store.setPartExhibicion(ag(), numParte, punto, cant, by);
-  logAction("parts.exhibicion", `Exhibición de ${numParte} (${ag()}): ${cant} en ${punto}`, by);
+  const p = store.setPartExhibicion(ag(), numParte, punto, cant, by, observacion);
+  const etiqueta = punto === "Sin ubicación" ? "sin ubicación (fuera de lugar)" : punto;
+  logAction("parts.exhibicion", `Exhibición/ubicación de ${numParte} (${ag()}): ${cant} en ${etiqueta}${observacion ? ` · obs: ${observacion}` : ""}`, by);
   try { pushPart(ag(), numParte); } catch (e) {}
-  setExhStatus(`✓ ${numParte}: ${cant} en ${punto} (total en exhibición: ${p.exhibicion}).`, "ok");
+  setExhStatus(`✓ ${numParte}: ${cant} en ${etiqueta} (total: ${p.exhibicion}).`, "ok");
   if (parteEl) parteEl.value = "";
   if (cantEl) cantEl.value = "";
+  if (obsEl) obsEl.value = "";
   if (parteEl) parteEl.focus();
   renderExhibicion();
   renderConteo();
@@ -437,15 +447,18 @@ function renderExhibicion() {
     <div class="stat"><b>${conExh.length}</b><span>Partes en exhibición</span></div>
     <div class="stat"><b>${totalPiezas}</b><span>Piezas en exhibición (suman al conteo)</span></div>`;
   if (tbody) {
-    // Una fila por (parte, punto).
+    // Una fila por (parte, punto). Resalta "Sin ubicación" (fuera de lugar).
     const filas = [];
     for (const p of conExh) {
       for (const [punto, n] of Object.entries(p.exhibiciones || {})) {
-        filas.push(`<tr>
+        const obs = (p.exhibObs && p.exhibObs[punto]) || "";
+        const sinUbic = punto === "Sin ubicación";
+        filas.push(`<tr${sinUbic ? ' style="background:#fffbeb"' : ""}>
           <td><code>${escapeHtml(p.numParte)}</code></td>
           <td>${escapeHtml((p.descripcion || "").slice(0, 40))}</td>
-          <td>${escapeHtml(punto)}</td>
+          <td>${sinUbic ? "⚠️ " : ""}${escapeHtml(punto)}</td>
           <td style="text-align:right"><b>${escapeHtml(String(n))}</b></td>
+          <td>${escapeHtml(obs)}</td>
         </tr>`);
       }
     }
@@ -1051,7 +1064,7 @@ function renderCrucePreview(c) {
           ? `<span style="color:#065f46">✓ Con existencia</span>`
           : `<span style="color:var(--danger)">Solo marbete</span>`);
     const ubicCell = it.ubicRecuperada
-      ? `<code title="Ubicación recuperada de un error de Excel; verifícala" style="color:#b45309">${escapeHtml(it.ubicacion || "")} ⚠</code>`
+      ? `<code title="Ubicación con posible error de exportación (Excel); verifícala en el sistema" style="color:#b45309">${escapeHtml(it.ubicacion || "")} ⚠</code>`
       : `<code>${escapeHtml(it.ubicacion || "")}</code>`;
     return `<tr>
       <td>${i + 1}</td>
@@ -1074,7 +1087,7 @@ function renderCrucePreview(c) {
   // Aviso de ubicaciones reconstruidas (errores de Excel al exportar).
   const nRecup = [...c.items, ...c.soloExistencia].filter(it => it.ubicRecuperada).length;
   const avisoUbic = nRecup
-    ? `<p class="hint" style="color:#b45309">⚠️ ${nRecup} ubicación(es) venían dañadas por Excel (notación científica) y se <b>reconstruyeron</b> automáticamente (marcadas con ⚠). Verifícalas si alguna no cuadra.</p>`
+    ? `<p class="hint" style="color:#b45309">⚠️ ${nRecup} ubicación(es) vienen con un posible <b>error de exportación</b> (notación científica, p. ej. 2.04E+303). Se dejan <b>tal cual</b> del archivo y se marcan con ⚠ para que las <b>verifiques en el sistema</b>. (En inventario completo, el marbete corrige la ubicación automáticamente cuando la trae.)</p>`
     : "";
 
   el.innerHTML = `
@@ -1936,6 +1949,35 @@ function imprimirResultadoFinal() {
        <table>${cabTabla}<tbody>${filasDe(otras)}</tbody></table>`
     : "";
 
+  // EVIDENCIA: refacciones encontradas FUERA DE SU UBICACIÓN ("Sin ubicación").
+  // Suman al conteo pero se listan aparte con su observación para reubicarlas.
+  const fueraDeUbic = [];
+  for (const p of store.listParts(ag())) {
+    const n = p.exhibiciones && p.exhibiciones["Sin ubicación"];
+    if (n != null && Number(n) > 0) {
+      fueraDeUbic.push({
+        numParte: p.numParte, descripcion: p.descripcion || "",
+        ubicSistema: p.ubicacion || "", cantidad: Number(n),
+        obs: (p.exhibObs && p.exhibObs["Sin ubicación"]) || "",
+      });
+    }
+  }
+  const seccionFueraUbic = fueraDeUbic.length
+    ? `<h2 style="color:#b45309">Refacciones fuera de su ubicación — ${fueraDeUbic.length} (evidencia)</h2>
+       <p class="nota">Estas piezas se contaron (suman al inventario) pero se encontraron fuera de su ubicación del sistema. Conviene reubicarlas o corregir el sistema.</p>
+       <table><thead><tr>
+         <th>No. parte</th><th>Descripción</th><th>Ubicación en sistema</th><th>Cantidad</th><th>Observación</th>
+       </tr></thead><tbody>${
+         fueraDeUbic.map(f => `<tr>
+           <td>${esc(f.numParte)}</td>
+           <td>${esc(f.descripcion)}</td>
+           <td>${esc(f.ubicSistema)}</td>
+           <td style="text-align:right">${esc(String(f.cantidad))}</td>
+           <td>${esc(f.obs)}</td>
+         </tr>`).join("")
+       }</tbody></table>`
+    : "";
+
   // Área de firmas: una por participante (nombre + cargo). Si no hay ninguno,
   // deja una línea genérica para firmar a mano.
   const firmas = participantes.length ? participantes : [{ nombre: "", cargo: "" }];
@@ -1962,6 +2004,7 @@ function imprimirResultadoFinal() {
       .firmas{display:flex;justify-content:space-between;gap:16px;margin-top:48px;flex-wrap:wrap}
       .firma{flex:1;text-align:center} .firma .linea{border-top:1px solid #000;margin-top:40px;padding-top:4px;font-size:12px}
       .firma .cargo{font-size:11px;color:#555}
+      .nota{font-size:11px;color:#555;margin:2px 0 6px}
       .barra{margin-bottom:12px} .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;background:#0f204a;color:#fff;cursor:pointer}
       @media print{.barra{display:none}}
     </style></head><body>
@@ -1981,6 +2024,7 @@ function imprimirResultadoFinal() {
          ${seccion("Ajuste NEGATIVO (faltan piezas: existencia &gt; contado)", negat, "#b91c1c")}
          ${seccionOtras}`
       : "<p>Sin diferencias. El inventario cuadra.</p>"}
+    ${seccionFueraUbic}
     ${firmasHtml}
     </body></html>`);
   win.document.close();

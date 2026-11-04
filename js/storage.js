@@ -634,7 +634,7 @@ export const store = {
   // "libreta"). Se guarda por punto (p.exhibiciones = { "Punto X": n }) y el
   // total p.exhibicion. Estas piezas SUMAN al conteo físico para cuadrar contra
   // la existencia del sistema (Opción A). Si la parte no existe, se da de alta.
-  setPartExhibicion(agency, numParte, punto, cantidad, by) {
+  setPartExhibicion(agency, numParte, punto, cantidad, by, observacion) {
     const db = read();
     const bucket = partsBucket(db, agency);
     let p = bucket[numParte];
@@ -650,6 +650,13 @@ export const store = {
     else p.exhibiciones[key] = n;
     // Total en exhibición = suma de todos los puntos.
     p.exhibicion = Object.values(p.exhibiciones).reduce((s, v) => s + Number(v || 0), 0);
+    // Observaciones por punto (p. ej. para "Sin ubicación": dónde se encontró).
+    if (observacion !== undefined) {
+      p.exhibObs = p.exhibObs || {};
+      const obs = String(observacion || "").trim();
+      if (obs) p.exhibObs[key] = obs;
+      else if (p.exhibObs[key]) delete p.exhibObs[key];
+    }
     p.exhibicionBy = by || "—";
     p.exhibicionAt = now;
     p.updatedAt = now;

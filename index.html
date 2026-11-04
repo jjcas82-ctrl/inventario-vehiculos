@@ -901,14 +901,16 @@
             <input id="ref-exh-parte" type="text" placeholder="Número de parte" style="flex:1;min-width:150px" />
             <select id="ref-exh-punto" style="min-width:180px"></select>
             <input id="ref-exh-cant" type="number" min="0" step="1" placeholder="Cantidad" style="max-width:120px" />
-            <button id="ref-exh-btn" class="btn btn-primary">Registrar en exhibición</button>
+            <input id="ref-exh-obs" type="text" placeholder="Observación (opcional)" style="flex:1;min-width:160px" />
+            <button id="ref-exh-btn" class="btn btn-primary">Registrar</button>
           </div>
+          <p class="hint" style="margin:6px 0 0">Usa <b>«Sin ubicación»</b> para refacciones que encontraste fuera de su lugar. Suman al conteo y quedan como evidencia en el reporte; puedes añadir una <b>observación</b>.</p>
           <p id="ref-exh-status" class="hint"></p>
         </div>
         <div id="ref-exh-resumen" class="summary" style="margin-top:6px"></div>
         <div class="table-wrap" style="max-height:260px;overflow:auto">
           <table class="table" id="ref-exh-table">
-            <thead><tr><th>No. parte</th><th>Descripción</th><th>Punto de venta</th><th>En exhibición</th></tr></thead>
+            <thead><tr><th>No. parte</th><th>Descripción</th><th>Punto / ubicación</th><th>Cantidad</th><th>Observación</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
