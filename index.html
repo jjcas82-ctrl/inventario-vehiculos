@@ -318,6 +318,8 @@
           <button id="inv-report" class="btn btn-primary">📊 Generar reporte (CSV de lo filtrado)</button>
           <button id="cdo-upload-btn" class="btn" data-perm="vehicle.edit">📄 Subir CDO / Factura (en tránsito)</button>
           <input id="cdo-file" type="file" accept="application/pdf,.pdf,.xml,text/xml,.txt" hidden />
+          <button id="exu-upload-btn" class="btn" data-perm="vehicle.edit" title="Reporte «Análisis de unidades en inventario» del sistema de la agencia">📋 Cargar existencias de unidades (Excel/PDF)</button>
+          <input id="exu-file" type="file" accept=".xlsx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
           <label class="chk-inline"><input type="checkbox" id="inv-show-sold" /> Incluir vendidas/entregadas</label>
           <span id="inv-count" class="muted" style="align-self:center"></span>
         </div>
@@ -1098,6 +1100,31 @@
       <div class="row gap wrap" style="margin-top:8px">
         <button id="cdo-confirm" class="btn btn-primary" hidden>✓ Cargar unidades nuevas</button>
         <button id="cdo-cancel" class="btn btn-ghost">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de carga de EXISTENCIAS DE UNIDADES (reporte del sistema de la agencia) -->
+  <div id="exu-modal" class="modal" hidden style="display:none">
+    <div class="modal-card" style="max-width:900px">
+      <div class="row between">
+        <h2>📋 Existencias de unidades · reporte del sistema</h2>
+        <button id="exu-close" class="btn btn-ghost">✕</button>
+      </div>
+      <div id="exu-progress" class="hint"></div>
+      <div class="row gap wrap" style="align-items:center;margin:6px 0">
+        <label for="exu-agency"><b>Agencia del reporte:</b></label>
+        <select id="exu-agency" style="min-width:220px"></select>
+      </div>
+      <div class="summary" id="exu-summary"></div>
+      <div id="exu-preview"></div>
+      <label class="chk-inline" style="display:block;margin-top:10px">
+        <input type="checkbox" id="exu-update-existing" />
+        Completar solo los datos VACÍOS de las unidades que ya existen (no cambia su ubicación ni su estado)
+      </label>
+      <div class="row gap wrap" style="margin-top:8px">
+        <button id="exu-confirm" class="btn btn-primary" hidden>✓ Cargar</button>
+        <button id="exu-cancel" class="btn btn-ghost">Cerrar</button>
       </div>
     </div>
   </div>
