@@ -160,9 +160,12 @@ CREATE TABLE IF NOT EXISTS auditorias (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
--- Refacciones (inventario de partes; clave = num_parte)
+-- Refacciones (inventario de partes) SEPARADO POR AGENCIA.
+-- Clave PRIMARIA COMPUESTA (agencia, num_parte): el mismo número de parte puede
+-- existir en varias agencias con existencias distintas y NUNCA se mezcla.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS refacciones (
+  agencia      VARCHAR(120) NOT NULL DEFAULT '',
   num_parte    VARCHAR(60)  NOT NULL,
   descripcion  VARCHAR(255) NOT NULL DEFAULT '',
   ubicacion    VARCHAR(80)  NOT NULL DEFAULT '',
@@ -170,20 +173,44 @@ CREATE TABLE IF NOT EXISTS refacciones (
   marbete      VARCHAR(20)  NOT NULL DEFAULT '',
   -- Existencia del sistema interno (puede ser NULL si la parte solo viene en marbetes).
   existencia   INT          NULL,
-  -- Conteo físico (NULL = aún sin contar).
+  -- Conteo físico (último valor; NULL = aún sin contar).
   conteo       INT          NULL,
   conteo_by    VARCHAR(120) NOT NULL DEFAULT '',
   conteo_at    DATETIME     NULL,
+  -- Conteos por ronda y exhibición por punto, en JSON (paridad con el frontend).
+  conteos      LONGTEXT     NULL,   -- { "1": n, "2": n, "3": n }
+  exhibiciones LONGTEXT     NULL,   -- { "Punto X": n, ... }
+  exhibicion   INT          NULL,   -- total en exhibición (suma de exhibiciones)
+  -- Datos económicos / clasificación de rotación (del CSV de existencias).
+  precio_unit  DECIMAL(12,2) NULL,
+  clasificacion VARCHAR(4)  NOT NULL DEFAULT '',   -- R/L/E/P/O/I
   -- Banderas del cruce y procedencia.
   en_marbetes  TINYINT(1)   NOT NULL DEFAULT 0,
   en_existencias TINYINT(1) NOT NULL DEFAULT 0,
-  origin       VARCHAR(20)  NOT NULL DEFAULT '',   -- cruce | existencias | conteo
+  origin       VARCHAR(20)  NOT NULL DEFAULT '',   -- cruce | existencias | conteo | rotativo
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (num_parte),
+  PRIMARY KEY (agencia, num_parte),
   KEY idx_refacciones_ubic (ubicacion),
   KEY idx_refacciones_marbete (marbete)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migración para instalaciones EXISTENTES (tabla antigua con PK = num_parte).
+-- Agrega las columnas nuevas y recompone la clave primaria a (agencia, num_parte).
+-- Idempotente: IF NOT EXISTS evita errores al re-ejecutar. Si ya tenías datos
+-- globales (sin agencia), quedan con agencia='' (se consideran "archivo anterior"
+-- hasta que vuelvas a cargar por agencia; el frontend los agrupa aparte).
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS agencia VARCHAR(120) NOT NULL DEFAULT '';
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS conteos LONGTEXT NULL;
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS exhibiciones LONGTEXT NULL;
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS exhibicion INT NULL;
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS precio_unit DECIMAL(12,2) NULL;
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS clasificacion VARCHAR(4) NOT NULL DEFAULT '';
+-- Recomponer la PK: quitar la antigua (si era solo num_parte) y poner la compuesta.
+-- Nota: MariaDB no soporta "DROP PRIMARY KEY IF EXISTS"; este bloque asume la
+-- migración de una tabla antigua. Si la tabla ya tiene la PK compuesta, el ALTER
+-- fallará sin dañar datos; en ese caso simplemente ignóralo.
+-- ALTER TABLE refacciones DROP PRIMARY KEY, ADD PRIMARY KEY (agencia, num_parte);
 
 -- ---------------------------------------------------------------------------
 -- Bitácora de auditoría del sistema (quién cambió qué)

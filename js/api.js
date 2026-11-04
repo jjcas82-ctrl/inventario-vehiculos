@@ -153,8 +153,24 @@ export async function deleteUser(id) { return apiFetch(`users/${encodeURICompone
 // Auditorías
 export async function listAudits() { return (await apiFetch("audits")).audits || []; }
 
-// Refacciones (parts)
-export async function listParts() { return (await apiFetch("parts")).parts || []; }
-export async function putPart(numParte, data) { return apiFetch(`parts/${encodeURIComponent(numParte)}`, { method: "PUT", body: data }); }
-export async function bulkParts(parts) { return apiFetch("parts/bulk", { method: "POST", body: { parts } }); }
-export async function setPartConteo(numParte, conteo) { return apiFetch(`parts/${encodeURIComponent(numParte)}/conteo`, { method: "POST", body: { conteo } }); }
+// Refacciones (parts) — SEPARADO POR AGENCIA.
+// La agencia viaja en el body (PUT/POST) y como ?agency= en GET. El backend usa
+// clave compuesta (agencia, num_parte). listParts() sin agencia trae todas (el
+// front fusiona por (agency,numParte)); con agencia, solo esa.
+export async function listParts(agency) {
+  const q = agency ? `parts?agency=${encodeURIComponent(agency)}` : "parts";
+  return (await apiFetch(q)).parts || [];
+}
+export async function putPart(numParte, data) {
+  // `data` ya incluye `agency` (lo agrega sync.pushPart).
+  return apiFetch(`parts/${encodeURIComponent(numParte)}`, { method: "PUT", body: data });
+}
+export async function bulkParts(parts) {
+  // Cada parte del arreglo lleva su `agency` (lo agrega sync.pushParts).
+  return apiFetch("parts/bulk", { method: "POST", body: { parts } });
+}
+export async function setPartConteo(numParte, conteo, agency, ronda) {
+  return apiFetch(`parts/${encodeURIComponent(numParte)}/conteo`, {
+    method: "POST", body: { conteo, agency, ronda },
+  });
+}
