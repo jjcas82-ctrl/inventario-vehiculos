@@ -23,6 +23,7 @@ import { initUsers, renderUsers } from "./users.js";
 import { initLabels, renderLabels } from "./labels.js";
 import { initCatalogAdmin } from "./catalogadmin.js";
 import { initCdoUpload } from "./cdoui.js";
+import { initExistUnidades } from "./existunidadesui.js";
 import { initZonaMove, stopZonaMove } from "./zonamove.js";
 import { initRefacciones, renderRefacciones, stopRefacciones } from "./refaccionesui.js";
 import { initSync, onSyncStatus, onSyncError, syncStatus, pullAll } from "./sync.js";
@@ -2044,6 +2045,7 @@ function main() {
   initAgencies(refreshAll);
   initInventory(refreshAll);
   initCdoUpload(refreshAll);
+  initExistUnidades(refreshAll);
   initMap();
   initReports();
   initCatalogAdmin();
