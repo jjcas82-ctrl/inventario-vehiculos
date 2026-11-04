@@ -1190,6 +1190,7 @@ async function startScan() {
   desbloquearAudio();   // el clic en «Escanear QR» desbloquea el beep en móvil
   try {
     await scanner.start();
+    scanner.resume();   // arranca escuchando (por si quedó en pausa de una sesión previa)
     document.getElementById("ref-scanner-wrap").hidden = false;
     document.getElementById("ref-scan").hidden = true;
     document.getElementById("ref-scan-stop").hidden = false;
@@ -1205,12 +1206,19 @@ function stopScan() {
   if (b2) b2.hidden = true;
 }
 
-// Al escanear un QR de parte: rellena el número de parte y enfoca la cantidad.
+// Al escanear un QR de parte: PAUSA el escáner (para que no siga leyendo y pise
+// la captura), rellena el número de parte y enfoca la cantidad. El escáner se
+// reanuda al registrar (o al cancelar). Esto hace el escaneo tipo "pistola":
+// escanear → teclear cantidad → Registrar → siguiente, sin pisarse.
 function handleScan(text) {
-  const p = parsePartQr(text);
-  if (!p || !p.numParte) { setScanStatus("Código no reconocido.", "error"); beep("error"); return; }
+  // Si ya hay una parte escaneada esperando su cantidad, ignora nuevas lecturas
+  // (el escáner ya debería estar en pausa; esto es un seguro extra).
   const inp = document.getElementById("ref-conteo-parte");
   const cant = document.getElementById("ref-conteo-cant");
+  const p = parsePartQr(text);
+  if (!p || !p.numParte) { setScanStatus("Código no reconocido.", "error"); beep("error"); return; }
+
+  if (scanner) scanner.pause();   // congela lecturas hasta registrar/cancelar
   if (inp) inp.value = p.numParte;
   const existente = store.getPart(ag(), p.numParte);
   if (existente) {
@@ -1218,17 +1226,14 @@ function handleScan(text) {
     setScanStatus(`✓ ${p.numParte} — ${existente.descripcion || p.descripcion || ""}. Teclea la cantidad y pulsa Registrar (o Enter).`, "ok");
   } else {
     beep("warn");  // sonido/vibración de AVISO: la parte NO está en el inventario
-    setScanStatus(`⚠️ ${p.numParte} no está en el inventario cargado. Puedes contarla igual.`, "warn");
+    setScanStatus(`⚠️ ${p.numParte} no está en el inventario. Teclea la cantidad y Registrar para contarla igual.`, "warn");
   }
-  // Enfoca la cantidad para teclear de inmediato. La cámara SIGUE encendida: tras
-  // registrar, el escáner queda listo para la siguiente parte sin reiniciar.
   if (cant) { cant.value = ""; cant.focus(); }
 }
 
-// Permite que el escáner vuelva a emitir el MISMO código tras registrar (si no,
-// el anti-ráfaga de 1.2s bloquearía re-escanear la misma parte a propósito).
-function resetScanDedupe() {
-  if (scanner) { scanner._lastEmit = null; scanner._lastEmitAt = 0; }
+// Reanuda el escáner para leer la SIGUIENTE parte (tras registrar o cancelar).
+function reanudarScan() {
+  if (scanner && scanner.running) scanner.resume();
 }
 
 function registrarConteoManual() {
@@ -1259,8 +1264,10 @@ function registrarConteoManual() {
       );
       if (!ok) {
         setScanStatus(`Sin cambios: ${numParte} conserva su conteo anterior (${previo}).`, "warn");
-        if (inp) { inp.value = ""; inp.focus(); }
+        if (inp) { inp.value = ""; }
         if (cantEl) cantEl.value = "";
+        reanudarScan();                 // vuelve a escanear la siguiente
+        if (scanner && scanner.running) {} else if (inp) inp.focus();
         return;
       }
     }
@@ -1269,8 +1276,10 @@ function registrarConteoManual() {
     if (esRotativo()) {
       beep("warn");
       setScanStatus(`⚠️ ${numParte} no está en la muestra de este inventario rotativo. No se registra.`, "warn");
-      if (inp) { inp.value = ""; inp.focus(); }
+      if (inp) { inp.value = ""; }
       if (cantEl) cantEl.value = "";
+      reanudarScan();                   // vuelve a escanear la siguiente
+      if (!(scanner && scanner.running) && inp) inp.focus();
       return;
     }
     // Completo: una parte contada que no estaba en el inventario cargado se da de alta.
@@ -1283,11 +1292,10 @@ function registrarConteoManual() {
   beep(true);
   if (inp) inp.value = "";
   if (cantEl) cantEl.value = "";
-  // ESCANEO CONTINUO: si la cámara está activa, deja todo listo para escanear la
-  // siguiente parte SIN detener la cámara (y permite re-escanear la misma si hace
-  // falta). Si no, enfoca el campo de nº de parte para seguir capturando.
+  // ESCANEO CONTINUO tipo "pistola": si la cámara está activa, se REANUDA para
+  // leer la siguiente parte (durante el conteo estuvo en pausa para no pisarse).
   if (scanner && scanner.running) {
-    resetScanDedupe();
+    reanudarScan();
     setScanStatus(`✓ Contada ${numParte}: ${conteo}. Escanea la SIGUIENTE parte…`, "ok");
   } else {
     setScanStatus(`✓ Contada ${numParte}: ${conteo} (conteo ${rondaActual}).`, "ok");
