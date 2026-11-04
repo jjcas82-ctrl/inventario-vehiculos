@@ -96,7 +96,7 @@ export async function pushParts(agency, partsArr) {
 export async function pushPartConteo(agency, numParte, conteo) {
   await trySend(
     { type: "partConteo", key: `${agency}|${numParte}`, data: { numParte, conteo, agency } },
-    () => api.setPartConteo(numParte, conteo));
+    () => api.setPartConteo(numParte, conteo, agency));
 }
 export async function pushAgencies() {
   const ag = store.listAgencies();
@@ -144,7 +144,7 @@ async function runOp(op) {
     case "stage":      return api.setVehicleStage(op.data.vin, op.data.stage);
     case "part":       return api.putPart(op.data.numParte, op.data);
     case "partsBulk":  return api.bulkParts(op.data);
-    case "partConteo": return api.setPartConteo(op.data.numParte, op.data.conteo);
+    case "partConteo": return api.setPartConteo(op.data.numParte, op.data.conteo, op.data.agency);
     case "agencies":   return api.saveAgencies(op.data);
     default: return;
   }

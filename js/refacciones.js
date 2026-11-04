@@ -125,15 +125,40 @@ function parseExistenciasDelimited(text) {
 
     const descripcion = (r[idx.desc] ?? "").toString().replace(/"/g, "").trim();
     const existencia = num(r[idx.cant]) ?? 0;
-    const ubicacion = (r[idx.ubic] ?? "").toString().replace(/"/g, "").trim();
+    const ubicRaw = (r[idx.ubic] ?? "").toString().replace(/"/g, "").trim();
+    const { ubicacion, recuperada } = repararUbicacion(ubicRaw);
     const clasificacion = (r[idx.clasif] ?? "").toString().replace(/"/g, "").trim().toUpperCase();
     const precioUnit = num(r[idx.precioU]);
     const valorTotal = num(r[idx.valorTotal]);
     const fecha = (r[idx.fecha] ?? "").toString().replace(/"/g, "").trim();
 
-    out.push({ numParte, descripcion, existencia, ubicacion, clasificacion, precioUnit, valorTotal, fecha });
+    out.push({ numParte, descripcion, existencia, ubicacion, ubicRecuperada: recuperada, clasificacion, precioUnit, valorTotal, fecha });
   }
   return out;
+}
+
+// Repara ubicaciones que Excel corrompió a NOTACIÓN CIENTÍFICA al exportar.
+// El sistema interno emite códigos como "204E303"; Excel los interpreta como
+// número y los guarda "2.04E+303" (= 2.04 × 10^303). Reconstruimos el código:
+//   "2.04E+303"  → "204" + "E" + "0" + "303"  = "204E0303"
+//   "2.03E+206"  → "203E0206",  "2.05E+107" → "205E0107", etc.
+// La forma objetivo coincide con las ubicaciones normales (NNÁNN0NN / NNÁNNNN).
+// Devuelve { ubicacion, recuperada }: recuperada=true si se reconstruyó (para
+// poder marcarla en la UI y que el usuario la verifique).
+function repararUbicacion(s) {
+  const t = String(s || "").trim();
+  // Patrón de Excel: d.ddE+ddd  (p. ej. 2.04E+303, 2.4E+303).
+  const m = t.match(/^(\d)\.(\d+)E\+?(\d+)$/i);
+  if (!m) return { ubicacion: t, recuperada: false };
+  // Dígitos de la "mantisa": el entero + los decimales → los 3 primeros del código.
+  const mant = (m[1] + m[2]);                 // "2" + "04" = "204"  |  "2"+"4" = "24"
+  const exp = m[3];                            // "303"
+  // Prefijo de 3 dígitos (rellena si la mantisa quedó corta).
+  const pref = (mant + "000").slice(0, 3);     // "204"
+  // La letra siempre es E en estos casos (el código tenía forma 20X E YZZ).
+  // Reconstrucción: PREF + 'E' + '0' + EXP  → 8 caracteres como las normales.
+  const recon = `${pref}E0${exp}`;
+  return { ubicacion: recon, recuperada: true };
 }
 
 // --- Parseo de MARBETES (PDF) ---
@@ -286,6 +311,8 @@ export function cruzar(marbetes, existencias) {
       numParte: m.numParte,
       descripcion: m.descripcion || (ex ? ex.descripcion : ""),
       ubicacion: m.ubicacion || (ex ? ex.ubicacion : ""),
+      // Si la ubicación proviene de la existencia reconstruida, hereda la marca.
+      ubicRecuperada: !m.ubicacion && ex ? !!ex.ubicRecuperada : false,
       marbete: m.marbete,
       existencia: ex ? ex.existencia : null,
       // Datos económicos/clasificación del archivo de existencias (si cruzó).
@@ -303,7 +330,7 @@ export function cruzar(marbetes, existencias) {
     if (vistos.has(norm(e.numParte))) continue;
     soloExistencia.push({
       grupo: "", numParte: e.numParte, descripcion: e.descripcion,
-      ubicacion: e.ubicacion, marbete: "", existencia: e.existencia,
+      ubicacion: e.ubicacion, ubicRecuperada: !!e.ubicRecuperada, marbete: "", existencia: e.existencia,
       precioUnit: e.precioUnit ?? null, clasificacion: e.clasificacion || "",
       enExistencias: true, enMarbetes: false,
     });

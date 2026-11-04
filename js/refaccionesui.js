@@ -974,6 +974,7 @@ function confirmarCarga() {
       numParte: it.numParte,
       descripcion: it.descripcion || "",
       ubicacion: it.ubicacion || "",
+      ubicRecuperada: !!it.ubicRecuperada,
       grupo: it.grupo || "",
       marbete: it.marbete || "",
       existencia: it.existencia,
@@ -989,6 +990,7 @@ function confirmarCarga() {
       numParte: it.numParte,
       descripcion: it.descripcion || "",
       ubicacion: it.ubicacion || "",
+      ubicRecuperada: !!it.ubicRecuperada,
       grupo: it.grupo || "",
       marbete: "",
       existencia: it.existencia,
@@ -1048,12 +1050,15 @@ function renderCrucePreview(c) {
       : (it.enExistencias
           ? `<span style="color:#065f46">✓ Con existencia</span>`
           : `<span style="color:var(--danger)">Solo marbete</span>`);
+    const ubicCell = it.ubicRecuperada
+      ? `<code title="Ubicación recuperada de un error de Excel; verifícala" style="color:#b45309">${escapeHtml(it.ubicacion || "")} ⚠</code>`
+      : `<code>${escapeHtml(it.ubicacion || "")}</code>`;
     return `<tr>
       <td>${i + 1}</td>
       <td><code>${escapeHtml(it.numParte || "—")}</code></td>
       <td><code>${escapeHtml(it.marbete || "")}</code></td>
       <td>${escapeHtml((it.descripcion || "").slice(0, 50))}</td>
-      <td><code>${escapeHtml(it.ubicacion || "")}</code></td>
+      <td>${ubicCell}</td>
       <td style="text-align:right">${it.existencia == null ? "—" : escapeHtml(String(it.existencia))}</td>
       <td>${estado}</td>
     </tr>`;
@@ -1064,6 +1069,12 @@ function renderCrucePreview(c) {
 
   const soloExist = c.soloExistencia.length
     ? `<p class="hint" style="color:#b45309">⚠️ ${c.soloExistencia.length} parte(s) en existencias <b>sin marbete</b> (se cargarán, pero no tendrán etiqueta ni renglón de conteo físico).</p>`
+    : "";
+
+  // Aviso de ubicaciones reconstruidas (errores de Excel al exportar).
+  const nRecup = [...c.items, ...c.soloExistencia].filter(it => it.ubicRecuperada).length;
+  const avisoUbic = nRecup
+    ? `<p class="hint" style="color:#b45309">⚠️ ${nRecup} ubicación(es) venían dañadas por Excel (notación científica) y se <b>reconstruyeron</b> automáticamente (marcadas con ⚠). Verifícalas si alguna no cuadra.</p>`
     : "";
 
   el.innerHTML = `
@@ -1077,6 +1088,7 @@ function renderCrucePreview(c) {
       ${r.enBlanco ? `<div class="stat"><b>${r.enBlanco}</b><span>En blanco</span></div>` : ""}
     </div>
     ${soloExist}
+    ${avisoUbic}
     <div class="table-wrap" style="max-height:340px;overflow:auto">
       <table class="table"><thead><tr>
         <th>#</th><th>No. parte</th><th>Marbete</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Estado</th>
