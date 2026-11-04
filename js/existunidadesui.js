@@ -18,6 +18,25 @@ import * as auth from "./auth.js";
 import { pushVehicle } from "./sync.js";
 
 const AGENCIA_DEFECTO = "Aeroplasa Auto";
+
+// Mapea la NOTA de ubicación del reporte del sistema a un área interna de la
+// agencia (para dejar la unidad ubicada conforme al sistema). Se queda con el
+// área; el texto completo de la nota igual se guarda en `ubicacionSistema`.
+// Devuelve { area, location } (location = subárea o la nota si no hay mapeo).
+function mapUbicacion(nota) {
+  const t = String(nota || "").trim();
+  if (!t) return { area: "", location: "" };
+  const up = t.toUpperCase();
+  // "Sala Exh" / "EXHIBICION"
+  if (/\bEXH/.test(up) || /SALA/.test(up)) return { area: "Sala de Exhibición de Ventas", location: "" };
+  // "Recepcion de Unidad"
+  if (/RECEP/.test(up)) return { area: "Área de Entregas", location: "Recepción" };
+  // "Patio ..." (incl. Patio TyT Queretaro) y notas de traslado "... TRAS ..."
+  if (/\bPATIO\b/.test(up)) return { area: "Patio", location: t };
+  if (/\bTRAS\b|TRANSITO|TRÁNSITO|ST QUERETARO|DEMO/.test(up)) return { area: "Patio", location: t };
+  // Cualquier otra: sin área mapeada, pero conservamos la nota como ubicación.
+  return { area: "", location: t };
+}
 const PAGE = 50;
 let parsed = null;            // { units, errores, esperado, duplicadosEnArchivo, fileName }
 let onLoaded = () => {};
@@ -207,7 +226,10 @@ function buildVehicle(u, agency, now, by) {
   if (esTransito(u)) {
     v.status = "transito"; v.transitAt = now; v.transitBy = by;
   } else {
-    v.status = "dentro"; v.currentAgency = agency; v.currentArea = ""; v.currentLocation = "";
+    // Alta como "dentro", UBICADA según la nota del sistema (área interna + nota).
+    const { area, location } = mapUbicacion(u.ubicacionSistema);
+    v.status = "dentro"; v.currentAgency = agency;
+    v.currentArea = area; v.currentLocation = location;
     v.entryAt = now; v.entryBy = by;
   }
   return v;
