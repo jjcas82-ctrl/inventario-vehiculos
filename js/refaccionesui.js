@@ -89,12 +89,6 @@ export function initRefacciones() {
   const btnLimpiar = document.getElementById("ref-limpiar");
   if (btnLimpiar) btnLimpiar.addEventListener("click", limpiarCarga);
 
-  // --- Etiquetas ---
-  const btnEtq = document.getElementById("ref-etiquetas");
-  if (btnEtq) btnEtq.addEventListener("click", imprimirEtiquetas);
-  const btnEtqPrueba = document.getElementById("ref-etiquetas-prueba");
-  if (btnEtqPrueba) btnEtqPrueba.addEventListener("click", () => imprimirEtiquetas(true));
-
   // --- Conteo ---
   const btnScan = document.getElementById("ref-scan");
   const btnScanStop = document.getElementById("ref-scan-stop");
@@ -1177,24 +1171,6 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
       sepV: numVal("ref-solo-etq-sepv", 2),
     });
     if (!prueba) logAction("parts.labels.shelf", `Etiquetas para anaqueles impresas (${lista.length} partes)`, auth.currentUser()?.name || "—");
-  } catch (e) {
-    notify(e.message || String(e), { type: "error" });
-  }
-}
-
-// ======================= ETIQUETAS =======================
-
-async function imprimirEtiquetas(prueba = false) {
-  const lista = store.listParts(ag()).filter(p => p.numParte);
-  if (!lista.length) { notify("No hay partes en el inventario. Carga existencias/marbetes primero.", { type: "warn" }); return; }
-  try {
-    await printPartLabels(lista, {
-      prueba,
-      margenSup: numVal("ref-etq-sup", 12),
-      margenIzq: numVal("ref-etq-izq", 6),
-      sepH: numVal("ref-etq-seph", 2),
-      sepV: numVal("ref-etq-sepv", 2),
-    });
   } catch (e) {
     notify(e.message || String(e), { type: "error" });
   }
