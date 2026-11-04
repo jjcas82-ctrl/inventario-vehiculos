@@ -405,6 +405,7 @@ export async function printPartLabels(parts, opts = {}) {
       <div class="txt">
         <div class="np">${esc(p.numParte)}</div>
         <div class="ds">${esc((p.descripcion || "").slice(0, 40))}</div>
+        ${opts.mostrarUbic && p.ubicacion ? `<div class="ub">${esc(p.ubicacion)}</div>` : ""}
       </div>
     </div>`;
 
@@ -433,6 +434,7 @@ export async function printPartLabels(parts, opts = {}) {
       .etq .txt{flex:1;min-width:0}
       .etq .np{font-size:9pt;font-weight:700;line-height:1.1;word-break:break-all}
       .etq .ds{font-size:7pt;line-height:1.05;margin-top:0.5mm}
+      .etq .ub{font-size:10pt;font-weight:700;line-height:1.1;margin-top:0.8mm}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}
       .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;cursor:pointer}
       @media print{.barra{display:none}}

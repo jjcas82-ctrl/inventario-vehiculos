@@ -189,6 +189,21 @@ export function initRefacciones() {
   const btnConnProbar = document.getElementById("ref-conn-probar");
   if (btnConnProbar) btnConnProbar.addEventListener("click", probarConexion);
 
+  // --- Etiquetas QR para anaqueles (solo existencias, sin inventario) ---
+  const soloBtn = document.getElementById("ref-solo-etq-file-btn");
+  const soloFile = document.getElementById("ref-solo-etq-file");
+  if (soloBtn && soloFile) {
+    soloBtn.addEventListener("click", () => { soloFile.value = ""; soloFile.click(); });
+    soloFile.addEventListener("change", async () => {
+      const f = soloFile.files && soloFile.files[0];
+      if (f) await cargarExistenciasSoloEtiquetas(f);
+    });
+  }
+  const soloPrint = document.getElementById("ref-solo-etq-print");
+  if (soloPrint) soloPrint.addEventListener("click", () => imprimirEtiquetasAnaqueles(false));
+  const soloPrueba = document.getElementById("ref-solo-etq-prueba");
+  if (soloPrueba) soloPrueba.addEventListener("click", () => imprimirEtiquetasAnaqueles(true));
+
   // --- Asistente de inicio: agencia + tipo ---
   const selWizAg = document.getElementById("ref-wizard-agencia");
   if (selWizAg) selWizAg.addEventListener("change", () => {
@@ -1107,6 +1122,64 @@ function renderCrucePreview(c) {
         <th>#</th><th>No. parte</th><th>Marbete</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Estado</th>
       </tr></thead><tbody>${filas}${more}</tbody></table>
     </div>`;
+}
+
+// ======================= ETIQUETAS PARA ANAQUELES =======================
+// Imprime etiquetas QR directamente desde el archivo de existencias, SIN iniciar
+// un inventario ni guardar nada en el store. Buffer propio (no toca `existencias`
+// del flujo de inventario).
+let etqAnaqueles = [];
+
+async function cargarExistenciasSoloEtiquetas(file) {
+  setStatusEl("ref-solo-etq-status", "Leyendo archivo de existencias…", "info");
+  try {
+    const text = await readTextFile(file);
+    etqAnaqueles = parseExistenciasCsv(text);
+    const n = etqAnaqueles.length;
+    setStatusEl("ref-solo-etq-status",
+      n ? `✓ ${n} partes leídas de «${file.name}». Ajusta los márgenes si hace falta e imprime.`
+        : "El archivo no contiene partes reconocibles.", n ? "ok" : "error");
+    const hay = n > 0;
+    const b1 = document.getElementById("ref-solo-etq-print");
+    const b2 = document.getElementById("ref-solo-etq-prueba");
+    if (b1) b1.disabled = !hay;
+    if (b2) b2.disabled = !hay;
+  } catch (e) {
+    etqAnaqueles = [];
+    setStatusEl("ref-solo-etq-status", "No se pudo leer el archivo: " + (e.message || e), "error");
+  }
+}
+
+async function imprimirEtiquetasAnaqueles(prueba = false) {
+  if (!etqAnaqueles.length) { notify("Primero sube el archivo de existencias.", { type: "warn" }); return; }
+  const soloConExist = document.getElementById("ref-solo-etq-conexist")?.checked;
+  // Filtra, quita duplicados exactos (misma parte + misma ubicación) y ordena por
+  // ubicación para pegar las etiquetas recorriendo el almacén en orden.
+  const vistos = new Set();
+  const lista = [];
+  for (const e of etqAnaqueles) {
+    if (!e.numParte) continue;
+    if (soloConExist && !(Number(e.existencia) > 0)) continue;
+    const k = `${e.numParte}|${e.ubicacion || ""}`;
+    if (vistos.has(k)) continue;
+    vistos.add(k);
+    lista.push(e);
+  }
+  if (!lista.length) { notify("No hay partes que cumplan el filtro para imprimir.", { type: "warn" }); return; }
+  lista.sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
+  try {
+    await printPartLabels(lista, {
+      prueba,
+      mostrarUbic: true,
+      margenSup: numVal("ref-solo-etq-sup", 12),
+      margenIzq: numVal("ref-solo-etq-izq", 6),
+      sepH: numVal("ref-solo-etq-seph", 2),
+      sepV: numVal("ref-solo-etq-sepv", 2),
+    });
+    if (!prueba) logAction("parts.labels.shelf", `Etiquetas para anaqueles impresas (${lista.length} partes)`, auth.currentUser()?.name || "—");
+  } catch (e) {
+    notify(e.message || String(e), { type: "error" });
+  }
 }
 
 // ======================= ETIQUETAS =======================
