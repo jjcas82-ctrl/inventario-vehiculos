@@ -1187,6 +1187,7 @@ function numVal(id, def) {
 
 async function startScan() {
   if (!scanner) return;
+  desbloquearAudio();   // el clic en «Escanear QR» desbloquea el beep en móvil
   try {
     await scanner.start();
     document.getElementById("ref-scanner-wrap").hidden = false;
@@ -2211,16 +2212,32 @@ function beep(tipo) {
   try {
     if (navigator.vibrate) navigator.vibrate(cfg.vib);
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    // En móvil el AudioContext nace "suspendido" y NO suena hasta reanudarlo tras
+    // una interacción del usuario. El escaneo no cuenta como interacción directa,
+    // así que el beep quedaba mudo. Lo reanudamos aquí (y también al abrir la
+    // cámara, ver desbloquearAudio) para que suene en cada lectura.
+    if (audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (e) {} }
     for (const t of cfg.tonos) {
       const start = audioCtx.currentTime + (t.gap || 0);
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
+      o.type = "square";                 // onda cuadrada: más audible en el almacén
       o.frequency.value = t.f;
       o.connect(g); g.connect(audioCtx.destination);
-      g.gain.setValueAtTime(0.08, start);
+      g.gain.setValueAtTime(0.18, start); // volumen más alto que antes (0.08)
       g.gain.exponentialRampToValueAtTime(0.0001, start + t.d);
       o.start(start); o.stop(start + t.d);
     }
+  } catch (e) { /* audio no disponible */ }
+}
+
+// "Desbloquea" el audio en móvil: crea/reanuda el AudioContext dentro de un gesto
+// del usuario (al pulsar «Escanear QR»). Sin esto, el primer beep del escaneo no
+// suena en Chrome Android. Se llama desde startScan().
+function desbloquearAudio() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
   } catch (e) { /* audio no disponible */ }
 }
 
