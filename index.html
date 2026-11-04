@@ -734,6 +734,29 @@
         </div>
       </div>
 
+      <!-- ETIQUETAS PARA ANAQUELES: imprime QR cargando solo el archivo de
+           existencias. No requiere agencia ni tipo y NO guarda nada en el inventario. -->
+      <div class="card" id="ref-solo-etq">
+        <h2>🏷️ Imprimir etiquetas QR para anaqueles</h2>
+        <p class="hint">Carga el archivo de <b>existencias</b> y se imprimen las etiquetas (3 × 7 = 21 por hoja carta) para pegarlas en los anaqueles. <b>No inicia un inventario ni guarda datos</b>; las etiquetas salen ordenadas por ubicación.</p>
+        <div class="row gap wrap" style="margin:8px 0;align-items:center">
+          <button id="ref-solo-etq-file-btn" class="btn btn-primary">📄 Subir existencias (CSV)</button>
+          <input id="ref-solo-etq-file" type="file" accept=".csv,text/csv,.txt,text/plain" hidden />
+          <label class="chk-inline"><input type="checkbox" id="ref-solo-etq-conexist" checked /> Solo partes con existencia (&gt; 0)</label>
+        </div>
+        <p id="ref-solo-etq-status" class="hint"></p>
+        <div class="filters">
+          <div class="field"><label for="ref-solo-etq-sup">Margen superior (mm)</label><input id="ref-solo-etq-sup" type="number" step="0.5" value="12" style="max-width:120px" /></div>
+          <div class="field"><label for="ref-solo-etq-izq">Margen izquierdo (mm)</label><input id="ref-solo-etq-izq" type="number" step="0.5" value="6" style="max-width:120px" /></div>
+          <div class="field"><label for="ref-solo-etq-seph">Separación horizontal (mm)</label><input id="ref-solo-etq-seph" type="number" step="0.5" value="2" style="max-width:140px" /></div>
+          <div class="field"><label for="ref-solo-etq-sepv">Separación vertical (mm)</label><input id="ref-solo-etq-sepv" type="number" step="0.5" value="2" style="max-width:140px" /></div>
+        </div>
+        <div class="row gap wrap" style="margin-top:8px">
+          <button id="ref-solo-etq-print" class="btn btn-primary" disabled>🖨️ Imprimir etiquetas</button>
+          <button id="ref-solo-etq-prueba" class="btn" disabled>🧪 Hoja de prueba (con bordes)</button>
+        </div>
+      </div>
+
       <!-- Contenedor de todo el inventario (se oculta hasta elegir agencia+tipo) -->
       <div id="ref-inventario" hidden>
 
