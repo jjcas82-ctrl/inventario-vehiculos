@@ -231,8 +231,16 @@ export class Scanner {
     }
   }
 
+  // PAUSA de emisiones: el consumidor puede "congelar" las lecturas mientras el
+  // usuario hace algo con el código recién leído (p. ej. teclear la cantidad),
+  // y reanudar después. La cámara sigue encendida; solo se dejan de ENTREGAR
+  // resultados. Evita que un re-escaneo pise lo que se está capturando.
+  pause() { this._paused = true; }
+  resume() { this._paused = false; this._lastEmit = null; this._lastEmitAt = 0; }
+
   _emit(text) {
     if (!text) return;
+    if (this._paused) return;                 // emisiones congeladas por el consumidor
     const clean = String(text).trim();
     // Evita reprocesar el mismo texto en ráfaga (los dos motores pueden repetir).
     const now = Date.now();
