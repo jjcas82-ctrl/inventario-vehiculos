@@ -208,10 +208,12 @@ export async function pullAll() {
       // que el servidor" sin intervención manual.
       pushMissingVehicles(serverVins);
     }
-    if (Array.isArray(parts)) mergeParts(parts);
-    // Sesión de inventario de refacciones por agencia (para continuar en otro
-    // equipo). Se baja aparte y se fusiona con last-write-wins por updatedAt.
+    // IMPORTANTE: primero bajamos la SESIÓN de inventario de refacciones (que
+    // trae el sello `rotativoSesion` de la muestra activa) y DESPUÉS fusionamos
+    // las partes. Así mergeParts puede usar el sello del servidor para decidir
+    // qué partes viejas descartar (las que no pertenecen a la muestra vigente).
     await pullPartsAudit();
+    if (Array.isArray(parts)) mergeParts(parts);
     // Usuarios: merge ADITIVO solo-metadatos (ver auth.mergeServerUsers). Nunca
     // toca credenciales locales (salt/passHash) ni borra la cuenta de emergencia.
     // El push de altas/bajas/cambios va directo desde auth.js (fire-and-forget),
@@ -283,8 +285,13 @@ async function pullPartsAudit() {
     let remota;
     try { remota = await api.getPartsAudit(agency); } catch (e) { continue; }
     if (!remota) continue;
-    const local = store.getPartsAudit(agency);
-    if (!local || isNewer(remota.updatedAt, local.updatedAt)) {
+    const local = store.getPartsAudit(agency) || {};
+    // Si el servidor trae una MUESTRA ROTATIVA distinta a la local (otro equipo
+    // inició un rotativo nuevo), esa muestra manda aunque el updatedAt local
+    // parezca más reciente: así todos los equipos convergen a la misma muestra.
+    const selloDistinto = !!remota.rotativoSesion &&
+      remota.rotativoSesion !== local.rotativoSesion;
+    if (!local.tipo || selloDistinto || isNewer(remota.updatedAt, local.updatedAt)) {
       store.setPartsAudit(agency, remota);
     }
   }
@@ -301,6 +308,15 @@ function mergeParts(serverList) {
   }
 
   for (const [agency, serverMap] of porAgencia) {
+    // ¿La agencia está en ROTATIVO con una muestra vigente? Si es así, el sello
+    // `rotativoSesion` de la sesión (ya bajada por pullPartsAudit) define qué
+    // partes son "del inventario actual". Las que no lleven ese sello son de un
+    // inventario anterior y NO deben conservarse aunque tengan conteo local:
+    // justo esto hacía que el celular siguiera viendo las 26 partes viejas.
+    const sesion = store.getPartsAudit(agency) || {};
+    const selloActivo = (sesion.tipo === "rotativo" && sesion.rotativoSesion)
+      ? sesion.rotativoSesion : null;
+
     // 1) Upsert last-write-wins: el servidor gana solo si es más nuevo.
     for (const [numParte, sp] of serverMap) {
       const local = store.getPart(agency, numParte);
@@ -311,9 +327,14 @@ function mergeParts(serverList) {
     // 2) Reemplazo: quitar las locales que el servidor YA NO tiene. Excepción:
     //    una parte local que NO está en el servidor pero tiene conteo/datos
     //    (creada/contada localmente y aún sin subir) NO se borra: se re-sube.
+    //    PERO si hay rotativo con sello activo, esa excepción NO aplica a las
+    //    partes que no pertenezcan a la muestra vigente (son del inventario
+    //    anterior): esas SÍ se borran para que el equipo converja a la muestra.
     const keep = new Set(serverMap.keys());
     for (const lp of store.listParts(agency)) {
       if (keep.has(lp.numParte)) continue;
+      // En rotativo: si la parte no es de la muestra vigente, descártala.
+      if (selloActivo && lp.rotativoSesion !== selloActivo) continue;
       const tieneTrabajoLocal = lp.conteo != null ||
         (lp.conteos && Object.keys(lp.conteos).length) ||
         (lp.exhibiciones && Object.keys(lp.exhibiciones).length);
