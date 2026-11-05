@@ -205,8 +205,8 @@ export function initRefacciones() {
   if (manualPrint) manualPrint.addEventListener("click", () => imprimirEtiquetasManuales(false));
   const manualClear = document.getElementById("ref-manual-clear");
   if (manualClear) manualClear.addEventListener("click", vaciarEtiquetasManuales);
-  // Enter en cualquiera de los 3 campos agrega la fila.
-  ["ref-manual-parte", "ref-manual-desc", "ref-manual-ubic"].forEach(id => {
+  // Enter en cualquiera de los campos agrega la fila.
+  ["ref-manual-parte", "ref-manual-desc", "ref-manual-ubic", "ref-manual-cant"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); agregarEtiquetaManual(); } });
   });
@@ -1203,12 +1203,18 @@ function renderEtiquetasManuales() {
       <td><code>${escapeHtml(p.numParte)}</code></td>
       <td>${escapeHtml(p.descripcion || "")}</td>
       <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
+      <td style="text-align:right"><b>${p.cantidad || 1}</b></td>
       <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
     </tr>`).join("");
     tbody.querySelectorAll(".ref-manual-del").forEach(b =>
       b.addEventListener("click", () => { etqManuales.splice(Number(b.dataset.i), 1); renderEtiquetasManuales(); }));
   }
-  if (btnPrint) btnPrint.disabled = etqManuales.length === 0;
+  // Total de etiquetas = suma de cantidades (cada refacción puede repetirse).
+  const totalEtq = etqManuales.reduce((s, p) => s + (Number(p.cantidad) || 1), 0);
+  if (btnPrint) {
+    btnPrint.disabled = etqManuales.length === 0;
+    btnPrint.textContent = totalEtq ? `🖨️ Imprimir ${totalEtq} etiqueta(s)` : "🖨️ Imprimir etiqueta(s)";
+  }
   if (btnClear) btnClear.disabled = etqManuales.length === 0;
 }
 
@@ -1216,18 +1222,25 @@ function agregarEtiquetaManual() {
   const pEl = document.getElementById("ref-manual-parte");
   const dEl = document.getElementById("ref-manual-desc");
   const uEl = document.getElementById("ref-manual-ubic");
+  const cEl = document.getElementById("ref-manual-cant");
   const numParte = (pEl?.value || "").trim();
   const descripcion = (dEl?.value || "").trim();
   const ubicacion = (uEl?.value || "").trim();
+  let cantidad = Math.floor(Number(cEl?.value));
+  if (!Number.isFinite(cantidad) || cantidad < 1) cantidad = 1;
   if (!numParte) { setStatusEl("ref-manual-status", "Escribe al menos el número de parte.", "error"); pEl?.focus(); return; }
-  // Evita duplicar el mismo número de parte en la lista.
-  if (etqManuales.some(x => x.numParte.toUpperCase() === numParte.toUpperCase())) {
-    setStatusEl("ref-manual-status", `El número de parte ${numParte} ya está en la lista.`, "warn");
-    return;
+  // Si el número de parte ya está, SUMA la cantidad en vez de duplicar la fila.
+  const existente = etqManuales.find(x => x.numParte.toUpperCase() === numParte.toUpperCase());
+  if (existente) {
+    existente.cantidad = (Number(existente.cantidad) || 1) + cantidad;
+    if (descripcion) existente.descripcion = descripcion;
+    if (ubicacion) existente.ubicacion = ubicacion;
+    setStatusEl("ref-manual-status", `${numParte} ya estaba; ahora son ${existente.cantidad} etiqueta(s).`, "ok");
+  } else {
+    etqManuales.push({ numParte, descripcion, ubicacion, cantidad });
+    setStatusEl("ref-manual-status", `✓ Agregada ${numParte} (${cantidad} etiqueta(s)). Sigue agregando o imprime.`, "ok");
   }
-  etqManuales.push({ numParte, descripcion, ubicacion });
-  setStatusEl("ref-manual-status", `✓ Agregada ${numParte}. Puedes seguir agregando o imprimir.`, "ok");
-  if (pEl) pEl.value = ""; if (dEl) dEl.value = ""; if (uEl) uEl.value = "";
+  if (pEl) pEl.value = ""; if (dEl) dEl.value = ""; if (uEl) uEl.value = ""; if (cEl) cEl.value = "1";
   if (pEl) pEl.focus();
   renderEtiquetasManuales();
 }
@@ -1240,15 +1253,21 @@ function vaciarEtiquetasManuales() {
 
 async function imprimirEtiquetasManuales() {
   if (!etqManuales.length) { notify("Agrega al menos una refacción a la lista.", { type: "warn" }); return; }
+  // Expande cada refacción en N copias según su cantidad.
+  const lista = [];
+  for (const p of etqManuales) {
+    const n = Math.max(1, Math.floor(Number(p.cantidad) || 1));
+    for (let i = 0; i < n; i++) lista.push({ numParte: p.numParte, descripcion: p.descripcion, ubicacion: p.ubicacion });
+  }
   try {
-    await printPartLabels(etqManuales.slice(), {
+    await printPartLabels(lista, {
       mostrarUbic: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),
       sepV: numVal("ref-solo-etq-sepv", 2),
     });
-    logAction("parts.labels.manual", `Etiqueta(s) suelta(s) impresa(s) (${etqManuales.length})`, auth.currentUser()?.name || "—");
+    logAction("parts.labels.manual", `Etiqueta(s) suelta(s) impresa(s): ${lista.length} de ${etqManuales.length} refacción(es)`, auth.currentUser()?.name || "—");
   } catch (e) {
     notify(e.message || String(e), { type: "error" });
   }
