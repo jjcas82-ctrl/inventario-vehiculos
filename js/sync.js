@@ -9,7 +9,7 @@
 // Diseño defensivo: NADA de esto debe romper el modo local. Si el servidor no
 // responde, todo sigue funcionando en local y queda pendiente de subir.
 
-import { store, ARCHIVO_PREVIO } from "./storage.js";
+import { store, ARCHIVO_PREVIO, AGENCIAS_REF } from "./storage.js";
 import * as api from "./api.js";
 import { mergeServerUsers } from "./auth.js";
 
@@ -98,6 +98,17 @@ export async function pushPartConteo(agency, numParte, conteo) {
     { type: "partConteo", key: `${agency}|${numParte}`, data: { numParte, conteo, agency } },
     () => api.setPartConteo(numParte, conteo, agency));
 }
+// Sube la SESIÓN de auditoría de refacciones de una agencia (tipo, rondas,
+// muestra rotativa, firmas, cierre…), para poder continuarla en otro equipo.
+export async function pushPartsAudit(agency) {
+  const datos = store.getPartsAudit(agency);
+  const payload = { ...(datos || {}), updatedAt: new Date().toISOString() };
+  // Guarda el updatedAt también en local para el last-write-wins del pull.
+  store.setPartsAudit(agency, { updatedAt: payload.updatedAt });
+  await trySend(
+    { type: "partsAudit", key: `audit|${agency}`, data: { agency, datos: payload } },
+    () => api.putPartsAudit(agency, payload));
+}
 export async function pushAgencies() {
   const ag = store.listAgencies();
   await trySend({ type: "agencies", key: "all", data: ag }, () => api.saveAgencies(ag));
@@ -113,6 +124,7 @@ function opLabel(op) {
     case "part":       return "la refacción " + (op.key || "");
     case "partsBulk":  return `la carga de refacciones (${Array.isArray(op.data) ? op.data.length : "?"} partes)`;
     case "partConteo": return "el conteo de " + (op.key || "");
+    case "partsAudit": return "la sesión de inventario de refacciones";
     case "agencies":   return "las agencias";
     default:           return "un cambio";
   }
@@ -145,6 +157,7 @@ async function runOp(op) {
     case "part":       return api.putPart(op.data.numParte, op.data);
     case "partsBulk":  return api.bulkParts(op.data);
     case "partConteo": return api.setPartConteo(op.data.numParte, op.data.conteo, op.data.agency);
+    case "partsAudit": return api.putPartsAudit(op.data.agency, op.data.datos);
     case "agencies":   return api.saveAgencies(op.data);
     default: return;
   }
@@ -196,6 +209,9 @@ export async function pullAll() {
       pushMissingVehicles(serverVins);
     }
     if (Array.isArray(parts)) mergeParts(parts);
+    // Sesión de inventario de refacciones por agencia (para continuar en otro
+    // equipo). Se baja aparte y se fusiona con last-write-wins por updatedAt.
+    await pullPartsAudit();
     // Usuarios: merge ADITIVO solo-metadatos (ver auth.mergeServerUsers). Nunca
     // toca credenciales locales (salt/passHash) ni borra la cuenta de emergencia.
     // El push de altas/bajas/cambios va directo desde auth.js (fire-and-forget),
@@ -249,17 +265,65 @@ function pushMissingVehicles(serverVins) {
     }
   }
 }
-// Fusión de refacciones por (agency, numParte). Las partes que vienen del
-// servidor sin `agency` (datos globales previos a la Fase B) se colocan en el
-// archivo previo para no mezclarlas con ninguna agencia real.
+// Fusión de refacciones por (agency, numParte) con REEMPLAZO por agencia.
+// Antes era solo-upsert (nunca borraba), por lo que en multi-dispositivo quedaban
+// "datos viejos" de muestras/inventarios anteriores. Ahora, para cada agencia que
+// el servidor reporta, el inventario local de ESA agencia pasa a ser el del
+// servidor: se upsertean las partes del servidor (last-write-wins por updatedAt,
+// que CONSERVA los conteos locales más nuevos aún no subidos) y se ELIMINAN las
+// locales que el servidor ya no tiene —salvo las que son más nuevas localmente y
+// todavía no se han subido, que se re-suben en vez de borrarse—.
+// `serverList` puede traer varias agencias mezcladas (api.listParts() sin filtro).
+// Baja la sesión de inventario de refacciones de cada agencia y la aplica en
+// local SOLO si la del servidor es más nueva (last-write-wins por updatedAt).
+// Así un equipo puede CONTINUAR el rotativo iniciado en otro. No pisa una sesión
+// local más reciente (p. ej. un cierre o cambio hecho aquí y aún sin subir).
+async function pullPartsAudit() {
+  for (const agency of AGENCIAS_REF) {
+    let remota;
+    try { remota = await api.getPartsAudit(agency); } catch (e) { continue; }
+    if (!remota) continue;
+    const local = store.getPartsAudit(agency);
+    if (!local || isNewer(remota.updatedAt, local.updatedAt)) {
+      store.setPartsAudit(agency, remota);
+    }
+  }
+}
+
 function mergeParts(serverList) {
+  // Agrupar las partes del servidor por agencia.
+  const porAgencia = new Map();   // agency -> Map(numParte -> parteServidor)
   for (const sp of serverList) {
     if (!sp || !sp.numParte) continue;
     const agency = sp.agency || ARCHIVO_PREVIO;
-    const local = store.getPart(agency, sp.numParte);
-    if (!local || isNewer(sp.updatedAt, local.updatedAt)) {
-      store.upsertPart(agency, sp);
+    if (!porAgencia.has(agency)) porAgencia.set(agency, new Map());
+    porAgencia.get(agency).set(sp.numParte, sp);
+  }
+
+  for (const [agency, serverMap] of porAgencia) {
+    // 1) Upsert last-write-wins: el servidor gana solo si es más nuevo.
+    for (const [numParte, sp] of serverMap) {
+      const local = store.getPart(agency, numParte);
+      if (!local || isNewer(sp.updatedAt, local.updatedAt)) {
+        store.upsertPart(agency, sp);
+      }
     }
+    // 2) Reemplazo: quitar las locales que el servidor YA NO tiene. Excepción:
+    //    una parte local que NO está en el servidor pero tiene conteo/datos
+    //    (creada/contada localmente y aún sin subir) NO se borra: se re-sube.
+    const keep = new Set(serverMap.keys());
+    for (const lp of store.listParts(agency)) {
+      if (keep.has(lp.numParte)) continue;
+      const tieneTrabajoLocal = lp.conteo != null ||
+        (lp.conteos && Object.keys(lp.conteos).length) ||
+        (lp.exhibiciones && Object.keys(lp.exhibiciones).length);
+      if (tieneTrabajoLocal) {
+        // Pertenece a este equipo y no está arriba todavía → súbela, no la borres.
+        keep.add(lp.numParte);
+        try { pushPart(agency, lp.numParte); } catch (e) {}
+      }
+    }
+    store.retainParts(agency, keep);   // elimina las que no están en keep
   }
 }
 // ¿La fecha 'a' (servidor) es MÁS NUEVA que 'b' (local)?

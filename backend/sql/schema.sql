@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS refacciones (
   -- Datos económicos / clasificación de rotación (del CSV de existencias).
   precio_unit  DECIMAL(12,2) NULL,
   clasificacion VARCHAR(4)  NOT NULL DEFAULT '',   -- R/L/E/P/O/I
+  rotativo_sesion VARCHAR(40) NOT NULL DEFAULT '', -- sello de la muestra rotativa
   -- Banderas del cruce y procedencia.
   en_marbetes  TINYINT(1)   NOT NULL DEFAULT 0,
   en_existencias TINYINT(1) NOT NULL DEFAULT 0,
@@ -206,11 +207,27 @@ ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS exhibiciones LONGTEXT NULL;
 ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS exhibicion INT NULL;
 ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS precio_unit DECIMAL(12,2) NULL;
 ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS clasificacion VARCHAR(4) NOT NULL DEFAULT '';
+-- Sello de la SESIÓN de muestreo rotativo (agrupa las partes de una misma
+-- muestra; permite continuar/contar el rotativo en otro dispositivo).
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS rotativo_sesion VARCHAR(40) NOT NULL DEFAULT '';
 -- Recomponer la PK: quitar la antigua (si era solo num_parte) y poner la compuesta.
 -- Nota: MariaDB no soporta "DROP PRIMARY KEY IF EXISTS"; este bloque asume la
 -- migración de una tabla antigua. Si la tabla ya tiene la PK compuesta, el ALTER
 -- fallará sin dañar datos; en ese caso simplemente ignóralo.
 -- ALTER TABLE refacciones DROP PRIMARY KEY, ADD PRIMARY KEY (agencia, num_parte);
+
+-- ---------------------------------------------------------------------------
+-- Sesión de AUDITORÍA de refacciones POR AGENCIA (para continuar un inventario
+-- rotativo/completo en otro dispositivo). Una fila por agencia (clave = agencia).
+-- `datos` guarda el objeto de sesión del frontend (tipo, rondas, rondaActual,
+-- cantidadRotativo, rotativoSesion, modoMuestreo, firmas, finishedAt, …) en JSON.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS refacciones_auditoria (
+  agencia     VARCHAR(120) NOT NULL,
+  datos       LONGTEXT     NULL,          -- objeto de sesión en JSON
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (agencia)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
 -- Bitácora de auditoría del sistema (quién cambió qué)
