@@ -198,6 +198,19 @@ export function initRefacciones() {
   const soloPrueba = document.getElementById("ref-solo-etq-prueba");
   if (soloPrueba) soloPrueba.addEventListener("click", () => imprimirEtiquetasAnaqueles(true));
 
+  // --- Etiqueta suelta (refacción nueva, escrita a mano) ---
+  const manualAdd = document.getElementById("ref-manual-add");
+  if (manualAdd) manualAdd.addEventListener("click", agregarEtiquetaManual);
+  const manualPrint = document.getElementById("ref-manual-print");
+  if (manualPrint) manualPrint.addEventListener("click", () => imprimirEtiquetasManuales(false));
+  const manualClear = document.getElementById("ref-manual-clear");
+  if (manualClear) manualClear.addEventListener("click", vaciarEtiquetasManuales);
+  // Enter en cualquiera de los 3 campos agrega la fila.
+  ["ref-manual-parte", "ref-manual-desc", "ref-manual-ubic"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); agregarEtiquetaManual(); } });
+  });
+
   // --- Asistente de inicio: agencia + tipo ---
   const selWizAg = document.getElementById("ref-wizard-agencia");
   if (selWizAg) selWizAg.addEventListener("change", () => {
@@ -1171,6 +1184,71 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
       sepV: numVal("ref-solo-etq-sepv", 2),
     });
     if (!prueba) logAction("parts.labels.shelf", `Etiquetas para anaqueles impresas (${lista.length} partes)`, auth.currentUser()?.name || "—");
+  } catch (e) {
+    notify(e.message || String(e), { type: "error" });
+  }
+}
+
+// ---- Etiquetas SUELTAS escritas a mano (refacciones nuevas sin archivo) ----
+let etqManuales = [];   // [{ numParte, descripcion, ubicacion }]
+
+function renderEtiquetasManuales() {
+  const wrap = document.getElementById("ref-manual-wrap");
+  const tbody = document.querySelector("#ref-manual-table tbody");
+  const btnPrint = document.getElementById("ref-manual-print");
+  const btnClear = document.getElementById("ref-manual-clear");
+  if (wrap) wrap.hidden = etqManuales.length === 0;
+  if (tbody) {
+    tbody.innerHTML = etqManuales.map((p, i) => `<tr>
+      <td><code>${escapeHtml(p.numParte)}</code></td>
+      <td>${escapeHtml(p.descripcion || "")}</td>
+      <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
+      <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
+    </tr>`).join("");
+    tbody.querySelectorAll(".ref-manual-del").forEach(b =>
+      b.addEventListener("click", () => { etqManuales.splice(Number(b.dataset.i), 1); renderEtiquetasManuales(); }));
+  }
+  if (btnPrint) btnPrint.disabled = etqManuales.length === 0;
+  if (btnClear) btnClear.disabled = etqManuales.length === 0;
+}
+
+function agregarEtiquetaManual() {
+  const pEl = document.getElementById("ref-manual-parte");
+  const dEl = document.getElementById("ref-manual-desc");
+  const uEl = document.getElementById("ref-manual-ubic");
+  const numParte = (pEl?.value || "").trim();
+  const descripcion = (dEl?.value || "").trim();
+  const ubicacion = (uEl?.value || "").trim();
+  if (!numParte) { setStatusEl("ref-manual-status", "Escribe al menos el número de parte.", "error"); pEl?.focus(); return; }
+  // Evita duplicar el mismo número de parte en la lista.
+  if (etqManuales.some(x => x.numParte.toUpperCase() === numParte.toUpperCase())) {
+    setStatusEl("ref-manual-status", `El número de parte ${numParte} ya está en la lista.`, "warn");
+    return;
+  }
+  etqManuales.push({ numParte, descripcion, ubicacion });
+  setStatusEl("ref-manual-status", `✓ Agregada ${numParte}. Puedes seguir agregando o imprimir.`, "ok");
+  if (pEl) pEl.value = ""; if (dEl) dEl.value = ""; if (uEl) uEl.value = "";
+  if (pEl) pEl.focus();
+  renderEtiquetasManuales();
+}
+
+function vaciarEtiquetasManuales() {
+  etqManuales = [];
+  setStatusEl("ref-manual-status", "", "info");
+  renderEtiquetasManuales();
+}
+
+async function imprimirEtiquetasManuales() {
+  if (!etqManuales.length) { notify("Agrega al menos una refacción a la lista.", { type: "warn" }); return; }
+  try {
+    await printPartLabels(etqManuales.slice(), {
+      mostrarUbic: true,
+      margenSup: numVal("ref-solo-etq-sup", 12),
+      margenIzq: numVal("ref-solo-etq-izq", 6),
+      sepH: numVal("ref-solo-etq-seph", 2),
+      sepV: numVal("ref-solo-etq-sepv", 2),
+    });
+    logAction("parts.labels.manual", `Etiqueta(s) suelta(s) impresa(s) (${etqManuales.length})`, auth.currentUser()?.name || "—");
   } catch (e) {
     notify(e.message || String(e), { type: "error" });
   }
