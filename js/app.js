@@ -1925,28 +1925,47 @@ function setupServerDiagnostic() {
 // ---------- Service Worker ----------
 function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+
+  // Cuando el NUEVO service worker toma el control, recargamos UNA vez para que
+  // todos los equipos salten a la última versión sin borrar caché a mano. Guard
+  // anti-bucle por sesión. Este evento es más fiable que escuchar 'statechange'.
+  let _recargando = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (_recargando) return;
+    let ya = false;
+    try { ya = sessionStorage.getItem("inv_sw_reloaded") === "1"; } catch (e) {}
+    if (ya) return;
+    try { sessionStorage.setItem("inv_sw_reloaded", "1"); } catch (e) {}
+    _recargando = true;
+    location.reload();
+  });
+
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").then((reg) => {
-      // Cuando se detecta una versión nueva, recargar UNA sola vez para tomarla.
-      // Guard anti-bucle: usamos sessionStorage para no recargar más de una vez
-      // por sesión (evitaba un parpadeo/recarga infinita al cambiar de versión).
-      reg.addEventListener("updatefound", () => {
-        const nw = reg.installing;
-        if (!nw) return;
-        nw.addEventListener("statechange", () => {
-          if (nw.state === "installed" && navigator.serviceWorker.controller) {
-            let yaRecargo = false;
-            try { yaRecargo = sessionStorage.getItem("inv_sw_reloaded") === "1"; } catch (e) {}
-            if (yaRecargo) return;   // ya recargamos una vez en esta sesión → no repetir
-            try { sessionStorage.setItem("inv_sw_reloaded", "1"); } catch (e) {}
+      // Si hay un SW nuevo esperando, pídele que se active YA (skipWaiting).
+      const activarNuevo = (sw) => {
+        if (!sw) return;
+        sw.addEventListener("statechange", () => {
+          if (sw.state === "installed" && navigator.serviceWorker.controller) {
             notify("Nueva versión disponible, actualizando…", { type: "info", timeout: 2000 });
-            setTimeout(() => location.reload(), 800);
+            try { sw.postMessage("skip-waiting"); } catch (e) {}
           }
         });
-      });
+      };
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        try { reg.waiting.postMessage("skip-waiting"); } catch (e) {}
+      }
+      reg.addEventListener("updatefound", () => activarNuevo(reg.installing));
+
+      // Busca actualizaciones AHORA, cada 60 s y cuando la pestaña vuelve al frente.
+      // Así el navegador vuelve a pedir sw.js al servidor y detecta versiones
+      // nuevas aunque el equipo lleve horas abierto (causa del "cada quien ve una
+      // versión distinta").
+      const buscar = () => { try { reg.update(); } catch (e) {} };
+      buscar();
+      setInterval(buscar, 60000);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) buscar(); });
     }).catch(() => {});
-    // Busca actualizaciones al abrir.
-    navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
 
     // Pide al service worker su versión real y la muestra en el badge (así el
     // número visible SIEMPRE coincide con la versión instalada, sin editarlo a mano).
