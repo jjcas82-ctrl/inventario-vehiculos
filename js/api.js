@@ -54,16 +54,28 @@ export class ApiError extends Error {
   }
 }
 
-// Construye la URL de una ruta: apiBase + "?r=<ruta>".
-function routeUrl(route) {
+// Construye la URL de una ruta: apiBase + "?r=<ruta>" + params extra.
+// `query` (opcional) son parámetros adicionales que deben ir como query REAL de
+// la URL (p. ej. agency), NO dentro de `r`. Antes se concatenaban a la ruta
+// ("parts?agency=..") y quedaban codificados dentro de `r`, por lo que el backend
+// NUNCA los recibía en $_GET → se devolvían TODAS las agencias y la sesión no
+// bajaba. Ahora van aparte y sí llegan.
+function routeUrl(route, query) {
   const base = apiBase();
   const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}r=${encodeURIComponent(route)}`;
+  let url = `${base}${sep}r=${encodeURIComponent(route)}`;
+  if (query && typeof query === "object") {
+    for (const [k, v] of Object.entries(query)) {
+      if (v == null || v === "") continue;
+      url += `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`;
+    }
+  }
+  return url;
 }
 
 // Llamada genérica a la API. Devuelve el JSON ya parseado (objeto).
 // Lanza ApiError{offline:true} si el servidor no responde (para caer a local).
-export async function apiFetch(route, { method = "GET", body = null, auth = true } = {}) {
+export async function apiFetch(route, { method = "GET", body = null, auth = true, query = null } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (auth && hasToken()) headers["Authorization"] = "Bearer " + getToken();
 
@@ -72,7 +84,7 @@ export async function apiFetch(route, { method = "GET", body = null, auth = true
 
   let res;
   try {
-    res = await fetch(routeUrl(route), {
+    res = await fetch(routeUrl(route, query), {
       method,
       headers,
       body: body != null ? JSON.stringify(body) : undefined,
@@ -158,8 +170,7 @@ export async function listAudits() { return (await apiFetch("audits")).audits ||
 // clave compuesta (agencia, num_parte). listParts() sin agencia trae todas (el
 // front fusiona por (agency,numParte)); con agencia, solo esa.
 export async function listParts(agency) {
-  const q = agency ? `parts?agency=${encodeURIComponent(agency)}` : "parts";
-  return (await apiFetch(q)).parts || [];
+  return (await apiFetch("parts", { query: agency ? { agency } : null })).parts || [];
 }
 export async function putPart(numParte, data) {
   // `data` ya incluye `agency` (lo agrega sync.pushPart).
@@ -176,12 +187,12 @@ export async function setPartConteo(numParte, conteo, agency, ronda) {
 }
 // Sesión de auditoría de refacciones por agencia (para continuar en otro equipo).
 export async function getPartsAudit(agency) {
-  return (await apiFetch(`parts/audit?agency=${encodeURIComponent(agency)}`)).audit || null;
+  return (await apiFetch("parts/audit", { query: { agency } })).audit || null;
 }
 export async function putPartsAudit(agency, datos) {
   return apiFetch("parts/audit", { method: "PUT", body: { agency, datos } });
 }
 // Vacía el inventario de refacciones de una agencia en el servidor (DELETE por agencia).
 export async function deleteParts(agency) {
-  return apiFetch(`parts?agency=${encodeURIComponent(agency)}`, { method: "DELETE" });
+  return apiFetch("parts", { method: "DELETE", query: { agency } });
 }
