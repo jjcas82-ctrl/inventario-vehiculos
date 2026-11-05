@@ -772,12 +772,14 @@
             <input id="ref-manual-parte" type="text" placeholder="Número de parte" style="flex:1;min-width:150px" />
             <input id="ref-manual-desc" type="text" placeholder="Descripción" style="flex:2;min-width:180px" />
             <input id="ref-manual-ubic" type="text" placeholder="Ubicación (anaquel)" style="flex:1;min-width:140px" />
+            <input id="ref-manual-cant" type="number" min="1" step="1" value="1" title="Cuántas etiquetas iguales imprimir" style="max-width:90px" />
             <button id="ref-manual-add" class="btn">+ Agregar a la lista</button>
           </div>
+          <p class="hint" style="margin:4px 0 0">La <b>cantidad</b> es cuántas etiquetas <b>iguales</b> quieres de esa refacción (por defecto 1).</p>
           <p id="ref-manual-status" class="hint"></p>
           <div class="table-wrap" id="ref-manual-wrap" style="max-height:200px;overflow:auto;margin-top:6px" hidden>
             <table class="table" id="ref-manual-table">
-              <thead><tr><th>No. parte</th><th>Descripción</th><th>Ubicación</th><th></th></tr></thead>
+              <thead><tr><th>No. parte</th><th>Descripción</th><th>Ubicación</th><th style="text-align:right">Etiquetas</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
