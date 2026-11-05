@@ -762,6 +762,30 @@
           <button id="ref-solo-etq-print" class="btn btn-primary" disabled>🖨️ Imprimir etiquetas</button>
           <button id="ref-solo-etq-prueba" class="btn" disabled>🧪 Hoja de prueba (con bordes)</button>
         </div>
+
+        <!-- ETIQUETA SUELTA: para una refacción nueva que aún no está en el
+             sistema. Se escribe a mano y se imprime su QR, sin cargar archivo. -->
+        <div class="loc-card" style="margin-top:14px">
+          <label><b>➕ Crear una etiqueta suelta (refacción nueva)</b></label>
+          <p class="hint" style="margin:4px 0">Para una refacción que acabas de agregar y todavía no está en el sistema: escribe sus datos e imprime su etiqueta QR al momento.</p>
+          <div class="row gap wrap">
+            <input id="ref-manual-parte" type="text" placeholder="Número de parte" style="flex:1;min-width:150px" />
+            <input id="ref-manual-desc" type="text" placeholder="Descripción" style="flex:2;min-width:180px" />
+            <input id="ref-manual-ubic" type="text" placeholder="Ubicación (anaquel)" style="flex:1;min-width:140px" />
+            <button id="ref-manual-add" class="btn">+ Agregar a la lista</button>
+          </div>
+          <p id="ref-manual-status" class="hint"></p>
+          <div class="table-wrap" id="ref-manual-wrap" style="max-height:200px;overflow:auto;margin-top:6px" hidden>
+            <table class="table" id="ref-manual-table">
+              <thead><tr><th>No. parte</th><th>Descripción</th><th>Ubicación</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="row gap wrap" style="margin-top:8px">
+            <button id="ref-manual-print" class="btn btn-primary" disabled>🖨️ Imprimir etiqueta(s)</button>
+            <button id="ref-manual-clear" class="btn btn-ghost" disabled>Vaciar lista</button>
+          </div>
+        </div>
       </div>
 
       <!-- Contenedor de todo el inventario (se oculta hasta elegir agencia+tipo) -->
