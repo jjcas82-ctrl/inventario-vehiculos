@@ -288,6 +288,14 @@ export function initRefacciones() {
 // Se llama cada vez que se abre la pestaña de refacciones.
 export function renderRefacciones() {
   if (!initialized) return;
+  // Rehidrata el buffer de existencias desde el catálogo persistido si está
+  // vacío (p. ej. tras recargar la página). Así «Generar muestra» / «Cargar
+  // estas partes» siguen teniendo el inventario completo aunque se haya perdido
+  // la variable en memoria.
+  if (agencyActual && !existencias.length) {
+    const cat = catalogoExistencias();
+    if (cat.length) existencias = cat.map(e => ({ ...e }));
+  }
   renderWizard();
   // El histórico se ve siempre (incluso sin agencia elegida).
   renderHistorialAuditorias();
@@ -777,12 +785,44 @@ async function cargarExistencias(file) {
   try {
     const text = await readTextFile(file);
     existencias = parseExistenciasCsv(text);
+    // Persistimos el CATÁLOGO completo de existencias en la sesión de la agencia.
+    // Antes, las existencias solo vivían en memoria (buffer `existencias`); si el
+    // usuario recargaba la página antes de muestrear, se perdían y el "inventario
+    // completo" del rotativo salía con muy pocas partes. Ahora queda guardado y
+    // se rehidrata al entrar, de modo que el valor total siempre es correcto.
+    guardarCatalogoExistencias(existencias);
     setCargaStatus(`✓ Existencias leídas: ${existencias.length} partes.`, "ok");
   } catch (e) {
     existencias = [];
     setCargaStatus("No se pudo leer el archivo de existencias: " + (e.message || e), "error");
   }
   renderCargaResumen();
+}
+
+// Guarda un catálogo ligero (solo lo necesario para re-muestrear y para el valor
+// total del inventario) en la sesión de la agencia activa. Se sincroniza con el
+// servidor como parte de partsAudit, así otro equipo también lo tiene.
+function guardarCatalogoExistencias(lista) {
+  if (!agencyActual) return;
+  const catalogo = (lista || [])
+    .filter(e => e && e.numParte)
+    .map(e => ({
+      numParte: e.numParte,
+      descripcion: e.descripcion || "",
+      ubicacion: e.ubicacion || "",
+      grupo: e.grupo || "",
+      existencia: e.existencia,
+      precioUnit: e.precioUnit ?? null,
+      clasificacion: e.clasificacion || "",
+    }));
+  store.setPartsAudit(ag(), { catalogo });
+  try { pushPartsAudit(ag()); } catch (e) {}
+}
+
+// Devuelve el catálogo de existencias persistido de la agencia activa (o []).
+function catalogoExistencias() {
+  const a = store.getPartsAudit(ag()) || {};
+  return Array.isArray(a.catalogo) ? a.catalogo : [];
 }
 
 async function cargarMarbetes(file) {
@@ -2081,6 +2121,9 @@ function money(n) {
   return "$ " + (Number(n) || 0).toLocaleString("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Devuelve la palabra en singular o plural según la cantidad (1 → singular).
+function plural(n, sing, plur) { return Number(n) === 1 ? sing : plur; }
+
 // Etiquetas de clasificación de rotación (del archivo de existencias).
 const CLASIF_LABEL = {
   R: "Rápido", L: "Lento", E: "Estancado", P: "Próximo obsoleto",
@@ -2142,9 +2185,13 @@ function resumenFinal() {
       partesConPrecio++;
     }
   }
-  // Valor del INVENTARIO COMPLETO cargado de la agencia (todas las partes con
-  // existencia y precio), para mostrarlo junto al del subconjunto en rotativo.
-  const todasAgencia = store.listParts(ag());
+  // Valor del INVENTARIO COMPLETO de la agencia. Preferimos el CATÁLOGO completo
+  // de existencias persistido (p. ej. 666 partes), que es el inventario real
+  // cargado; si no existe (inventarios antiguos), caemos a lo que haya en el
+  // store. Esto corrige el caso en que el rotativo solo dejaba unas pocas partes
+  // y el "valor del inventario completo" salía con 3 partes.
+  const catalogo = catalogoExistencias();
+  const todasAgencia = catalogo.length ? catalogo : store.listParts(ag());
   let valorInventarioTotal = 0, partesTotalConPrecio = 0;
   for (const p of todasAgencia) {
     if (p.precioUnit != null && p.existencia != null) {
@@ -2212,8 +2259,8 @@ function renderFinal() {
     ${aviso}
     ${valorTotalCell}
     <div class="stat"><b style="color:var(--danger)">${money(r.valorDiferencia)}</b><span>Monto de la diferencia</span></div>
-    <div class="stat"><b style="color:#b45309">${r.ajustePositivo.partes} · +${r.ajustePositivo.unidades}</b><span>Ajuste positivo (sobran)</span></div>
-    <div class="stat"><b style="color:var(--danger)">${r.ajusteNegativo.partes} · −${r.ajusteNegativo.unidades}</b><span>Ajuste negativo (faltan)</span></div>
+    <div class="stat"><b style="color:#b45309">${r.ajustePositivo.partes} ${plural(r.ajustePositivo.partes, "parte", "partes")} · +${r.ajustePositivo.unidades} ${plural(r.ajustePositivo.unidades, "pieza", "piezas")}</b><span>Ajuste positivo (sobran): piezas contadas de más</span></div>
+    <div class="stat"><b style="color:var(--danger)">${r.ajusteNegativo.partes} ${plural(r.ajusteNegativo.partes, "parte", "partes")} · −${r.ajusteNegativo.unidades} ${plural(r.ajusteNegativo.unidades, "pieza", "piezas")}</b><span>Ajuste negativo (faltan): piezas que faltan</span></div>
     <div class="stat"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>`;
 
   renderClasificacion();
@@ -2365,8 +2412,8 @@ function imprimirResultadoFinal() {
            <div class="box"><b>${money(r.valorInventario)}</b><span>Valor subconjunto AUDITADO (${r.totalPartes} partes)</span></div>`
         : `<div class="box"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>`}
       <div class="box"><b>${money(r.valorDiferencia)}</b><span>Monto total de la diferencia</span></div>
-      <div class="box"><b>${r.ajustePositivo.partes} · +${r.ajustePositivo.unidades} u.</b><span>Ajuste positivo (sobran)</span></div>
-      <div class="box"><b>${r.ajusteNegativo.partes} · −${r.ajusteNegativo.unidades} u.</b><span>Ajuste negativo (faltan)</span></div>
+      <div class="box"><b>${r.ajustePositivo.partes} ${plural(r.ajustePositivo.partes, "parte", "partes")} · +${r.ajustePositivo.unidades} ${plural(r.ajustePositivo.unidades, "pieza", "piezas")}</b><span>Ajuste positivo (sobran piezas)</span></div>
+      <div class="box"><b>${r.ajusteNegativo.partes} ${plural(r.ajusteNegativo.partes, "parte", "partes")} · −${r.ajusteNegativo.unidades} ${plural(r.ajusteNegativo.unidades, "pieza", "piezas")}</b><span>Ajuste negativo (faltan piezas)</span></div>
       <div class="box"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>
       <div class="box"><b>${r.difs.length}</b><span>Partes en el reporte</span></div>
     </div>
