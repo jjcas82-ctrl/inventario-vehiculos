@@ -20,7 +20,7 @@ import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
 import * as auth from "./auth.js";
 import * as api from "./api.js";
-import { pushParts, pushPartConteo, pushPart } from "./sync.js";
+import { pushParts, pushPartConteo, pushPart, pushPartsAudit } from "./sync.js";
 
 let initialized = false;
 let scanner = null;
@@ -150,6 +150,7 @@ export function initRefacciones() {
     const rondas = Number(selRondas.value) || 1;
     const a = store.getPartsAudit(ag()) || {};
     store.setPartsAudit(ag(), { rondas, rondaActual: a.rondaActual || 1 });
+    try { pushPartsAudit(ag()); } catch (e) {}
     renderRondas();
   });
   const btnRondaSig = document.getElementById("ref-ronda-siguiente");
@@ -359,6 +360,7 @@ function elegirTipo(tipo) {
   if (tipo === "rotativo") { patch.rondas = 1; patch.rondaActual = 1; }
   else if (!prev.rondas) { patch.rondas = 3; patch.rondaActual = prev.rondaActual || 1; }
   store.setPartsAudit(agencyActual, patch);
+  try { pushPartsAudit(agencyActual); } catch (e) {}
   logAction("parts.type.select", `Tipo de inventario (${agencyActual}): ${tipo}`, auth.currentUser()?.name || "—");
   renderRefacciones();
 }
@@ -381,6 +383,10 @@ function iniciarNuevoInventario() {
   store.clearParts(ag());
   store.clearPartsAudit(ag());
   existencias = []; marbetes = []; lastCruce = null; lastMarbetesFile = null;
+  // Propaga el vaciado al servidor: borra el inventario de la agencia y limpia la
+  // sesión, para que los demás equipos no sigan viendo el inventario anterior.
+  try { api.deleteParts(ag()); } catch (e) {}
+  try { pushPartsAudit(ag()); } catch (e) {}
   logAction("parts.new", `Nuevo inventario iniciado (vaciado) en ${ag()}`, auth.currentUser()?.name || "—");
   notify(`Inventario de ${ag()} vaciado. Elige el tipo y vuelve a cargar.`, { type: "success", timeout: 6000 });
   renderRefacciones();
@@ -570,6 +576,7 @@ function avanzarRonda() {
   const difs = listaDiferencias().filter(d => d.tipo === "faltante" || d.tipo === "sobrante").length;
   logAction("parts.count.round", `Conteo ${rondaActual} terminado · ${difs} con diferencia`, by);
   store.setPartsAudit(ag(), { rondaActual: rondaActual + 1, rondas });
+  try { pushPartsAudit(ag()); } catch (e) {}
   notify(`Conteo ${rondaActual} terminado. Ahora el conteo ${rondaActual + 1} recuenta solo las diferencias.`, { type: "success", timeout: 6000 });
   renderRondas();
   renderConteo();
@@ -588,6 +595,7 @@ function finalizarConteos() {
   if (!confirm(msg)) return;
   const by = auth.currentUser()?.name || "—";
   store.setPartsAudit(ag(), { rondas: rondaActual, rondaActual });
+  try { pushPartsAudit(ag()); } catch (e) {}
   logAction("parts.count.finish", `Conteos finalizados en el conteo ${rondaActual} (de ${rondas} configurados)`, by);
   notify(`Conteos finalizados en el conteo ${rondaActual}. Revisa las diferencias y el resultado final.`, { type: "success", timeout: 6000 });
   renderRondas();
@@ -885,7 +893,7 @@ function muestrearRotativo() {
   store.bulkUpsertParts(ag(), toSave, { merge: false });
   store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir, rotativoSesion: sesion });
   logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""}`, by);
-  try { pushParts(ag(), toSave); } catch (e) {}
+  try { pushParts(ag(), toSave); pushPartsAudit(ag()); } catch (e) {}
   const nota = excluidas ? ` Se excluyeron ${excluidas} ya auditadas antes.` : "";
   setRotativoStatus(`Muestra creada: ${pedir} número(s) de parte al azar de ${total}.${nota} Imprime la plantilla de conteo.`, "ok");
   notify(`Muestra rotativa creada: ${pedir} partes.`, { type: "success", timeout: 6000 });
@@ -920,6 +928,9 @@ function cargarRotativoManual() {
 
   const by = auth.currentUser()?.name || "—";
   const yaAuditadas = partesAuditadasAntes(ag());
+  // Sello de sesión (igual que el muestreo al azar) para poder continuar el
+  // rotativo manual en otro dispositivo.
+  const sesion = "rot-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const toSave = [];
   const noEncontradas = [];
   const repetidas = [];
@@ -935,6 +946,9 @@ function cargarRotativoManual() {
       grupo: e.grupo || "", marbete: "", existencia: e.existencia,
       precioUnit: e.precioUnit ?? null, clasificacion: e.clasificacion || "",
       enMarbetes: false, enExistencias: true, origin: "rotativo-manual",
+      rotativoSesion: sesion,
+      conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null,
+      exhibicion: null, exhibiciones: {},
     });
   }
   if (!toSave.length) {
@@ -949,9 +963,9 @@ function cargarRotativoManual() {
 
   store.clearParts(ag());
   store.bulkUpsertParts(ag(), toSave, { merge: false });
-  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: toSave.length, modoMuestreo: "manual" });
+  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: toSave.length, modoMuestreo: "manual", rotativoSesion: sesion });
   logAction("parts.rotativo.manual", `Rotativo manual (${ag()}): ${toSave.length} partes${repetidas.length ? ` · ${repetidas.length} repetidas` : ""}${noEncontradas.length ? ` · ${noEncontradas.length} no encontradas` : ""}`, by);
-  try { pushParts(ag(), toSave); } catch (e) {}
+  try { pushParts(ag(), toSave); pushPartsAudit(ag()); } catch (e) {}
   let msg = `Cargadas ${toSave.length} parte(s) a auditar.`;
   if (noEncontradas.length) msg += ` ${noEncontradas.length} no estaban en existencias (omitidas).`;
   if (repetidas.length) msg += ` ${repetidas.length} ya auditadas antes.`;
@@ -1442,6 +1456,7 @@ function reiniciarConteo() {
   // Reiniciar la ronda a 1 (conserva el nº de rondas configurado).
   const a = store.getPartsAudit(ag()) || {};
   store.setPartsAudit(ag(), { rondas: a.rondas || 1, rondaActual: 1 });
+  try { pushPartsAudit(ag()); } catch (e) {}
   logAction("parts.count.reset", `Conteo reiniciado (${partes.length} partes)`, by);
   notify("Conteo físico reiniciado (vuelve al conteo 1).", { type: "success" });
   renderRondas();
@@ -2290,6 +2305,8 @@ function cerrarAuditoria() {
     valorInventario: r.valorInventario, valorDiferencia: r.valorDiferencia,
     faltantes: r.faltantes, sobrantes: r.sobrantes, noComprobadas: r.noComprobadas,
   });
+  // Propaga el CIERRE a los demás equipos (el finishedAt viaja en la sesión).
+  try { pushPartsAudit(ag()); } catch (e) {}
   // Guarda un SNAPSHOT en el histórico (para comparar con futuras auditorías),
   // ETIQUETADO con la agencia activa (clave del rediseño por agencia).
   store.addPartsAuditHistory({

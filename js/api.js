@@ -174,3 +174,14 @@ export async function setPartConteo(numParte, conteo, agency, ronda) {
     method: "POST", body: { conteo, agency, ronda },
   });
 }
+// Sesión de auditoría de refacciones por agencia (para continuar en otro equipo).
+export async function getPartsAudit(agency) {
+  return (await apiFetch(`parts/audit?agency=${encodeURIComponent(agency)}`)).audit || null;
+}
+export async function putPartsAudit(agency, datos) {
+  return apiFetch("parts/audit", { method: "PUT", body: { agency, datos } });
+}
+// Vacía el inventario de refacciones de una agencia en el servidor (DELETE por agencia).
+export async function deleteParts(agency) {
+  return apiFetch(`parts?agency=${encodeURIComponent(agency)}`, { method: "DELETE" });
+}

@@ -31,6 +31,7 @@ function part_row_to_api(array $r): array {
     'exhibicion'    => isset($r['exhibicion']) && $r['exhibicion'] !== null ? (int)$r['exhibicion'] : null,
     'precioUnit'    => isset($r['precio_unit']) && $r['precio_unit'] !== null ? (float)$r['precio_unit'] : null,
     'clasificacion' => $r['clasificacion'] ?? '',
+    'rotativoSesion'=> $r['rotativo_sesion'] ?? '',
     'enMarbetes'    => (bool)$r['en_marbetes'],
     'enExistencias' => (bool)$r['en_existencias'],
     'origin'        => $r['origin'],
@@ -68,9 +69,9 @@ function part_upsert(string $agencia, array $b): void {
     'INSERT INTO refacciones
        (agencia, num_parte, descripcion, ubicacion, grupo, marbete, existencia, conteo,
         conteo_by, conteo_at, conteos, exhibiciones, exhibicion, precio_unit, clasificacion,
-        en_marbetes, en_existencias, origin)
+        rotativo_sesion, en_marbetes, en_existencias, origin)
      VALUES (:ag,:np,:desc,:ubic,:grupo,:marb,:exist,:cont,
-             :cby,:cat,:conteos,:exhs,:exh,:pu,:clas,:enm,:ene,:org)
+             :cby,:cat,:conteos,:exhs,:exh,:pu,:clas,:rses,:enm,:ene,:org)
      ON DUPLICATE KEY UPDATE
        descripcion   = VALUES(descripcion),
        ubicacion     = VALUES(ubicacion),
@@ -79,6 +80,7 @@ function part_upsert(string $agencia, array $b): void {
        existencia    = VALUES(existencia),
        precio_unit   = VALUES(precio_unit),
        clasificacion = VALUES(clasificacion),
+       rotativo_sesion = VALUES(rotativo_sesion),
        en_marbetes   = VALUES(en_marbetes),
        en_existencias= VALUES(en_existencias),
        origin        = VALUES(origin)')
@@ -98,6 +100,7 @@ function part_upsert(string $agencia, array $b): void {
       ':exh'   => part_int_or_null($b['exhibicion'] ?? null),
       ':pu'    => part_num_or_null($b['precioUnit'] ?? null),
       ':clas'  => (string)($b['clasificacion'] ?? ''),
+      ':rses'  => (string)($b['rotativoSesion'] ?? ''),
       ':enm'   => !empty($b['enMarbetes']) ? 1 : 0,
       ':ene'   => !empty($b['enExistencias']) ? 1 : 0,
       ':org'   => (string)($b['origin'] ?? ''),
@@ -112,7 +115,37 @@ function part_agency(array $b = []): string {
 }
 
 function handle_parts(array $user, string $method, array $parts): void {
-  $seg = isset($parts[1]) ? trim($parts[1]) : null;   // {numParte} o 'bulk'
+  $seg = isset($parts[1]) ? trim($parts[1]) : null;   // {numParte} | 'bulk' | 'audit'
+
+  // ---- Sesión de AUDITORÍA de refacciones por agencia (para continuar en otro
+  //      dispositivo). GET /parts/audit?agency=..  y  PUT /parts/audit ----
+  if ($seg === 'audit') {
+    if ($method === 'GET') {
+      require_perm($user, 'refacciones.view');
+      $agencia = part_agency();
+      if ($agencia === '') json_error(422, 'Falta la agencia.');
+      $st = db()->prepare('SELECT datos, updated_at FROM refacciones_auditoria WHERE agencia=?');
+      $st->execute([$agencia]);
+      $r = $st->fetch();
+      if (!$r) { json_ok(['audit' => null]); }
+      $datos = part_json_decode($r['datos']);
+      if (is_array($datos)) $datos['updatedAt'] = $r['updated_at'];   // para last-write-wins
+      json_ok(['audit' => $datos]);
+    }
+    if ($method === 'PUT') {
+      require_perm($user, 'refacciones.edit');
+      $b = body();
+      $agencia = part_agency($b);
+      if ($agencia === '') json_error(422, 'Falta la agencia.');
+      $datos = $b['datos'] ?? null;
+      db()->prepare(
+        'INSERT INTO refacciones_auditoria (agencia, datos) VALUES (:ag, :d)
+         ON DUPLICATE KEY UPDATE datos = VALUES(datos)')
+        ->execute([':ag' => $agencia, ':d' => part_json_encode($datos)]);
+      json_ok();
+    }
+    json_error(405, 'Método no permitido.');
+  }
 
   // GET /parts[?agency=..]  o  GET /parts/{numParte}?agency=..
   if ($method === 'GET') {
