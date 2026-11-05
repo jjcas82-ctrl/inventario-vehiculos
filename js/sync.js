@@ -307,12 +307,13 @@ function mergeParts(serverList) {
     porAgencia.get(agency).set(sp.numParte, sp);
   }
 
+  // Sello rotativo vigente de CADA agencia según la sesión (ya bajada por
+  // pullPartsAudit). En el modelo actual TODO el inventario (p. ej. 666 partes)
+  // se sube al servidor, y solo las partes de la muestra llevan `rotativoSesion`.
+  // Por eso el reemplazo normal basta: lo que el servidor tiene ES el inventario
+  // actual completo. El sello solo se usa para proteger de borrado las partes de
+  // la muestra que este equipo contó y aún no subió.
   for (const [agency, serverMap] of porAgencia) {
-    // ¿La agencia está en ROTATIVO con una muestra vigente? Si es así, el sello
-    // `rotativoSesion` de la sesión (ya bajada por pullPartsAudit) define qué
-    // partes son "del inventario actual". Las que no lleven ese sello son de un
-    // inventario anterior y NO deben conservarse aunque tengan conteo local:
-    // justo esto hacía que el celular siguiera viendo las 26 partes viejas.
     const sesion = store.getPartsAudit(agency) || {};
     const selloActivo = (sesion.tipo === "rotativo" && sesion.rotativoSesion)
       ? sesion.rotativoSesion : null;
@@ -325,20 +326,20 @@ function mergeParts(serverList) {
       }
     }
     // 2) Reemplazo: quitar las locales que el servidor YA NO tiene. Excepción:
-    //    una parte local que NO está en el servidor pero tiene conteo/datos
-    //    (creada/contada localmente y aún sin subir) NO se borra: se re-sube.
-    //    PERO si hay rotativo con sello activo, esa excepción NO aplica a las
-    //    partes que no pertenezcan a la muestra vigente (son del inventario
-    //    anterior): esas SÍ se borran para que el equipo converja a la muestra.
+    //    una parte local que NO está en el servidor pero tiene trabajo local
+    //    (contada/creada aquí y aún sin subir) NO se borra: se re-sube. En
+    //    rotativo esa protección aplica SOLO a las partes de la muestra vigente
+    //    (las que llevan el sello activo): si una parte sin ese sello no está en
+    //    el servidor, es de un inventario anterior → se borra para converger.
     const keep = new Set(serverMap.keys());
     for (const lp of store.listParts(agency)) {
       if (keep.has(lp.numParte)) continue;
-      // En rotativo: si la parte no es de la muestra vigente, descártala.
-      if (selloActivo && lp.rotativoSesion !== selloActivo) continue;
       const tieneTrabajoLocal = lp.conteo != null ||
         (lp.conteos && Object.keys(lp.conteos).length) ||
         (lp.exhibiciones && Object.keys(lp.exhibiciones).length);
-      if (tieneTrabajoLocal) {
+      // En rotativo, solo protegemos del borrado las partes de la muestra actual.
+      const esDeLaMuestra = !selloActivo || lp.rotativoSesion === selloActivo;
+      if (tieneTrabajoLocal && esDeLaMuestra) {
         // Pertenece a este equipo y no está arriba todavía → súbela, no la borres.
         keep.add(lp.numParte);
         try { pushPart(agency, lp.numParte); } catch (e) {}
