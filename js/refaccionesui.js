@@ -54,6 +54,18 @@ function tipoActual() {
 function esRotativo() { return tipoActual() === "rotativo"; }
 function esCompleto() { return tipoActual() === "completo"; }
 
+// Partes del inventario a trabajar en el flujo actual.
+//   - ROTATIVO: SOLO las de la sesión de muestra activa (ignora cualquier parte
+//     que el servidor haya vuelto a bajar de un conteo anterior).
+//   - COMPLETO: todas las de la agencia.
+function partesActuales() {
+  const todas = store.listParts(ag());
+  if (!esRotativo()) return todas;
+  const sesion = (store.getPartsAudit(ag()) || {}).rotativoSesion;
+  if (!sesion) return todas;
+  return todas.filter(p => p.rotativoSesion === sesion);
+}
+
 export function initRefacciones() {
   if (initialized) return;
   initialized = true;
@@ -591,7 +603,7 @@ function finalizarConteos() {
 // recapturar). Pensada para el flujo COMPLETO.
 function imprimirHojaConteo() {
   const { rondas, rondaActual } = rondaInfo();
-  const all = store.listParts(ag());
+  const all = partesActuales();
 
   // Conteo de referencia a imprimir: lo capturado en la ronda actual (o la última
   // con datos). Para ronda 1 = todas las contadas; para ronda ≥2 = solo las que
@@ -845,6 +857,10 @@ function muestrearRotativo() {
 
   const muestra = muestraAlAzar(candidatos, pedir);
   const by = auth.currentUser()?.name || "—";
+  // Sello de SESIÓN de la muestra: todo el flujo rotativo (conteo, diferencias,
+  // resultado) opera SOLO sobre las partes con este sello. Así, aunque el pull
+  // del servidor baje partes de un conteo anterior, el rotativo solo ve éstas.
+  const sesion = "rot-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const toSave = muestra.map(e => ({
     numParte: e.numParte,
     descripcion: e.descripcion || "",
@@ -857,13 +873,17 @@ function muestrearRotativo() {
     enMarbetes: false,
     enExistencias: true,
     origin: "rotativo",
+    rotativoSesion: sesion,
+    // Limpia cualquier conteo heredado para que la muestra arranque en cero.
+    conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null,
+    exhibicion: null, exhibiciones: {},
   }));
 
   // El inventario rotativo contiene SOLO la muestra: cargamos y conservamos solo
   // esos números de parte (descartamos cualquier parte previa de otra muestra).
   store.clearParts(ag());
   store.bulkUpsertParts(ag(), toSave, { merge: false });
-  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir });
+  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir, rotativoSesion: sesion });
   logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""}`, by);
   try { pushParts(ag(), toSave); } catch (e) {}
   const nota = excluidas ? ` Se excluyeron ${excluidas} ya auditadas antes.` : "";
@@ -948,7 +968,7 @@ function setRotativoStatus(msg, kind) { setStatusEl("ref-rotativo-status", msg, 
 // cantidad contada. La existencia del sistema NO se muestra (para no sesgar el
 // conteo físico).
 function imprimirPlantillaConteo() {
-  const lista = store.listParts(ag())
+  const lista = partesActuales()
     .filter(p => p.numParte)
     .sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
   if (!lista.length) { notify("No hay partes muestreadas. Primero genera la muestra rotativa.", { type: "warn" }); return; }
@@ -1432,7 +1452,7 @@ function reiniciarConteo() {
 function renderConteo() {
   const el = document.getElementById("ref-conteo-resumen");
   if (!el) return;
-  const all = store.listParts(ag());
+  const all = partesActuales();
   const { rondaActual } = rondaInfo();
   // Contadas EN ESTA RONDA y pendientes de contar EN ESTA RONDA.
   const contadas = all.filter(p => (p.conteos || {})[String(rondaActual)] != null).length;
@@ -1491,7 +1511,7 @@ function renderPendientesUbicacion() {
   if (_pendColapsado) { cont.innerHTML = ""; return; }
 
   const { rondaActual } = rondaInfo();
-  const pend = store.listParts(ag()).filter(p => pendienteEnRonda(p, rondaActual));
+  const pend = partesActuales().filter(p => pendienteEnRonda(p, rondaActual));
   if (!pend.length) {
     cont.innerHTML = `<p class="muted" style="margin:4px 0">✓ No hay partes pendientes en el conteo ${rondaActual}.</p>`;
     return;
@@ -1541,7 +1561,7 @@ function difBadge(dif) {
 // Devuelve SOLO las partes con diferencia (conteo ≠ existencia) o sin dato para
 // comparar (contada sin existencia, o con existencia pero sin contar).
 function listaDiferencias() {
-  const all = store.listParts(ag());
+  const all = partesActuales();
   const out = [];
   for (const p of all) {
     const dif = diffValor(p);
@@ -1919,7 +1939,7 @@ const CLASIF_ORDEN = ["R", "L", "E", "P", "O", "I"];
 // inventario y monto de diferencia por cada clasificación. Útil para contabilidad
 // (p. ej. cuánto valor hay en obsoletos, cuánta merma en rápidos).
 function resumenPorClasificacion() {
-  const all = store.listParts(ag());
+  const all = partesActuales();
   const difs = listaDiferencias();
   // Mapa numParte → impacto $ de su diferencia (faltante/sobrante).
   const impactoPorParte = new Map();
@@ -1959,7 +1979,9 @@ function clasifNombre(k) {
 //   valorInventario: suma de existencia × precioUnit de todas las partes.
 //   valorDiferencia: suma de |diferencia| × precioUnit de las partes con diferencia.
 function resumenFinal() {
-  const all = store.listParts(ag());
+  // Partes AUDITADAS (en rotativo = la muestra; en completo = todas).
+  const all = partesActuales();
+  // Valor del SUBCONJUNTO auditado.
   let valorInventario = 0, partesConPrecio = 0;
   for (const p of all) {
     if (p.precioUnit != null && p.existencia != null) {
@@ -1967,12 +1989,22 @@ function resumenFinal() {
       partesConPrecio++;
     }
   }
+  // Valor del INVENTARIO COMPLETO cargado de la agencia (todas las partes con
+  // existencia y precio), para mostrarlo junto al del subconjunto en rotativo.
+  const todasAgencia = store.listParts(ag());
+  let valorInventarioTotal = 0, partesTotalConPrecio = 0;
+  for (const p of todasAgencia) {
+    if (p.precioUnit != null && p.existencia != null) {
+      valorInventarioTotal += Number(p.precioUnit) * Number(p.existencia);
+      partesTotalConPrecio++;
+    }
+  }
+
   const difs = listaDiferencias();
   const conDif = difs.filter(d => d.tipo === "faltante" || d.tipo === "sobrante");
   let valorDiferencia = 0;
   for (const d of conDif) {
-    const p = store.getPart(ag(), d.numParte);
-    const precio = p && p.precioUnit != null ? Number(p.precioUnit) : 0;
+    const precio = d.precioUnit != null ? Number(d.precioUnit) : 0;
     valorDiferencia += Math.abs(Number(d.dif) || 0) * precio;
   }
   const noComprobadas = difs.filter(d => d.tipo === "sin-contar").length;
@@ -1980,7 +2012,6 @@ function resumenFinal() {
   // AJUSTES (lo que hay que capturar en el sistema):
   //   - Ajuste NEGATIVO: existencia > contado  (faltan piezas físicas). dif < 0.
   //   - Ajuste POSITIVO: contado > existencia  (sobran piezas físicas). dif > 0.
-  // Para cada uno: nº de partes y suma de unidades a ajustar (magnitud).
   const posit = conDif.filter(d => Number(d.dif) > 0);
   const negat = conDif.filter(d => Number(d.dif) < 0);
   const uds = (arr) => arr.reduce((s, d) => s + Math.abs(Number(d.dif) || 0), 0);
@@ -1989,7 +2020,10 @@ function resumenFinal() {
 
   return {
     totalPartes: all.length, partesConPrecio,
-    valorInventario, valorDiferencia,
+    valorInventario,                                  // valor del subconjunto auditado
+    valorInventarioTotal, partesTotal: todasAgencia.length, partesTotalConPrecio,
+    esRotativo: esRotativo(),
+    valorDiferencia,
     faltantes: negat.length,   // faltante = ajuste negativo
     sobrantes: posit.length,   // sobrante = ajuste positivo
     ajustePositivo, ajusteNegativo,
@@ -2015,9 +2049,15 @@ function renderFinal() {
       <b style="color:#b45309">Valor parcial</b>
       <span>${sinPrecio} de ${r.totalPartes} partes <b>sin precio</b>: el valor mostrado solo cubre ${r.partesConPrecio} partes.</span></div>`;
   }
+  // En ROTATIVO mostramos DOS valores: el del inventario completo cargado y el
+  // del subconjunto auditado. En completo, uno solo (son lo mismo).
+  const valorTotalCell = r.esRotativo
+    ? `<div class="stat stat-wide"><b>${money(r.valorInventarioTotal)}</b><span>Valor del inventario COMPLETO cargado (${r.partesTotal} partes)</span></div>
+       <div class="stat stat-wide"><b style="color:var(--primary)">${money(r.valorInventario)}</b><span>Valor del subconjunto AUDITADO / rotativo (${r.totalPartes} partes)</span></div>`
+    : `<div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario${r.partesConPrecio < r.totalPartes ? " (parcial)" : ""}</span></div>`;
   el.innerHTML = `
     ${aviso}
-    <div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario${r.partesConPrecio < r.totalPartes ? " (parcial)" : ""}</span></div>
+    ${valorTotalCell}
     <div class="stat"><b style="color:var(--danger)">${money(r.valorDiferencia)}</b><span>Monto de la diferencia</span></div>
     <div class="stat"><b style="color:#b45309">${r.ajustePositivo.partes} · +${r.ajustePositivo.unidades}</b><span>Ajuste positivo (sobran)</span></div>
     <div class="stat"><b style="color:var(--danger)">${r.ajusteNegativo.partes} · −${r.ajusteNegativo.unidades}</b><span>Ajuste negativo (faltan)</span></div>
@@ -2167,7 +2207,10 @@ function imprimirResultadoFinal() {
     <h1>Resultado de auditoría — Inventario de refacciones</h1>
     <div class="meta">Generado: ${esc(fecha)} · Responsable: ${esc(by)} · Conteos realizados: ${rondaActual} de ${rondas}</div>
     <div class="resumen">
-      <div class="box"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>
+      ${r.esRotativo
+        ? `<div class="box"><b>${money(r.valorInventarioTotal)}</b><span>Valor inventario COMPLETO (${r.partesTotal} partes)</span></div>
+           <div class="box"><b>${money(r.valorInventario)}</b><span>Valor subconjunto AUDITADO (${r.totalPartes} partes)</span></div>`
+        : `<div class="box"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>`}
       <div class="box"><b>${money(r.valorDiferencia)}</b><span>Monto total de la diferencia</span></div>
       <div class="box"><b>${r.ajustePositivo.partes} · +${r.ajustePositivo.unidades} u.</b><span>Ajuste positivo (sobran)</span></div>
       <div class="box"><b>${r.ajusteNegativo.partes} · −${r.ajusteNegativo.unidades} u.</b><span>Ajuste negativo (faltan)</span></div>
@@ -2240,7 +2283,7 @@ function cerrarAuditoria() {
   const participantes = leerParticipantes();   // [{nombre, cargo}]
   // Lista de números de parte auditados en este inventario (para que un ROTATIVO
   // futuro pueda evitar repetirlos).
-  const partesAuditadas = store.listParts(ag()).map(p => p.numParte).filter(Boolean);
+  const partesAuditadas = partesActuales().map(p => p.numParte).filter(Boolean);
   store.setPartsAudit(ag(), {
     finishedAt: new Date().toISOString(),
     participantes,
