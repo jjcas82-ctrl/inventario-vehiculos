@@ -78,7 +78,12 @@ function partesActuales() {
   const todas = store.listParts(ag());
   if (!esRotativo()) return todas;
   const sesion = (store.getPartsAudit(ag()) || {}).rotativoSesion;
-  if (!sesion) return todas;
+  // En ROTATIVO filtramos SIEMPRE por el sello de la muestra. Antes, si no había
+  // sello se devolvían TODAS las partes (fallback), por eso el reporte mostraba
+  // el inventario completo (p. ej. 26) en vez de la muestra (p. ej. 5). Ahora:
+  //   - con sello → solo las partes de esa muestra.
+  //   - sin sello (aún no se genera la muestra) → ninguna, no todas.
+  if (!sesion) return [];
   return todas.filter(p => p.rotativoSesion === sesion);
 }
 
@@ -438,6 +443,11 @@ function iniciarNuevoInventario() {
   store.clearParts(ag());
   store.clearPartsAudit(ag());
   existencias = []; marbetes = []; lastCruce = null; lastMarbetesFile = null;
+  // Limpia TODOS los campos del formulario (antes solo se borraban los datos
+  // internos, pero el modo azar/manual, la lista de números de parte, la
+  // cantidad y la vista previa del cruce se quedaban con lo del inventario
+  // anterior). Así el usuario arranca el nuevo inventario con la pantalla limpia.
+  limpiarFormularioRefacciones();
   // Propaga el vaciado al servidor: borra el inventario de la agencia y limpia la
   // sesión, para que los demás equipos no sigan viendo el inventario anterior.
   try { api.deleteParts(ag()); } catch (e) {}
@@ -445,6 +455,27 @@ function iniciarNuevoInventario() {
   logAction("parts.new", `Nuevo inventario iniciado (vaciado) en ${ag()}`, auth.currentUser()?.name || "—");
   notify(`Inventario de ${ag()} vaciado. Elige el tipo y vuelve a cargar.`, { type: "success", timeout: 6000 });
   renderRefacciones();
+}
+
+// Deja en blanco los campos del asistente/muestreo de refacciones. Se usa al
+// iniciar un inventario nuevo para que no queden valores del anterior.
+function limpiarFormularioRefacciones() {
+  const byId = (id) => document.getElementById(id);
+  // Muestreo rotativo: lista manual de números de parte y cantidad al azar.
+  const lista = byId("ref-rotativo-lista"); if (lista) lista.value = "";
+  const cant = byId("ref-rotativo-cant");   if (cant) cant.value = "";
+  // Volver el modo a "Al azar" (valor por defecto) y marcar "evitar ya auditadas".
+  document.querySelectorAll('input[name="ref-rotativo-modo"]').forEach(r => {
+    r.checked = (r.value === "azar");
+  });
+  const evitar = byId("ref-rotativo-evitar"); if (evitar) evitar.checked = true;
+  // Número de conteos (completo): volver al valor por defecto.
+  const rondas = byId("ref-rondas-sel"); if (rondas) rondas.value = "3";
+  // Líneas de estado y vista previa del cruce.
+  const prev = byId("ref-cruce-preview"); if (prev) prev.innerHTML = "";
+  setRotativoStatus("", "info");
+  setCargaStatus("", "info");
+  const btnConfirmar = byId("ref-confirmar"); if (btnConfirmar) btnConfirmar.hidden = true;
 }
 
 // Muestra/oculta las secciones específicas de cada tipo (clases
