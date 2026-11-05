@@ -54,6 +54,22 @@ function tipoActual() {
 function esRotativo() { return tipoActual() === "rotativo"; }
 function esCompleto() { return tipoActual() === "completo"; }
 
+// ¿La agencia activa tiene un inventario EN CURSO (no cerrado)? Lo está si tiene
+// una sesión con tipo elegido Y partes cargadas Y aún no se cerró (sin finishedAt).
+// Devuelve un objeto con el detalle para la leyenda, o null si no hay.
+function inventarioActivo() {
+  if (!agencyActual) return null;
+  const a = store.getPartsAudit(ag()) || {};
+  if (!a.tipo) return null;
+  if (a.finishedAt) return null;                 // ya se cerró → no está activo
+  const partes = partesActuales();
+  if (!partes.length) return null;               // sin partes cargadas → no hay inventario
+  const contadas = partes.filter(p => p.conteo != null || (p.conteos && Object.keys(p.conteos).length)).length;
+  return { tipo: a.tipo, total: partes.length, contadas };
+}
+// Solo el ADMINISTRADOR puede saltarse el candado (iniciar otro con uno activo).
+function puedeSaltarCandado() { try { return auth.isAdmin(); } catch (e) { return false; } }
+
 // Partes del inventario a trabajar en el flujo actual.
 //   - ROTATIVO: SOLO las de la sesión de muestra activa (ignora cualquier parte
 //     que el servidor haya vuelto a bajar de un conteo anterior).
@@ -325,28 +341,67 @@ function renderWizard() {
         : "";
   }
 
+  // CANDADO: si la agencia tiene un inventario EN CURSO, se bloquea iniciar otro
+  // (cambiar de tipo / muestrear / cargar) para no borrar el trabajo por error.
+  // Solo el ADMINISTRADOR puede saltarlo (vía "Iniciar nuevo inventario").
+  const activo = inventarioActivo();
+  const bloqueado = !!activo && !puedeSaltarCandado();
+  // Deshabilita los botones de tipo mientras haya inventario activo (no-admin).
+  if (btnC) btnC.disabled = bloqueado;
+  if (btnR) btnR.disabled = bloqueado;
+
   const aviso = document.getElementById("ref-wizard-aviso");
   if (aviso) {
-    aviso.textContent = !agencyActual
-      ? "Selecciona una agencia para comenzar."
-      : (!tipo ? "Elige el tipo de inventario para habilitar la carga y el conteo." : "");
+    if (activo) {
+      const tipoTxt = activo.tipo === "rotativo" ? "rotativo" : "completo";
+      aviso.innerHTML = `🔒 <b>${escapeHtml(ag())}</b>: inventario <b>${tipoTxt}</b> EN CURSO ` +
+        `(${activo.total} parte(s), ${activo.contadas} contada(s)). ` +
+        (bloqueado
+          ? `Para continuarlo, baja a «Conteo físico». No puedes iniciar otro: pide a un administrador que use «Iniciar nuevo inventario» si hay que empezar de cero.`
+          : `Para empezar de cero usa «Iniciar nuevo inventario» (abajo); si no, continúa en «Conteo físico».`);
+      aviso.style.color = bloqueado ? "var(--danger)" : "#b45309";
+    } else {
+      aviso.style.color = "#b45309";
+      aviso.textContent = !agencyActual
+        ? "Selecciona una agencia para comenzar."
+        : (!tipo ? "Elige el tipo de inventario para habilitar la carga y el conteo." : "");
+    }
   }
 
   // Botón "Iniciar nuevo inventario": visible solo si la agencia activa ya tiene
-  // partes cargadas (si no, no hay nada que vaciar).
+  // partes cargadas. Si hay inventario activo, SOLO el administrador lo ve (es el
+  // escape del candado); para los demás queda oculto.
   const nuevoBox = document.getElementById("ref-nuevo-inv-box");
-  if (nuevoBox) nuevoBox.hidden = !(agencyActual && store.listParts(ag()).length > 0);
+  if (nuevoBox) {
+    const hayDatos = agencyActual && store.listParts(ag()).length > 0;
+    nuevoBox.hidden = !hayDatos || (!!activo && !puedeSaltarCandado());
+  }
 }
 
 // Elige el tipo de inventario para la agencia activa. Si ya había un tipo
 // distinto con datos cargados, avisa (cambiar de tipo no borra, pero el flujo
 // cambia). En rotativo fijamos 1 conteo; en completo, por defecto 3.
+// Candado compartido: devuelve true si se DEBE bloquear la acción de iniciar otro
+// inventario (hay uno activo y el usuario no es admin). Avisa al usuario.
+function candadoBloquea(accion) {
+  const activo = inventarioActivo();
+  if (activo && !puedeSaltarCandado()) {
+    notify(`🔒 ${ag()} ya tiene un inventario ${activo.tipo} en curso (${activo.contadas}/${activo.total} contadas). ` +
+      `No puedes ${accion} sin cerrarlo. Solo un administrador puede iniciar uno nuevo.`, { type: "warn", timeout: 7000 });
+    return true;
+  }
+  return false;
+}
+
 function elegirTipo(tipo) {
   if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
   if (!puedeEditar() && !puedeContar()) {
     notify("Tu rol no permite iniciar inventarios de refacciones.", { type: "warn" });
     return;
   }
+  // Cambiar de tipo con un inventario activo lo reinicia de hecho → candado.
+  const prevTipo = tipoActual();
+  if (tipo !== prevTipo && candadoBloquea("cambiar el tipo de inventario")) return;
   const prev = store.getPartsAudit(agencyActual) || {};
   if (prev.tipo && prev.tipo !== tipo) {
     const hayDatos = store.listParts(agencyActual).length > 0;
@@ -824,6 +879,7 @@ function muestrearRotativo() {
   if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
   if (!esRotativo()) { notify("Este paso es solo para inventario rotativo.", { type: "warn" }); return; }
   if (!puedeEditar()) { notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" }); return; }
+  if (candadoBloquea("generar una muestra nueva")) return;
   if (!existencias.length) {
     setRotativoStatus("Primero carga el archivo de existencias (CSV).", "error");
     notify("Carga el archivo de existencias antes de muestrear.", { type: "warn" });
@@ -910,6 +966,7 @@ function cargarRotativoManual() {
   if (!agencyActual) { notify("Primero selecciona la agencia.", { type: "warn" }); return; }
   if (!esRotativo()) { notify("Este paso es solo para inventario rotativo.", { type: "warn" }); return; }
   if (!puedeEditar()) { notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" }); return; }
+  if (candadoBloquea("cargar otra muestra")) return;
   if (!existencias.length) {
     setRotativoStatus("Primero carga el archivo de existencias (CSV) para traer descripción y existencia.", "error");
     notify("Carga el archivo de existencias antes de agregar las partes.", { type: "warn" });
@@ -1031,6 +1088,7 @@ function confirmarCarga() {
     notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" });
     return;
   }
+  if (candadoBloquea("cargar otro inventario")) return;
   const by = auth.currentUser()?.name || "—";
 
   // Unimos los items del cruce (marbetes) + las partes solo-existencia en una
