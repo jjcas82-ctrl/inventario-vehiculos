@@ -2191,7 +2191,12 @@ function resumenFinal() {
   // store. Esto corrige el caso en que el rotativo solo dejaba unas pocas partes
   // y el "valor del inventario completo" salía con 3 partes.
   const catalogo = catalogoExistencias();
-  const todasAgencia = catalogo.length ? catalogo : store.listParts(ag());
+  const enStore = store.listParts(ag());
+  // Usamos la fuente con MÁS partes: el catálogo (inventario completo cargado) o
+  // lo que haya en el store. Así el valor total es el real aunque el rotativo
+  // haya dejado solo la muestra en el store, y también en inventarios completos
+  // antiguos (sin catálogo) donde el store sí tiene todo.
+  const todasAgencia = catalogo.length >= enStore.length ? catalogo : enStore;
   let valorInventarioTotal = 0, partesTotalConPrecio = 0;
   for (const p of todasAgencia) {
     if (p.precioUnit != null && p.existencia != null) {
