@@ -952,34 +952,48 @@ function muestrearRotativo() {
 
   const muestra = muestraAlAzar(candidatos, pedir);
   const by = auth.currentUser()?.name || "—";
-  // Sello de SESIÓN de la muestra: todo el flujo rotativo (conteo, diferencias,
-  // resultado) opera SOLO sobre las partes con este sello. Así, aunque el pull
-  // del servidor baje partes de un conteo anterior, el rotativo solo ve éstas.
+  // Sello de SESIÓN de la muestra: el flujo rotativo (conteo, diferencias,
+  // resultado) opera SOLO sobre las partes con este sello, pero el inventario
+  // COMPLETO (todas las existencias) se conserva para calcular su valor total.
   const sesion = "rot-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const toSave = muestra.map(e => ({
-    numParte: e.numParte,
-    descripcion: e.descripcion || "",
-    ubicacion: e.ubicacion || "",
-    grupo: e.grupo || "",
-    marbete: "",
-    existencia: e.existencia,
-    precioUnit: e.precioUnit ?? null,
-    clasificacion: e.clasificacion || "",
-    enMarbetes: false,
-    enExistencias: true,
-    origin: "rotativo",
-    rotativoSesion: sesion,
-    // Limpia cualquier conteo heredado para que la muestra arranque en cero.
-    conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null,
-    exhibicion: null, exhibiciones: {},
-  }));
+  const enMuestra = new Set(muestra.map(e => e.numParte));
 
-  // El inventario rotativo contiene SOLO la muestra: cargamos y conservamos solo
-  // esos números de parte (descartamos cualquier parte previa de otra muestra).
+  // Guardamos TODO el inventario cargado (las 666), NO solo la muestra. Las
+  // partes elegidas llevan el sello `rotativoSesion`; las demás quedan con sello
+  // vacío. Así el "inventario completo" sigue existiendo (para su valor total) y
+  // el rotativo audita solo las selladas. Antes se borraba todo lo no muestreado
+  // (clearParts), por eso el valor del inventario completo salía con ~22 partes.
+  const toSave = existencias
+    .filter(e => e.numParte)
+    .map(e => {
+      const sel = enMuestra.has(e.numParte);
+      return {
+        numParte: e.numParte,
+        descripcion: e.descripcion || "",
+        ubicacion: e.ubicacion || "",
+        grupo: e.grupo || "",
+        marbete: "",
+        existencia: e.existencia,
+        precioUnit: e.precioUnit ?? null,
+        clasificacion: e.clasificacion || "",
+        enMarbetes: false,
+        enExistencias: true,
+        origin: sel ? "rotativo" : "existencias",
+        rotativoSesion: sel ? sesion : "",
+        // Las partes de la muestra arrancan su conteo en cero; las demás no se
+        // cuentan (no son parte de la auditoría rotativa).
+        conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null,
+        exhibicion: null, exhibiciones: {},
+      };
+    });
+
+  // Reemplazamos el inventario de la agencia por el recién cargado (merge:false
+  // refresca precios/existencia/ubicación del archivo nuevo), conservando TODAS
+  // las partes y marcando la muestra.
   store.clearParts(ag());
   store.bulkUpsertParts(ag(), toSave, { merge: false });
   store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir, rotativoSesion: sesion });
-  logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""}`, by);
+  logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""} · inventario completo ${toSave.length} partes`, by);
   try { pushParts(ag(), toSave); pushPartsAudit(ag()); } catch (e) {}
   const nota = excluidas ? ` Se excluyeron ${excluidas} ya auditadas antes.` : "";
   setRotativoStatus(`Muestra creada: ${pedir} número(s) de parte al azar de ${total}.${nota} Imprime la plantilla de conteo.`, "ok");
@@ -1019,7 +1033,8 @@ function cargarRotativoManual() {
   // Sello de sesión (igual que el muestreo al azar) para poder continuar el
   // rotativo manual en otro dispositivo.
   const sesion = "rot-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const toSave = [];
+  // Números de parte elegidos (normalizados) que SÍ están en existencias.
+  const elegidos = new Set();
   const noEncontradas = [];
   const repetidas = [];
   for (const np of pedidos) {
@@ -1029,17 +1044,9 @@ function cargarRotativoManual() {
       const f = yaAuditadas.get(e.numParte);
       repetidas.push(`${e.numParte}${f ? ` (${new Date(f).toLocaleDateString("es-MX")})` : ""}`);
     }
-    toSave.push({
-      numParte: e.numParte, descripcion: e.descripcion || "", ubicacion: e.ubicacion || "",
-      grupo: e.grupo || "", marbete: "", existencia: e.existencia,
-      precioUnit: e.precioUnit ?? null, clasificacion: e.clasificacion || "",
-      enMarbetes: false, enExistencias: true, origin: "rotativo-manual",
-      rotativoSesion: sesion,
-      conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null,
-      exhibicion: null, exhibiciones: {},
-    });
+    elegidos.add(e.numParte);
   }
-  if (!toSave.length) {
+  if (!elegidos.size) {
     setRotativoStatus(`Ninguno de los ${pedidos.length} número(s) está en las existencias cargadas.`, "error");
     return;
   }
@@ -1049,12 +1056,31 @@ function cargarRotativoManual() {
     if (!confirm(`Aviso: ${repetidas.length} número(s) de parte ya se auditaron en inventarios anteriores:\n\n${lista}\n\n¿Continuar de todos modos?`)) return;
   }
 
+  // Guardamos TODO el inventario cargado y marcamos con el sello SOLO las partes
+  // elegidas. Igual que en el muestreo al azar: el inventario completo se
+  // conserva (para su valor total) y el rotativo audita solo las selladas.
+  const toSave = existencias
+    .filter(e => e.numParte)
+    .map(e => {
+      const sel = elegidos.has(e.numParte);
+      return {
+        numParte: e.numParte, descripcion: e.descripcion || "", ubicacion: e.ubicacion || "",
+        grupo: e.grupo || "", marbete: "", existencia: e.existencia,
+        precioUnit: e.precioUnit ?? null, clasificacion: e.clasificacion || "",
+        enMarbetes: false, enExistencias: true,
+        origin: sel ? "rotativo-manual" : "existencias",
+        rotativoSesion: sel ? sesion : "",
+        conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null,
+        exhibicion: null, exhibiciones: {},
+      };
+    });
+
   store.clearParts(ag());
   store.bulkUpsertParts(ag(), toSave, { merge: false });
-  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: toSave.length, modoMuestreo: "manual", rotativoSesion: sesion });
-  logAction("parts.rotativo.manual", `Rotativo manual (${ag()}): ${toSave.length} partes${repetidas.length ? ` · ${repetidas.length} repetidas` : ""}${noEncontradas.length ? ` · ${noEncontradas.length} no encontradas` : ""}`, by);
+  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: elegidos.size, modoMuestreo: "manual", rotativoSesion: sesion });
+  logAction("parts.rotativo.manual", `Rotativo manual (${ag()}): ${elegidos.size} partes${repetidas.length ? ` · ${repetidas.length} repetidas` : ""}${noEncontradas.length ? ` · ${noEncontradas.length} no encontradas` : ""} · inventario completo ${toSave.length} partes`, by);
   try { pushParts(ag(), toSave); pushPartsAudit(ag()); } catch (e) {}
-  let msg = `Cargadas ${toSave.length} parte(s) a auditar.`;
+  let msg = `Cargadas ${elegidos.size} parte(s) a auditar.`;
   if (noEncontradas.length) msg += ` ${noEncontradas.length} no estaban en existencias (omitidas).`;
   if (repetidas.length) msg += ` ${repetidas.length} ya auditadas antes.`;
   setRotativoStatus(msg + " Imprime la plantilla de conteo.", "ok");
@@ -1441,11 +1467,17 @@ function handleScan(text) {
   if (scanner) scanner.pause();   // congela lecturas hasta registrar/cancelar
   if (inp) inp.value = p.numParte;
   const existente = store.getPart(ag(), p.numParte);
-  if (existente) {
-    beep("ok");  // sonido/vibración de ÉXITO: la parte está en el inventario
+  // En rotativo, "cuenta" solo si la parte es de la MUESTRA (lleva el sello).
+  const sello = (store.getPartsAudit(ag()) || {}).rotativoSesion;
+  const enMuestra = !esRotativo() || (existente && sello && existente.rotativoSesion === sello);
+  if (existente && enMuestra) {
+    beep("ok");  // ÉXITO: la parte está en el inventario (y en la muestra si rotativo)
     setScanStatus(`✓ ${p.numParte} — ${existente.descripcion || p.descripcion || ""}. Teclea la cantidad y pulsa Registrar (o Enter).`, "ok");
+  } else if (existente && esRotativo()) {
+    beep("warn");  // existe en el inventario pero NO es de la muestra rotativa
+    setScanStatus(`⚠️ ${p.numParte} no está en la muestra de este rotativo. No se contará.`, "warn");
   } else {
-    beep("warn");  // sonido/vibración de AVISO: la parte NO está en el inventario
+    beep("warn");  // AVISO: la parte NO está en el inventario
     setScanStatus(`⚠️ ${p.numParte} no está en el inventario. Teclea la cantidad y Registrar para contarla igual.`, "warn");
   }
   if (cant) { cant.value = ""; cant.focus(); }
@@ -1471,6 +1503,23 @@ function registrarConteoManual() {
   const by = auth.currentUser()?.name || "—";
   const { rondaActual } = rondaInfo();
   let p = store.getPart(ag(), numParte);
+
+  // En ROTATIVO el inventario del store contiene TODAS las partes (p. ej. 666),
+  // pero solo se auditan las de la MUESTRA (las que llevan el sello activo). Si
+  // la parte existe pero NO es de la muestra, no se cuenta (evita inflar el
+  // conteo del rotativo con partes del inventario completo).
+  if (esRotativo()) {
+    const sello = (store.getPartsAudit(ag()) || {}).rotativoSesion;
+    if (!p || !sello || p.rotativoSesion !== sello) {
+      beep("warn");
+      setScanStatus(`⚠️ ${numParte} no está en la muestra de este inventario rotativo. No se registra.`, "warn");
+      if (inp) inp.value = "";
+      if (cantEl) cantEl.value = "";
+      reanudarScan();
+      if (!(scanner && scanner.running) && inp) inp.focus();
+      return;
+    }
+  }
 
   // AVISO: si esta parte YA fue contada en la ronda ACTUAL, confirmar antes de
   // reemplazar el valor (opción A). En las rondas ≥2 recontar es lo esperado, así

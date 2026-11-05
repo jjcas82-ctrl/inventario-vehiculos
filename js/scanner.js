@@ -150,23 +150,32 @@ export class Scanner {
   async _loopNative() {
     if (!this.running || !this._detector) return;
     try {
-      // Detectamos sobre el canvas (más fiable que sobre el <video> en algunos equipos)
-      const canvas = this._grabFrame();
-      const target = canvas || this.video;
-      this._frames = (this._frames || 0) + 1;
-      if (this._frames === 1) {
-        this.onDetect(`analizando cuadros (${target.width || this.video.videoWidth}x${target.height || this.video.videoHeight})…`, "info");
-      }
-      const codes = await this._detector.detect(target);
-      if (codes && codes.length) {
-        this.onDetect(codes[0].rawValue, codes[0].format);
-        this._emit(codes[0].rawValue);
+      // Mientras esté en pausa, NO analizamos cuadros: así no se cachea un frame
+      // viejo que luego se re-emita, y ahorramos CPU. El loop sigue agendándose.
+      if (!this._paused) {
+        // Detectamos sobre el canvas (más fiable que sobre el <video> en algunos equipos)
+        const canvas = this._grabFrame();
+        const target = canvas || this.video;
+        this._frames = (this._frames || 0) + 1;
+        if (this._frames === 1) {
+          this.onDetect(`analizando cuadros (${target.width || this.video.videoWidth}x${target.height || this.video.videoHeight})…`, "info");
+        }
+        const codes = await this._detector.detect(target);
+        if (codes && codes.length) {
+          this.onDetect(codes[0].rawValue, codes[0].format);
+          this._emit(codes[0].rawValue);
+        }
       }
     } catch (e) {
       if (!this._loopErrShown) { this._loopErrShown = true; this.onDetect("error al analizar: " + (e.name || e), "info"); }
-    }
-    if (this.running) {
-      this._timer = setTimeout(() => this._loopNative(), 120);
+    } finally {
+      // SIEMPRE re-agendamos el loop mientras la cámara siga encendida. Antes, si
+      // detect() lanzaba una excepción el loop moría y el motor nativo dejaba de
+      // leer hasta reiniciar la cámara: justo el síntoma de "lee el primero y el
+      // segundo ya no, hasta detener la cámara".
+      if (this.running) {
+        this._timer = setTimeout(() => this._loopNative(), 120);
+      }
     }
   }
 
@@ -236,7 +245,11 @@ export class Scanner {
   // y reanudar después. La cámara sigue encendida; solo se dejan de ENTREGAR
   // resultados. Evita que un re-escaneo pise lo que se está capturando.
   pause() { this._paused = true; }
-  resume() { this._paused = false; this._lastEmit = null; this._lastEmitAt = 0; }
+  resume() {
+    this._paused = false;
+    this._lastEmit = null;
+    this._lastEmitAt = 0;
+  }
 
   _emit(text) {
     if (!text) return;
@@ -244,7 +257,11 @@ export class Scanner {
     const clean = String(text).trim();
     // Evita reprocesar el mismo texto en ráfaga (los dos motores pueden repetir).
     const now = Date.now();
-    if (clean === this._lastEmit && now - (this._lastEmitAt || 0) < 1200) return;
+    // Ventana anti-ráfaga: evita procesar el MISMO texto repetido en milisegundos
+    // (los dos motores —nativo y ZXing— pueden reportar el mismo código a la vez).
+    // 600 ms es suficiente para filtrar la ráfaga sin bloquear la re-lectura
+    // legítima de una parte parecida en el siguiente escaneo.
+    if (clean === this._lastEmit && now - (this._lastEmitAt || 0) < 600) return;
     this._lastEmit = clean;
     this._lastEmitAt = now;
     // El consumidor decide si es VIN válido y si detener la cámara.
