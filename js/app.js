@@ -1941,7 +1941,12 @@ function setupServiceWorker() {
   });
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").then((reg) => {
+    // updateViaCache:'none' → el navegador NUNCA sirve el sw.js desde su caché
+    // HTTP; siempre lo vuelve a pedir a la red al comprobar actualizaciones. Esta
+    // es la causa de raíz del "cada equipo se queda en una versión distinta":
+    // sin esto, el navegador reusaba el sw.js viejo y no se enteraba de versiones
+    // nuevas. Con esto + reg.update() periódico, todos convergen solos.
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
       // Si hay un SW nuevo esperando, pídele que se active YA (skipWaiting).
       const activarNuevo = (sw) => {
         if (!sw) return;
