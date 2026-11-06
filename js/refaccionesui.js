@@ -612,7 +612,8 @@ function renderExhibicion() {
           <td>${sinUbic ? "⚠️ " : ""}${escapeHtml(punto)}</td>
           <td style="text-align:right"><b>${escapeHtml(String(n))}</b></td>
           <td>${escapeHtml(obs)}</td>
-          <td style="text-align:center"><button class="btn btn-ghost ref-exh-del" type="button" title="Quitar esta exhibición" data-parte="${escapeHtml(p.numParte)}" data-punto="${escapeHtml(punto)}" style="padding:2px 8px;color:var(--danger)">✕</button></td>`);
+          <td style="text-align:center"><button class="btn btn-ghost ref-exh-del" type="button" title="Quitar esta exhibición" data-parte="${escapeHtml(p.numParte)}" data-punto="${escapeHtml(punto)}" style="padding:2px 8px;color:var(--danger)">✕</button></td>
+        </tr>`);
       }
     }
     tbody.innerHTML = filas.join("");
