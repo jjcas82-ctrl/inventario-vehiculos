@@ -17,14 +17,19 @@
 //     vendor/README.md y colócalos en vendor/. (opción A)
 const ZXING_LOCAL = "../vendor/zxing-browser.js";
 const ZXING_LIB_LOCAL = "../vendor/zxing-library.js";
-// CDNs de respaldo (se prueban en orden si no está la copia local).
+// CDNs para cargar ZXing. Se prueban EN ORDEN hasta que uno funcione.
+// IMPORTANTE: esm.sh va PRIMERO porque reescribe las dependencias internas de
+// @zxing/browser (que importa @zxing/library) y de @zxing/library (que importa
+// ts-custom-error) a URLs absolutas resolubles por el navegador. jsdelivr/unpkg
+// dejan esos imports como rutas "/npm/..." o "bare" que el navegador NO sabe
+// resolver sin import map → fallaban y el equipo se quedaba sin lector.
 const ZXING_CDNS = [
+  { b: "https://esm.sh/@zxing/browser@0.1.5",
+    l: "https://esm.sh/@zxing/library@0.20.0" },
   { b: "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm",
     l: "https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/+esm" },
   { b: "https://unpkg.com/@zxing/browser@0.1.5/esm/index.js",
     l: "https://unpkg.com/@zxing/library@0.20.0/esm/index.js" },
-  { b: "https://esm.sh/@zxing/browser@0.1.5",
-    l: "https://esm.sh/@zxing/library@0.20.0" },
 ];
 
 // Formatos que nos interesan (QR + los códigos de barras usados en etiquetas de VIN)
@@ -181,30 +186,53 @@ export class Scanner {
 
   async _startZxing() {
     let browserMod, libMod;
-    // 1º intento: copia LOCAL (offline).
-    try {
-      [browserMod, libMod] = await Promise.all([
-        import(/* @vite-ignore */ ZXING_LOCAL),
-        import(/* @vite-ignore */ ZXING_LIB_LOCAL).catch(() => null),
-      ]);
-      this.onDetect("ZXing cargado LOCAL (offline) ✓", "info");
-    } catch (eLocal) {
-      // 2º…N: CDNs de respaldo, probados en orden hasta que uno cargue.
-      for (const cdn of ZXING_CDNS) {
-        try {
-          const [b, l] = await Promise.all([
-            import(/* @vite-ignore */ cdn.b),
-            import(/* @vite-ignore */ cdn.l).catch(() => null),
-          ]);
-          browserMod = b; libMod = l;
-          this.onDetect("ZXing cargado desde CDN de respaldo", "info");
+    const errores = [];
+    // 1º: CDNs (esm.sh primero). Son los que resuelven TODAS las dependencias
+    // internas de ZXing, así que funcionan tal cual en el navegador. Se prueban
+    // en orden hasta que uno cargue el módulo del navegador (`b`).
+    for (const cdn of ZXING_CDNS) {
+      try {
+        const [b, l] = await Promise.all([
+          import(/* @vite-ignore */ cdn.b),
+          import(/* @vite-ignore */ cdn.l).catch(() => null),
+        ]);
+        if (b && (b.BrowserMultiFormatReader || (b.default && b.default.BrowserMultiFormatReader))) {
+          browserMod = b.BrowserMultiFormatReader ? b : b.default;
+          libMod = l;
+          this.onDetect("ZXing cargado desde " + cdn.b, "info");
           break;
-        } catch (e) { /* probar el siguiente CDN */ }
+        }
+        errores.push(cdn.b + ": sin BrowserMultiFormatReader");
+      } catch (e) {
+        errores.push(cdn.b + ": " + (e && (e.message || e.name) || e));
       }
-      if (!browserMod) {
-        this.onStatus("No se pudo cargar el lector de códigos. Usa la captura manual del VIN. (Para que funcione sin internet, sube los archivos de vendor/.)", "error");
-        return;
+    }
+    // 2º (último recurso): copia LOCAL de vendor/. OJO: la copia bundleada por
+    // jsdelivr conserva imports a "/npm/..." que NO existen en este servidor, por
+    // lo que normalmente falla; se intenta por si se sube una copia autocontenida.
+    if (!browserMod) {
+      try {
+        const [b, l] = await Promise.all([
+          import(/* @vite-ignore */ ZXING_LOCAL),
+          import(/* @vite-ignore */ ZXING_LIB_LOCAL).catch(() => null),
+        ]);
+        if (b && (b.BrowserMultiFormatReader || (b.default && b.default.BrowserMultiFormatReader))) {
+          browserMod = b.BrowserMultiFormatReader ? b : b.default;
+          libMod = l;
+          this.onDetect("ZXing cargado LOCAL (vendor/) ✓", "info");
+        } else {
+          errores.push("local: sin BrowserMultiFormatReader");
+        }
+      } catch (eLocal) {
+        errores.push("local: " + (eLocal && (eLocal.message || eLocal.name) || eLocal));
       }
+    }
+    if (!browserMod) {
+      // Mostramos el motivo concreto para poder diagnosticar (antes salía un
+      // mensaje genérico y no se sabía si era red, CDN o los archivos locales).
+      this.onDetect("ZXing no cargó · " + errores.join(" | "), "info");
+      this.onStatus("No se pudo cargar el lector de cámara (revisa tu conexión). Puedes usar la captura manual o un lector USB/Bluetooth.", "error");
+      return;
     }
     try {
       const { BrowserMultiFormatReader } = browserMod;
