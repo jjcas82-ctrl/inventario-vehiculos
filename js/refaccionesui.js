@@ -551,6 +551,24 @@ function registrarExhibicion() {
   const cant = Number(cantRaw);
   if (!Number.isFinite(cant) || cant < 0) { notify("La cantidad debe ser 0 o más.", { type: "warn" }); cantEl?.focus(); return; }
 
+  // AVISO: comprobar que el número de parte EXISTE en el inventario cargado. En
+  // rotativo, además, que pertenezca a la MUESTRA auditada. Antes, exhibición
+  // daba de alta cualquier número sin avisar, así que un error de tecleo entraba
+  // silenciosamente y descuadraba el conteo.
+  const existente = store.getPart(ag(), numParte);
+  const sello = (store.getPartsAudit(ag()) || {}).rotativoSesion;
+  const enInventario = !!existente && (!esRotativo() || (sello && existente.rotativoSesion === sello));
+  if (!enInventario) {
+    const motivo = !existente
+      ? `El número de parte ${numParte} NO está en el inventario cargado de ${ag()}.`
+      : `El número de parte ${numParte} está en el inventario, pero NO forma parte de la muestra de este inventario rotativo.`;
+    if (!confirm(`${motivo}\n\n¿Agregarlo de todos modos a exhibición? (puede descuadrar el conteo si fue un error de captura)`)) {
+      setExhStatus(`Cancelado: ${numParte} no se agregó.`, "warn");
+      parteEl?.focus();
+      return;
+    }
+  }
+
   const obsEl = document.getElementById("ref-exh-obs");
   const observacion = (obsEl?.value || "").trim();
   const by = auth.currentUser()?.name || "—";
@@ -582,6 +600,7 @@ function renderExhibicion() {
     <div class="stat"><b>${totalPiezas}</b><span>Piezas en exhibición (suman al conteo)</span></div>`;
   if (tbody) {
     // Una fila por (parte, punto). Resalta "Sin ubicación" (fuera de lugar).
+    // Cada fila lleva un botón ✕ para quitarla (p. ej. si se capturó por error).
     const filas = [];
     for (const p of conExh) {
       for (const [punto, n] of Object.entries(p.exhibiciones || {})) {
@@ -593,11 +612,33 @@ function renderExhibicion() {
           <td>${sinUbic ? "⚠️ " : ""}${escapeHtml(punto)}</td>
           <td style="text-align:right"><b>${escapeHtml(String(n))}</b></td>
           <td>${escapeHtml(obs)}</td>
-        </tr>`);
+          <td style="text-align:center"><button class="btn btn-ghost ref-exh-del" type="button" title="Quitar esta exhibición" data-parte="${escapeHtml(p.numParte)}" data-punto="${escapeHtml(punto)}" style="padding:2px 8px;color:var(--danger)">✕</button></td>`);
       }
     }
     tbody.innerHTML = filas.join("");
+    // Enganchar los botones de quitar.
+    tbody.querySelectorAll(".ref-exh-del").forEach(btn => {
+      btn.addEventListener("click", () => quitarExhibicion(btn.dataset.parte, btn.dataset.punto));
+    });
   }
+}
+
+// Quita una exhibición (parte + punto): pone su cantidad a 0, lo que en el store
+// elimina ese punto de p.exhibiciones y recalcula el total. Se usa para corregir
+// una captura equivocada.
+function quitarExhibicion(numParte, punto) {
+  if (!numParte || !punto) return;
+  if (!puedeContar()) { notify("Tu rol no permite editar exhibición.", { type: "warn" }); return; }
+  if (!confirm(`¿Quitar la exhibición de ${numParte} en «${punto}»?`)) return;
+  const by = auth.currentUser()?.name || "—";
+  store.setPartExhibicion(ag(), numParte, punto, 0, by);   // 0 → elimina el punto
+  logAction("parts.exhibicion.del", `Exhibición quitada: ${numParte} en ${punto} (${ag()})`, by);
+  try { pushPart(ag(), numParte); } catch (e) {}
+  setExhStatus(`Quitada la exhibición de ${numParte} en ${punto}.`, "ok");
+  renderExhibicion();
+  renderConteo();
+  renderDiferencias();
+  renderFinal();
 }
 
 function setExhStatus(msg, kind) { setStatusEl("ref-exh-status", msg, kind); }
