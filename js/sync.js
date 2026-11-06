@@ -297,6 +297,44 @@ async function pullPartsAudit() {
   }
 }
 
+// Repara una parte que baja del servidor ANTES de guardarla en local, para que
+// datos "envenenados" del servidor no pisen datos buenos locales. Problema real:
+// algunas partes quedaron en el servidor con `exhibicion` (total > 0) pero
+// `exhibiciones` (detalle por punto) en NULL —p. ej. por versiones viejas del
+// backend o por el endpoint de conteo que toca updated_at sin tocar exhibiciones—.
+// Al bajar, ese null pisaba el detalle bueno local y la tabla quedaba vacía.
+// Reglas:
+//   - Si el servidor NO trae detalle de exhibición (null/{}) pero SÍ un total>0:
+//       · si local tiene detalle → conservamos el detalle local.
+//       · si no hay detalle en ningún lado → sintetizamos uno {"Exhibición": total}
+//         para que el total y el detalle queden coherentes (y la tabla muestre fila).
+//   - Igual para `conteos` vs `conteo` (no perder el histórico por ronda).
+function sanearParteServidor(sp, local) {
+  const out = { ...sp };
+  const vacio = (o) => !o || typeof o !== "object" || !Object.keys(o).length;
+
+  // --- Exhibición ---
+  const totalExh = Number(out.exhibicion || 0);
+  if (vacio(out.exhibiciones)) {
+    if (local && !vacio(local.exhibiciones)) {
+      out.exhibiciones = local.exhibiciones;                 // conserva el detalle local
+      if (local.exhibObs) out.exhibObs = local.exhibObs;
+    } else if (totalExh > 0) {
+      out.exhibiciones = { "Exhibición": totalExh };          // sintetiza para que cuadre
+    }
+  }
+  // Recalcula el total a partir del detalle resultante (coherencia).
+  if (!vacio(out.exhibiciones)) {
+    out.exhibicion = Object.values(out.exhibiciones).reduce((s, v) => s + Number(v || 0), 0);
+  }
+
+  // --- Conteos por ronda ---
+  if (vacio(out.conteos) && local && !vacio(local.conteos)) {
+    out.conteos = local.conteos;
+  }
+  return out;
+}
+
 function mergeParts(serverList) {
   // Agrupar las partes del servidor por agencia.
   const porAgencia = new Map();   // agency -> Map(numParte -> parteServidor)
@@ -322,7 +360,7 @@ function mergeParts(serverList) {
     for (const [numParte, sp] of serverMap) {
       const local = store.getPart(agency, numParte);
       if (!local || isNewer(sp.updatedAt, local.updatedAt)) {
-        store.upsertPart(agency, sp);
+        store.upsertPart(agency, sanearParteServidor(sp, local));
       }
     }
     // 2) Reemplazo: quitar las locales que el servidor YA NO tiene. Excepción:

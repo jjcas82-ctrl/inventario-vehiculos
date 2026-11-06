@@ -603,7 +603,15 @@ function renderExhibicion() {
     // Cada fila lleva un botón ✕ para quitarla (p. ej. si se capturó por error).
     const filas = [];
     for (const p of conExh) {
-      for (const [punto, n] of Object.entries(p.exhibiciones || {})) {
+      // Si la parte tiene TOTAL de exhibición pero el detalle por punto está vacío
+      // (dato envenenado que pudo bajar del servidor con exhibiciones=null), lo
+      // mostramos igualmente como una fila "Exhibición" para que el usuario lo vea
+      // y pueda quitarlo. Sin esto, el resumen contaba la parte pero la tabla
+      // salía vacía.
+      let detalle = p.exhibiciones && Object.keys(p.exhibiciones).length
+        ? p.exhibiciones
+        : { "Exhibición": Number(p.exhibicion || 0) };
+      for (const [punto, n] of Object.entries(detalle)) {
         const obs = (p.exhibObs && p.exhibObs[punto]) || "";
         const sinUbic = punto === "Sin ubicación";
         filas.push(`<tr${sinUbic ? ' style="background:#fffbeb"' : ""}>
