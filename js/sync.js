@@ -319,8 +319,10 @@ function sanearParteServidor(sp, local) {
     if (local && !vacio(local.exhibiciones)) {
       out.exhibiciones = local.exhibiciones;                 // conserva el detalle local
       if (local.exhibObs) out.exhibObs = local.exhibObs;
+      out._exhReparada = true;                               // hay que curar el servidor
     } else if (totalExh > 0) {
       out.exhibiciones = { "Exhibición": totalExh };          // sintetiza para que cuadre
+      out._exhReparada = true;                               // hay que curar el servidor
     }
   }
   // Recalcula el total a partir del detalle resultante (coherencia).
@@ -360,7 +362,16 @@ function mergeParts(serverList) {
     for (const [numParte, sp] of serverMap) {
       const local = store.getPart(agency, numParte);
       if (!local || isNewer(sp.updatedAt, local.updatedAt)) {
-        store.upsertPart(agency, sanearParteServidor(sp, local));
+        const saneada = sanearParteServidor(sp, local);
+        const reparada = saneada._exhReparada;
+        delete saneada._exhReparada;                 // flag interno, no se guarda
+        store.upsertPart(agency, saneada);
+        // Si tuvimos que REPARAR el detalle de exhibición (el servidor lo trajo
+        // vacío pero había total), re-subimos la versión saneada para CURAR el
+        // dato en el servidor y que no se vuelva a propagar vacío a otros equipos.
+        if (reparada) {
+          try { pushPart(agency, numParte); } catch (e) {}
+        }
       }
     }
     // 2) Reemplazo: quitar las locales que el servidor YA NO tiene. Excepción:
