@@ -11,8 +11,20 @@ function user_row_to_api(array $r): array {
     'role'      => $r['role'],
     'activo'    => (bool)$r['activo'],
     'accessParts' => isset($r['access_parts']) && $r['access_parts'] !== null ? (bool)$r['access_parts'] : null,
+    'accessVeh'   => isset($r['access_veh']) && $r['access_veh'] !== null ? (bool)$r['access_veh'] : null,
     'canEdit'     => isset($r['can_edit']) ? (bool)$r['can_edit'] : false,
   ];
+}
+
+// ¿Existe ya la columna usuarios.access_veh? Permite subir este archivo antes de
+// correr el ALTER sin romper el alta/edición de usuarios (simplemente no guarda
+// el ajuste de vehículos hasta que la columna exista).
+function usuarios_tiene_access_veh(): bool {
+  static $ok = null;
+  if ($ok !== null) return $ok;
+  try { db()->query('SELECT access_veh FROM usuarios LIMIT 1'); $ok = true; }
+  catch (Throwable $e) { $ok = false; }
+  return $ok;
 }
 
 function handle_users(array $user, string $method, array $parts): void {
@@ -35,20 +47,44 @@ function handle_users(array $user, string $method, array $parts): void {
     $dup = db()->prepare('SELECT id FROM usuarios WHERE username=?'); $dup->execute([$username]);
     if ($dup->fetch()) json_error(409, 'Ya existe ese nombre de usuario.');
     $accessParts = array_key_exists('accessParts', $b) && $b['accessParts'] !== null ? (int)(bool)$b['accessParts'] : null;
+    $accessVeh = array_key_exists('accessVeh', $b) && $b['accessVeh'] !== null ? (int)(bool)$b['accessVeh'] : null;
+    $role = (string)($b['role'] ?? 'operador');
+    // Un usuario (no admin) debe tener acceso al menos a un módulo.
+    $tmp = ['role' => $role, 'access_parts' => $accessParts, 'access_veh' => $accessVeh];
+    if (!user_has_parts($tmp) && !user_has_veh($tmp)) {
+      json_error(422, 'El usuario debe tener acceso al menos a un módulo (vehículos o refacciones).');
+    }
     $canEdit = !empty($b['canEdit']) ? 1 : 0;
-    db()->prepare('INSERT INTO usuarios (first_name, last_name, email, username, pass_hash, role, access_parts, can_edit) VALUES (?,?,?,?,?,?,?,?)')
-        ->execute([
-          (string)($b['firstName'] ?? ''), (string)($b['lastName'] ?? ''),
-          (string)($b['email'] ?? ''), $username,
-          password_hash($pass, PASSWORD_DEFAULT), (string)($b['role'] ?? 'operador'),
-          $accessParts, $canEdit,
-        ]);
+    $cols = 'first_name, last_name, email, username, pass_hash, role, access_parts, can_edit';
+    $vals = [
+      (string)($b['firstName'] ?? ''), (string)($b['lastName'] ?? ''),
+      (string)($b['email'] ?? ''), $username,
+      password_hash($pass, PASSWORD_DEFAULT), $role,
+      $accessParts, $canEdit,
+    ];
+    if (usuarios_tiene_access_veh()) { $cols .= ', access_veh'; $vals[] = $accessVeh; }
+    $marks = implode(',', array_fill(0, count($vals), '?'));
+    db()->prepare("INSERT INTO usuarios ($cols) VALUES ($marks)")->execute($vals);
     json_ok(['id' => (int)db()->lastInsertId()]);
   }
 
   // PUT /users/{id} — editar rol / datos / contraseña
   if ($method === 'PUT' && $id) {
     $b = body();
+    // Protección: tras el cambio, el usuario debe conservar al menos un módulo
+    // (vehículos o refacciones). El admin siempre tiene ambos.
+    if (isset($b['role']) || array_key_exists('accessParts', $b) || array_key_exists('accessVeh', $b)) {
+      $curU = db()->prepare('SELECT * FROM usuarios WHERE id=?'); $curU->execute([$id]);
+      $tmp = $curU->fetch();
+      if ($tmp) {
+        if (isset($b['role'])) $tmp['role'] = (string)$b['role'];
+        if (array_key_exists('accessParts', $b)) $tmp['access_parts'] = $b['accessParts'] === null ? null : (int)(bool)$b['accessParts'];
+        if (array_key_exists('accessVeh', $b))   $tmp['access_veh']   = $b['accessVeh'] === null ? null : (int)(bool)$b['accessVeh'];
+        if (!user_has_parts($tmp) && !user_has_veh($tmp)) {
+          json_error(422, 'El usuario debe conservar acceso al menos a un módulo (vehículos o refacciones).');
+        }
+      }
+    }
     if (isset($b['role'])) {
       // Evitar quedarse sin administradores.
       if ($b['role'] !== 'admin') {
@@ -67,6 +103,10 @@ function handle_users(array $user, string $method, array $parts): void {
     if (array_key_exists('accessParts', $b)) {
       $ap = $b['accessParts'] === null ? null : (int)(bool)$b['accessParts'];
       db()->prepare('UPDATE usuarios SET access_parts=? WHERE id=?')->execute([$ap, $id]);
+    }
+    if (array_key_exists('accessVeh', $b) && usuarios_tiene_access_veh()) {
+      $av = $b['accessVeh'] === null ? null : (int)(bool)$b['accessVeh'];
+      db()->prepare('UPDATE usuarios SET access_veh=? WHERE id=?')->execute([$av, $id]);
     }
     if (array_key_exists('canEdit', $b)) {
       db()->prepare('UPDATE usuarios SET can_edit=? WHERE id=?')->execute([!empty($b['canEdit']) ? 1 : 0, $id]);

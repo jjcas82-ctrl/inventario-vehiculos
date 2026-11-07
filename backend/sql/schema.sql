@@ -29,8 +29,10 @@ CREATE TABLE IF NOT EXISTS usuarios (
   role          VARCHAR(20)  NOT NULL DEFAULT 'operador',
   -- Ajustes por usuario (el admin los controla en la pestaña Usuarios):
   --   access_parts: NULL = usar valor por defecto del rol; 0/1 = forzar.
-  --   can_edit: edición opcional para gerente/contabilidad.
+  --   access_veh:   igual que access_parts pero para el módulo de VEHÍCULOS.
+  --   can_edit: edición opcional (solo rol contabilidad).
   access_parts  TINYINT(1)   NULL DEFAULT NULL,
+  access_veh    TINYINT(1)   NULL DEFAULT NULL,
   can_edit      TINYINT(1)   NOT NULL DEFAULT 0,
   activo        TINYINT(1)   NOT NULL DEFAULT 1,
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -42,6 +44,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 -- Migración para instalaciones existentes: agrega los ajustes por usuario si
 -- la tabla ya existía sin estas columnas (MariaDB 10.x soporta IF NOT EXISTS).
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS access_parts TINYINT(1) NULL DEFAULT NULL;
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS access_veh TINYINT(1) NULL DEFAULT NULL;
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS can_edit TINYINT(1) NOT NULL DEFAULT 0;
 
 -- ---------------------------------------------------------------------------

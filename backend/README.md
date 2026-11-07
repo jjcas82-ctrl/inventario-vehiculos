@@ -65,15 +65,26 @@ La matriz del backend (`lib/auth.php`) se mantiene en sync con el frontend (`js/
 Roles: **admin, gerente, auditor, contabilidad, ventas_admin, capturista, consultor,
 asesor, operador, refacciones**.
 
-Ajustes POR USUARIO (columnas `access_parts` y `can_edit` en `usuarios`):
+Ajustes POR USUARIO (columnas `access_parts`, `access_veh` y `can_edit` en `usuarios`):
 - **access_parts** (`NULL` = valor por defecto del rol; `0/1` = forzar): da o quita el
   acceso a **refacciones** a cualquier usuario sin cambiarle el rol.
-- **can_edit**: activa la **edición opcional** de **gerente** y **contabilidad**
-  (editan fichas como capturista; nunca VIN/agencias/usuarios).
+- **access_veh** (`NULL` = valor por defecto del rol; `0/1` = forzar): igual, para el módulo
+  de **vehículos**. Sin acceso a vehículos no se concede ningún permiso de vehículos
+  (inventario, escanear, mapa, reportes, auditoría, edición de fichas).
+- **can_edit**: activa la **edición opcional** de **contabilidad** (edita fichas como
+  capturista; nunca VIN/agencias/usuarios).
+- El **admin** siempre tiene ambos módulos; el rol **refacciones** es solo refacciones.
+  Un usuario no puede quedarse sin ningún módulo (el servidor responde 422).
 
 Notas clave:
+- **gerente/director**: solo lectura en vehículos y refacciones. Sin Escanear, Mover por
+  zona, Auditoría ni edición.
+- **auditor**: audita, escanea y mueve por zona (`event.register`), y puede **contar**
+  refacciones (`refacciones.count`) aunque no las edite. No edita fichas.
 - **asesor** ve Inventario y Reportes pero **sin** `inventory.viewValue` (montos ocultos).
-- **auditor** puede **contar** refacciones (`refacciones.count`) aunque no las edite.
+- Solo el **admin** ve Agencias, Usuarios y Bitácora.
+- `do_login` devuelve `accessParts`, `accessVeh` y `canEdit` para que el equipo muestre
+  solo los módulos del usuario.
 
 ## Instalación
 Ver **[INSTALACION-SYNOLOGY.md](INSTALACION-SYNOLOGY.md)**.

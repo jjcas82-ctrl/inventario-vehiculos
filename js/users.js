@@ -4,40 +4,55 @@ import { escapeHtml } from "./agencies.js";
 import { notify, confirmDialog, promptDialog } from "./ui.js";
 
 export function initUsers() {
-  // Muestra/oculta el switch "Puede editar" en el alta según el rol elegido
-  // (solo aplica a roles de edición opcional: gerente/contabilidad).
+  // Muestra/oculta los switches del alta según el rol elegido y los PRESELECCIONA
+  // con el acceso por defecto de ese rol (así un rol nuevo no queda sin módulos).
+  //  - "Puede editar": solo roles de edición opcional (contabilidad).
+  //  - Vehículos / Refacciones: no aplican al admin (tiene ambos) ni al rol
+  //    "refacciones" (exclusivo de refacciones).
   const roleSel = document.getElementById("nu-role");
   const caneditLabel = document.getElementById("nu-canedit-label");
   const syncAltaSwitches = () => {
     if (!roleSel) return;
     const r = roleSel.value;
     if (caneditLabel) caneditLabel.style.display = auth.roleHasOptionalEdit(r) ? "" : "none";
-    // El rol "refacciones" ya es exclusivo de refacciones: el switch no aplica.
-    const accBox = document.getElementById("nu-access-parts")?.closest("label");
-    if (accBox) accBox.style.display = auth.roleCanHaveParts(r) ? "" : "none";
+    const ed = auth.roleAccessEditable(r);
+    const def = auth.roleDefaultAccess(r);
+    const vehChk = document.getElementById("nu-access-veh");
+    const partsChk = document.getElementById("nu-access-parts");
+    if (vehChk) { vehChk.checked = def.veh; vehChk.closest("label").style.display = ed.veh ? "" : "none"; }
+    if (partsChk) { partsChk.checked = def.parts; partsChk.closest("label").style.display = ed.parts ? "" : "none"; }
   };
   if (roleSel) roleSel.addEventListener("change", syncAltaSwitches);
   syncAltaSwitches();
 
   document.getElementById("add-user").addEventListener("click", async () => {
+    const role = document.getElementById("nu-role").value;
+    const ed = auth.roleAccessEditable(role);
     const data = {
       firstName: document.getElementById("nu-first").value,
       lastName:  document.getElementById("nu-last").value,
       email:     document.getElementById("nu-email").value,
       username:  document.getElementById("nu-username").value,
       password:  document.getElementById("nu-pass").value,
-      role:      document.getElementById("nu-role").value,
-      accessParts: !!document.getElementById("nu-access-parts")?.checked,
+      role,
+      // Si el rol no permite elegir (admin / refacciones) se deja undefined para
+      // que use el valor por defecto del rol.
+      accessVeh:   ed.veh   ? !!document.getElementById("nu-access-veh")?.checked   : undefined,
+      accessParts: ed.parts ? !!document.getElementById("nu-access-parts")?.checked : undefined,
       canEdit:     !!document.getElementById("nu-can-edit")?.checked,
     };
     if (!data.firstName.trim()) { notify("Escribe el nombre.", { type: "warn" }); return; }
+    if (ed.veh && ed.parts && !data.accessVeh && !data.accessParts) {
+      notify("El usuario debe tener acceso al menos a un módulo (vehículos o refacciones).", { type: "warn" });
+      return;
+    }
     if (data.email && !/^\S+@\S+\.\S+$/.test(data.email.trim())) { notify("Correo no válido.", { type: "warn" }); return; }
     const res = await auth.createUser(data);
     if (!res.ok) { notify(res.error, { type: "error" }); return; }
     // Limpiar formulario
     ["nu-first", "nu-last", "nu-email", "nu-username", "nu-pass"].forEach(id => document.getElementById(id).value = "");
-    const ap = document.getElementById("nu-access-parts"); if (ap) ap.checked = false;
     const ce = document.getElementById("nu-can-edit"); if (ce) ce.checked = false;
+    syncAltaSwitches();   // vuelve a preseleccionar vehículos/refacciones según el rol
     renderUsers();
     notify("Usuario registrado.", { type: "success" });
   });
@@ -53,7 +68,8 @@ export function renderUsers() {
 
   tbody.innerHTML = users.map(u => {
     const partsOn = auth.hasPartsAccess(u);
-    const canHaveParts = auth.roleCanHaveParts(u.role);
+    const vehOn = auth.hasVehAccess(u);
+    const ed = auth.roleAccessEditable(u.role);   // admin / refacciones: casillas fijas
     const optEdit = auth.roleHasOptionalEdit(u.role);
     return `
     <tr>
@@ -67,9 +83,14 @@ export function renderUsers() {
         </select>
       </td>
       <td style="text-align:center">
-        ${canHaveParts
+        ${ed.veh
+          ? `<input type="checkbox" class="user-veh" data-id="${u.id}" ${vehOn ? "checked" : ""} title="Acceso al inventario de vehículos" />`
+          : `<span class="muted" title="${u.role === "admin" ? "El administrador siempre tiene acceso" : "El rol Refacciones es exclusivo de refacciones"}">${vehOn ? "✔" : "—"}</span>`}
+      </td>
+      <td style="text-align:center">
+        ${ed.parts
           ? `<input type="checkbox" class="user-parts" data-id="${u.id}" ${partsOn ? "checked" : ""} title="Acceso al inventario de refacciones" />`
-          : `<span class="muted" title="El rol Refacciones ya es exclusivo de refacciones">✔</span>`}
+          : `<span class="muted" title="${u.role === "admin" ? "El administrador siempre tiene acceso" : "El rol Refacciones ya es exclusivo de refacciones"}">${partsOn ? "✔" : "—"}</span>`}
       </td>
       <td style="text-align:center">
         ${optEdit
@@ -95,21 +116,44 @@ export function renderUsers() {
         return;
       }
       const patch = { role: sel.value };
-      // Al cambiar a un rol sin edición opcional, limpiamos canEdit.
-      if (!auth.roleHasOptionalEdit(sel.value)) patch.canEdit = undefined;
+      // Al cambiar a un rol sin edición opcional, apagamos canEdit (false, no
+      // undefined, para que el cambio también llegue al servidor).
+      if (!auth.roleHasOptionalEdit(sel.value)) patch.canEdit = false;
+      // Si con el nuevo rol el usuario quedaría SIN ningún módulo (por un ajuste
+      // explícito anterior), se restablecen los ajustes al valor por defecto del
+      // rol (null = "usar el del rol", también en el servidor).
+      const tmp = { ...target, role: sel.value };
+      if (!auth.hasPartsAccess(tmp) && !auth.hasVehAccess(tmp)) {
+        patch.accessParts = null;
+        patch.accessVeh = null;
+      }
       auth.updateUser(sel.dataset.id, patch);
       notify("Rol actualizado.", { type: "success" });
       renderUsers();   // refresca columnas de switches según el nuevo rol
     })
   );
 
-  // Switch: acceso a refacciones por usuario.
-  tbody.querySelectorAll(".user-parts").forEach(chk =>
-    chk.addEventListener("change", () => {
-      auth.updateUser(chk.dataset.id, { accessParts: chk.checked });
-      notify(chk.checked ? "Acceso a refacciones activado." : "Acceso a refacciones quitado.", { type: "success" });
-    })
-  );
+  // Switches de acceso por módulo. Protección: un usuario no puede quedarse sin
+  // ningún módulo (si se intenta, se revierte la casilla y se avisa).
+  const bindAcceso = (selector, field, otherHas, textoOn, textoOff) => {
+    tbody.querySelectorAll(selector).forEach(chk =>
+      chk.addEventListener("change", () => {
+        const u = auth.listUsers().find(x => x.id === chk.dataset.id);
+        if (!u) return;
+        if (!chk.checked && !otherHas(u)) {
+          chk.checked = true;
+          notify("El usuario debe conservar acceso al menos a un módulo (vehículos o refacciones).", { type: "warn" });
+          return;
+        }
+        auth.updateUser(chk.dataset.id, { [field]: chk.checked });
+        notify(chk.checked ? textoOn : textoOff, { type: "success" });
+      })
+    );
+  };
+  bindAcceso(".user-veh", "accessVeh", u => auth.hasPartsAccess(u),
+    "Acceso a vehículos activado.", "Acceso a vehículos quitado.");
+  bindAcceso(".user-parts", "accessParts", u => auth.hasVehAccess(u),
+    "Acceso a refacciones activado.", "Acceso a refacciones quitado.");
 
   // Switch: edición opcional por usuario (gerente/contabilidad).
   tbody.querySelectorAll(".user-canedit").forEach(chk =>

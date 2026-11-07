@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '', username TEXT NOT NULL UNIQUE,
   pass_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'operador',
-  access_parts INTEGER DEFAULT NULL, can_edit INTEGER NOT NULL DEFAULT 0,
+  access_parts INTEGER DEFAULT NULL, access_veh INTEGER DEFAULT NULL, can_edit INTEGER NOT NULL DEFAULT 0,
   activo INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
