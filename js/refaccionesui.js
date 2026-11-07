@@ -1829,6 +1829,41 @@ function listaDiferencias() {
   return out;
 }
 
+// Lista TODAS las piezas registradas en EXHIBICIÓN / puntos de venta, una fila
+// por (parte, punto), con su observación. Estas piezas SUMAN al conteo físico
+// (Opción A), por eso deben quedar como EVIDENCIA en los reportes: así quien
+// revise entiende de dónde salió una cantidad contada mayor a la que está en el
+// anaquel. Solo incluye partes del inventario actual (partesActuales()).
+function listaExhibiciones() {
+  const out = [];
+  for (const p of partesActuales()) {
+    const detalle = (p.exhibiciones && Object.keys(p.exhibiciones).length)
+      ? p.exhibiciones
+      : (Number(p.exhibicion || 0) > 0 ? { "Exhibición": Number(p.exhibicion) } : null);
+    if (!detalle) continue;
+    for (const [punto, n] of Object.entries(detalle)) {
+      if (Number(n) <= 0) continue;
+      out.push({
+        numParte: p.numParte,
+        descripcion: p.descripcion || "",
+        ubicacion: p.ubicacion || "",
+        punto,
+        cantidad: Number(n),
+        observacion: (p.exhibObs && p.exhibObs[punto]) || "",
+      });
+    }
+  }
+  // Orden: por número de parte para que sea fácil de localizar.
+  out.sort((a, b) => String(a.numParte).localeCompare(String(b.numParte), "es"));
+  return out;
+}
+
+// Piezas en exhibición de UNA parte (para la columna "En exhib." de las tablas).
+function exhibDeParte(numParte) {
+  const p = store.getPart(ag(), numParte);
+  return p ? Number(p.exhibicion || 0) : 0;
+}
+
 // Umbral de "diferencia grande" en $: configurable, default $500. Las partes con
 // impacto económico >= umbral se resaltan para priorizar la recontada.
 const UMBRAL_DIF_GRANDE = 500;
@@ -1857,6 +1892,7 @@ function renderDiferencias() {
     tbody.innerHTML = difs.map(d => {
       const grande = esDifGrande(d);
       const impactoCell = d.impacto == null ? "—" : money(d.impacto);
+      const exh = Number(d.exhibicion || 0);
       return `
       <tr${grande ? ` style="background:#fef2f2"` : ""}>
         <td>${grande ? "⚠️ " : ""}<code>${escapeHtml(d.numParte)}</code></td>
@@ -1864,6 +1900,7 @@ function renderDiferencias() {
         <td><code>${escapeHtml(d.ubicacion || "")}</code></td>
         <td style="text-align:right">${d.existencia == null ? "—" : escapeHtml(String(d.existencia))}</td>
         <td style="text-align:right">${d.conteo == null ? "—" : escapeHtml(String(d.conteo))}</td>
+        <td style="text-align:right">${exh > 0 ? `<span title="Incluidas en el conteo" style="color:var(--primary)">${exh}</span>` : "—"}</td>
         <td style="text-align:right">${difBadge(d.dif)}</td>
         <td style="text-align:right${grande ? ";color:var(--danger);font-weight:700" : ""}">${impactoCell}</td>
         <td>${tipoLabel(d.tipo)}</td>
@@ -1888,16 +1925,38 @@ function imprimirDiferencias() {
   if (!difs.length) { notify("No hay diferencias que reportar. El conteo cuadra.", { type: "success" }); return; }
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString();
-  const filas = difs.map(d => `
+  const filas = difs.map(d => {
+    const exh = Number(d.exhibicion || 0);
+    return `
     <tr>
       <td>${esc(d.numParte)}</td>
       <td>${esc(d.descripcion || "")}</td>
       <td>${esc(d.ubicacion || "")}</td>
       <td style="text-align:right">${d.existencia == null ? "—" : esc(String(d.existencia))}</td>
       <td style="text-align:right">${d.conteo == null ? "—" : esc(String(d.conteo))}</td>
+      <td style="text-align:right">${exh > 0 ? esc(String(exh)) : "—"}</td>
       <td style="text-align:right">${d.dif == null ? "—" : (d.dif > 0 ? "+" : "") + d.dif}</td>
       <td>${esc(tipoTexto(d.tipo))}</td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
+
+  // Sección de EVIDENCIA de exhibición: de dónde salieron las piezas que suman
+  // al conteo (puntos de venta / fuera de ubicación), con su observación.
+  const exhibiciones = listaExhibiciones();
+  const seccionExhib = exhibiciones.length ? `
+    <h2 style="font-size:14px;margin:18px 0 6px">Piezas en exhibición / puntos de venta (sumadas al conteo) — ${exhibiciones.length}</h2>
+    <p class="meta" style="margin:0 0 6px">Estas piezas NO estaban en el anaquel pero SÍ existen físicamente; se suman al conteo para que cuadre contra la existencia. Se listan como evidencia del ajuste.</p>
+    <table><thead><tr>
+      <th>No. parte</th><th>Descripción</th><th>Punto / ubicación</th><th>Cantidad</th><th>Observación</th>
+    </tr></thead><tbody>${
+      exhibiciones.map(e => `<tr>
+        <td>${esc(e.numParte)}</td>
+        <td>${esc(e.descripcion)}</td>
+        <td>${esc(e.punto)}</td>
+        <td style="text-align:right">${esc(String(e.cantidad))}</td>
+        <td>${esc(e.observacion)}</td>
+      </tr>`).join("")
+    }</tbody></table>` : "";
 
   const win = window.open("", "_blank", "width=900,height=1000");
   if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
@@ -1905,7 +1964,7 @@ function imprimirDiferencias() {
     <title>Reporte de diferencias — Refacciones</title>
     <style>
       *{box-sizing:border-box} body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}
-      h1{font-size:18px;margin:0 0 4px} .meta{color:#555;font-size:12px;margin-bottom:12px}
+      h1{font-size:18px;margin:0 0 4px} h2{color:#0f204a} .meta{color:#555;font-size:12px;margin-bottom:12px}
       table{width:100%;border-collapse:collapse;font-size:12px}
       th,td{border:1px solid #ccc;padding:5px 7px;text-align:left}
       th{background:#0f204a;color:#fff}
@@ -1918,11 +1977,12 @@ function imprimirDiferencias() {
     <h1>Reporte de diferencias — Inventario de refacciones</h1>
     <div class="meta">Generado: ${esc(fecha)} · Por: ${esc(by)} · ${difs.length} parte(s) con diferencia</div>
     <table><thead><tr>
-      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Conteo</th><th>Dif.</th><th>Tipo</th>
+      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Conteo</th><th>En exhib.</th><th>Dif.</th><th>Tipo</th>
     </tr></thead><tbody>${filas}</tbody></table>
+    ${seccionExhib}
     </body></html>`);
   win.document.close();
-  logAction("parts.diff.report", `Reporte de diferencias impreso (${difs.length} partes)`, by);
+  logAction("parts.diff.report", `Reporte de diferencias impreso (${difs.length} partes${exhibiciones.length ? `, ${exhibiciones.length} en exhibición` : ""})`, by);
 }
 
 function tipoTexto(t) {
@@ -1932,11 +1992,12 @@ function tipoTexto(t) {
 function exportarDiferenciasCsv() {
   const difs = listaDiferencias();
   if (!difs.length) { notify("No hay diferencias que exportar.", { type: "info" }); return; }
-  const head = ["No.Parte", "Descripcion", "Ubicacion", "Existencia", "Conteo", "Diferencia", "Tipo"];
+  const head = ["No.Parte", "Descripcion", "Ubicacion", "Existencia", "Conteo", "EnExhibicion", "Diferencia", "Tipo"];
   const rows = difs.map(d => [
     d.numParte, d.descripcion || "", d.ubicacion || "",
     d.existencia == null ? "" : d.existencia,
     d.conteo == null ? "" : d.conteo,
+    Number(d.exhibicion || 0) || "",
     d.dif == null ? "" : d.dif,
     tipoTexto(d.tipo),
   ]);
@@ -2399,34 +2460,25 @@ function imprimirResultadoFinal() {
        <table>${cabTabla}<tbody>${filasDe(otras)}</tbody></table>`
     : "";
 
-  // EVIDENCIA: refacciones encontradas FUERA DE SU UBICACIÓN ("Sin ubicación").
-  // Suman al conteo pero se listan aparte con su observación para reubicarlas.
-  const fueraDeUbic = [];
-  for (const p of store.listParts(ag())) {
-    const n = p.exhibiciones && p.exhibiciones["Sin ubicación"];
-    if (n != null && Number(n) > 0) {
-      fueraDeUbic.push({
-        numParte: p.numParte, descripcion: p.descripcion || "",
-        ubicSistema: p.ubicacion || "", cantidad: Number(n),
-        obs: (p.exhibObs && p.exhibObs["Sin ubicación"]) || "",
-      });
-    }
-  }
-  const seccionFueraUbic = fueraDeUbic.length
-    ? `<h2 style="color:#b45309">Refacciones fuera de su ubicación — ${fueraDeUbic.length} (evidencia)</h2>
-       <p class="nota">Estas piezas se contaron (suman al inventario) pero se encontraron fuera de su ubicación del sistema. Conviene reubicarlas o corregir el sistema.</p>
-       <table><thead><tr>
-         <th>No. parte</th><th>Descripción</th><th>Ubicación en sistema</th><th>Cantidad</th><th>Observación</th>
-       </tr></thead><tbody>${
-         fueraDeUbic.map(f => `<tr>
-           <td>${esc(f.numParte)}</td>
-           <td>${esc(f.descripcion)}</td>
-           <td>${esc(f.ubicSistema)}</td>
-           <td style="text-align:right">${esc(String(f.cantidad))}</td>
-           <td>${esc(f.obs)}</td>
-         </tr>`).join("")
-       }</tbody></table>`
-    : "";
+  // EVIDENCIA COMPLETA de exhibición / puntos de venta: TODAS las piezas que se
+  // sumaron al conteo desde exhibición (no solo las "Sin ubicación"), con su
+  // observación. Así el reporte explica de dónde salió cada cantidad contada que
+  // no estaba en el anaquel.
+  const exhibiciones = listaExhibiciones();
+  const seccionExhib = exhibiciones.length ? `
+    <h2 style="color:#0f204a">Piezas en exhibición / puntos de venta — ${exhibiciones.length} (evidencia)</h2>
+    <p class="nota">Estas piezas se SUMARON al conteo (existen físicamente aunque no en el anaquel). Se listan con su observación como respaldo del ajuste.</p>
+    <table><thead><tr>
+      <th>No. parte</th><th>Descripción</th><th>Punto / ubicación</th><th>Cantidad</th><th>Observación</th>
+    </tr></thead><tbody>${
+      exhibiciones.map(e => `<tr${e.punto === "Sin ubicación" ? ' style="background:#fffbeb"' : ""}>
+        <td>${esc(e.numParte)}</td>
+        <td>${esc(e.descripcion)}</td>
+        <td>${e.punto === "Sin ubicación" ? "⚠️ " : ""}${esc(e.punto)}</td>
+        <td style="text-align:right">${esc(String(e.cantidad))}</td>
+        <td>${esc(e.observacion)}</td>
+      </tr>`).join("")
+    }</tbody></table>` : "";
 
   // Área de firmas: una por participante (nombre + cargo). Si no hay ninguno,
   // deja una línea genérica para firmar a mano.
@@ -2477,7 +2529,7 @@ function imprimirResultadoFinal() {
          ${seccion("Ajuste NEGATIVO (faltan piezas: existencia &gt; contado)", negat, "#b91c1c")}
          ${seccionOtras}`
       : "<p>Sin diferencias. El inventario cuadra.</p>"}
-    ${seccionFueraUbic}
+    ${seccionExhib}
     ${firmasHtml}
     </body></html>`);
   win.document.close();
