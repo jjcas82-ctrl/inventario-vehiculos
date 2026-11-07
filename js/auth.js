@@ -28,8 +28,8 @@ const EMERGENCY_DEFAULT_PASS = "aeroplasa";   // cámbiala en el primer acceso
 
 export const ROLES = {
   admin:       { label: "Administrador",               desc: "Acceso total: VIN, agencias, usuarios, refacciones y auditorías." },
-  gerente:     { label: "Gerente / Director",          desc: "Ve todas las pestañas (veh. y refacciones). Edición opcional." },
-  auditor:     { label: "Auditor",                     desc: "Ve inventario de unidades y refacciones; realiza auditorías." },
+  gerente:     { label: "Gerente / Director",          desc: "Ve vehículos y refacciones en solo lectura. No edita, no escanea ni audita." },
+  auditor:     { label: "Auditor",                     desc: "Ve vehículos y refacciones; realiza auditorías, escanea y mueve unidades." },
   contabilidad:{ label: "Administrativo de contabilidad", desc: "Ve vehículos y refacciones. Edición opcional." },
   ventas_admin:{ label: "Administrativo de ventas",    desc: "Pestañas de vehículos; puede editar fichas." },
   capturista:  { label: "Capturista",                  desc: "Inventario de vehículos; registra y edita fichas." },
@@ -52,14 +52,15 @@ const PERMISSIONS = {
   asesor:      ["inventory.view", "reports.view"],                 // SIN inventory.viewValue (montos ocultos)
   capturista:  ["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view", "vehicle.edit"],
   ventas_admin:["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view", "vehicle.edit"],
-  // El auditor ve ambos inventarios (solo lectura) y corre auditorías.
-  auditor:     ["inventory.view", "inventory.viewValue", "reports.view", "map.view",
+  // El auditor ve ambos inventarios (sin editar fichas), corre auditorías y puede
+  // escanear / mover por zona (event.register).
+  auditor:     ["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view",
                 "refacciones.view", "audit.run", "audit.schedule"],
   // Contabilidad ve ambos inventarios; edición OPCIONAL (se concede con canEdit).
   contabilidad:["inventory.view", "inventory.viewValue", "reports.view", "map.view", "refacciones.view"],
-  // Gerente/Director ve TODO; edición OPCIONAL (se concede con canEdit).
-  gerente:     ["inventory.view", "inventory.viewValue", "reports.view", "map.view",
-                "event.register", "refacciones.view", "audit.run", "audit.schedule"],
+  // Gerente/Director: SOLO LECTURA en ambos inventarios. Sin Escanear, Mover por
+  // zona ni Auditoría, y sin edición.
+  gerente:     ["inventory.view", "inventory.viewValue", "reports.view", "map.view", "refacciones.view"],
   // Rol dedicado a refacciones: solo el inventario de partes (ver + editar).
   refacciones: ["refacciones.view", "refacciones.edit"],
   admin:       ["event.register", "inventory.view", "inventory.viewValue", "reports.view", "map.view",
@@ -70,7 +71,16 @@ const PERMISSIONS = {
 // Roles cuya EDICIÓN es opcional (se activa con el switch canEdit por usuario).
 // Al activarse, obtienen permiso de editar fichas de vehículos (como capturista),
 // pero NUNCA VIN/agencias/usuarios (eso es exclusivo de admin).
-const OPTIONAL_EDIT_ROLES = ["gerente", "contabilidad"];
+// Solo contabilidad: el gerente/director es siempre de solo lectura.
+const OPTIONAL_EDIT_ROLES = ["contabilidad"];
+
+// Permisos del módulo de VEHÍCULOS: sin acceso a vehículos no se concede ninguno.
+const VEH_PERMS = ["inventory.view", "inventory.viewValue", "reports.view", "map.view",
+  "event.register", "vehicle.edit", "vehicle.editVin", "vehicle.delete",
+  "audit.run", "audit.override", "audit.schedule"];
+
+// Acceso a VEHÍCULOS por defecto: todos los roles menos "refacciones".
+const VEH_DEFAULT_EXCEPT = ["refacciones"];
 
 // Valor POR DEFECTO del acceso a refacciones según el rol (si el usuario no tiene
 // un ajuste explícito accessParts). El Administrador puede activarlo/quitarlo por
@@ -211,7 +221,13 @@ async function cacheServerUser(serverUser, plainPassword) {
     cachedAt: new Date().toISOString(),
   };
   if (serverUser.id != null) patch.serverId = Number(serverUser.id);
+  // El servidor manda los ajustes por usuario al iniciar sesión (null = usar el
+  // valor por defecto del rol). Se guardan SIEMPRE, incluso null, para que un
+  // ajuste que el admin quitó no se quede pegado en este equipo.
   if (typeof serverUser.accessParts === "boolean") patch.accessParts = serverUser.accessParts;
+  else if (serverUser.accessParts === null) patch.accessParts = undefined;
+  if (typeof serverUser.accessVeh === "boolean") patch.accessVeh = serverUser.accessVeh;
+  else if (serverUser.accessVeh === null) patch.accessVeh = undefined;
   if (typeof serverUser.canEdit === "boolean") patch.canEdit = serverUser.canEdit;
   // El servidor YA validó la credencial real, así que el flag de "cambia tu
   // contraseña inicial" (sembrado localmente con el seed jcabrera/1234) ya no
@@ -265,6 +281,8 @@ export function mergeServerUsers(list) {
     if (su.email != null) meta.email = String(su.email);
     if (typeof su.accessParts === "boolean") meta.accessParts = su.accessParts;
     else if (su.accessParts === null) meta.accessParts = undefined;
+    if (typeof su.accessVeh === "boolean") meta.accessVeh = su.accessVeh;
+    else if (su.accessVeh === null) meta.accessVeh = undefined;
     if (typeof su.canEdit === "boolean") meta.canEdit = su.canEdit;
     if (su.id != null) meta.serverId = Number(su.id);
 
@@ -320,8 +338,38 @@ function currentFullUser() {
 export function hasPartsAccess(user) {
   const u = user || currentFullUser();
   if (!u) return false;
+  if (u.role === "admin") return true;          // el administrador siempre tiene acceso
   if (typeof u.accessParts === "boolean") return u.accessParts;
   return !!PARTS_DEFAULT[u.role];
+}
+
+// ¿El usuario tiene acceso al módulo de VEHÍCULOS? Usa el ajuste explícito
+// accessVeh si existe; si no, el valor por defecto del rol (todos menos
+// "refacciones"). El administrador siempre tiene acceso.
+export function hasVehAccess(user) {
+  const u = user || currentFullUser();
+  if (!u) return false;
+  if (u.role === "admin") return true;
+  if (typeof u.accessVeh === "boolean") return u.accessVeh;
+  return !VEH_DEFAULT_EXCEPT.includes(u.role);
+}
+
+// ¿Un rol puede tener acceso a vehículos? (para mostrar la casilla). El rol
+// "refacciones" es exclusivo de refacciones.
+export function roleCanHaveVeh(role) { return role !== "refacciones"; }
+
+// ¿Las casillas de acceso a módulos son EDITABLES para este rol? El admin siempre
+// tiene ambos módulos y el rol "refacciones" es exclusivo de refacciones: en esos
+// casos no hay nada que elegir.
+export function roleAccessEditable(role) {
+  const locked = role === "admin" || role === "refacciones";
+  return { veh: !locked, parts: !locked };
+}
+
+// Valor POR DEFECTO de cada módulo según el rol (para preseleccionar las casillas
+// en el alta y como referencia de lo que se hereda cuando no hay ajuste).
+export function roleDefaultAccess(role) {
+  return { veh: !VEH_DEFAULT_EXCEPT.includes(role), parts: !!PARTS_DEFAULT[role] };
 }
 
 // ¿El usuario puede editar (para roles de edición opcional)?
@@ -336,15 +384,21 @@ export function can(permission) {
   if (!u) return false;
   const base = PERMISSIONS[u.role] || [];
 
-  // Refacciones: ver/editar depende del switch accessParts (o el valor por rol).
-  if (permission === "refacciones.view" || permission === "refacciones.edit") {
+  // Refacciones: ver/editar/contar depende del switch accessParts (o el valor por rol).
+  if (permission === "refacciones.view" || permission === "refacciones.edit" || permission === "refacciones.count") {
     if (!hasPartsAccess(u)) return false;
     // Si tiene acceso: 'view' siempre; 'edit' según el permiso base del rol
     // (p. ej. admin y rol refacciones editan; auditor/contabilidad solo ven),
     // o si el rol tiene edición opcional activada.
     if (permission === "refacciones.view") return true;
-    return base.includes("refacciones.edit") || hasOptionalEdit(u);
+    if (permission === "refacciones.edit") return base.includes("refacciones.edit") || hasOptionalEdit(u);
+    // Contar: quien edita refacciones O el auditor. NO depende del acceso a
+    // vehículos (un auditor con solo refacciones debe poder contar).
+    return base.includes("refacciones.edit") || hasOptionalEdit(u) || base.includes("audit.run");
   }
+
+  // Módulo de VEHÍCULOS: sin acceso a vehículos no se concede ningún permiso suyo.
+  if (VEH_PERMS.includes(permission) && !hasVehAccess(u)) return false;
 
   // Edición de fichas de vehículos: permiso base O edición opcional concedida.
   if (permission === "vehicle.edit") {
@@ -378,6 +432,7 @@ export async function createUser(data) {
     // Ajustes por usuario: acceso a refacciones y edición opcional.
     // Si no se indica accessParts, se deja undefined (usa el valor por defecto del rol).
     accessParts: typeof data.accessParts === "boolean" ? data.accessParts : undefined,
+    accessVeh: typeof data.accessVeh === "boolean" ? data.accessVeh : undefined,
     canEdit: roleHasOptionalEdit(role) ? !!data.canEdit : undefined,
     salt, passHash,
   });
@@ -389,6 +444,7 @@ export async function createUser(data) {
     username: user.username, firstName: user.firstName, lastName: user.lastName,
     email: user.email, role: user.role, password: data.password,
     accessParts: typeof user.accessParts === "boolean" ? user.accessParts : null,
+    accessVeh: typeof user.accessVeh === "boolean" ? user.accessVeh : null,
     canEdit: typeof user.canEdit === "boolean" ? user.canEdit : false,
   });
   return { ok: true, user };
@@ -406,6 +462,7 @@ export function updateUser(id, patch) {
       if (patch[k] !== undefined) serverPatch[k] = patch[k];
     }
     if (patch.accessParts !== undefined) serverPatch.accessParts = patch.accessParts === undefined ? null : patch.accessParts;
+    if (patch.accessVeh !== undefined) serverPatch.accessVeh = patch.accessVeh;
     if (patch.canEdit !== undefined) serverPatch.canEdit = patch.canEdit;
     if (Object.keys(serverPatch).length) pushUpdateUser(sid, serverPatch);
   }

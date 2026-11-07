@@ -2629,7 +2629,7 @@ function puedeEditar() {
 // Registrar conteo físico: lo puede hacer quien edita refacciones O el auditor
 // (contar es la tarea central de la auditoría de refacciones).
 function puedeContar() {
-  try { return auth.can("refacciones.edit") || auth.can("audit.run"); }
+  try { return auth.can("refacciones.count"); }
   catch (e) { return false; }
 }
 

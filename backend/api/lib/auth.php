@@ -8,11 +8,13 @@ const PERMISSIONS = [
   'asesor'      => ['inventory.view', 'reports.view'],  // sin inventory.viewValue (montos ocultos)
   'capturista'  => ['event.register', 'inventory.view', 'inventory.viewValue', 'reports.view', 'map.view', 'vehicle.edit'],
   'ventas_admin'=> ['event.register', 'inventory.view', 'inventory.viewValue', 'reports.view', 'map.view', 'vehicle.edit'],
-  'auditor'     => ['inventory.view', 'inventory.viewValue', 'reports.view', 'map.view',
+  // Auditor: ve ambos inventarios, corre auditorías y puede escanear/mover (no edita fichas).
+  'auditor'     => ['event.register', 'inventory.view', 'inventory.viewValue', 'reports.view', 'map.view',
                     'refacciones.view', 'audit.run', 'audit.schedule'],
   'contabilidad'=> ['inventory.view', 'inventory.viewValue', 'reports.view', 'map.view', 'refacciones.view'],
-  'gerente'     => ['inventory.view', 'inventory.viewValue', 'reports.view', 'map.view',
-                    'event.register', 'refacciones.view', 'audit.run', 'audit.schedule'],
+  // Gerente/Director: SOLO LECTURA en ambos inventarios. Sin Escanear, Mover por
+  // zona ni Auditoría, y sin edición.
+  'gerente'     => ['inventory.view', 'inventory.viewValue', 'reports.view', 'map.view', 'refacciones.view'],
   'refacciones' => ['refacciones.view', 'refacciones.edit'],
   'admin'       => ['event.register', 'inventory.view', 'inventory.viewValue', 'reports.view', 'map.view',
                     'vehicle.edit', 'vehicle.editVin', 'vehicle.delete', 'agencies.manage', 'users.manage', 'data.wipe',
@@ -20,20 +22,42 @@ const PERMISSIONS = [
 ];
 
 // Roles con edición OPCIONAL (se concede con el switch can_edit por usuario).
-const OPTIONAL_EDIT_ROLES = ['gerente', 'contabilidad'];
+// Solo contabilidad: el gerente/director es de solo lectura.
+const OPTIONAL_EDIT_ROLES = ['contabilidad'];
 
 // Acceso a refacciones POR DEFECTO según el rol (si el usuario no tiene ajuste
 // explícito access_parts). El admin puede activarlo/quitarlo por usuario.
 const PARTS_DEFAULT = ['admin' => true, 'auditor' => true, 'contabilidad' => true,
                        'gerente' => true, 'refacciones' => true];
 
+// Acceso a VEHÍCULOS por defecto: todos los roles menos "refacciones".
+const VEH_DEFAULT_EXCEPT = ['refacciones'];
+
+// Permisos que pertenecen al módulo de VEHÍCULOS: si el usuario no tiene acceso a
+// vehículos, ninguno de estos se concede (ni siquiera por rol).
+const VEH_PERMS = ['inventory.view', 'inventory.viewValue', 'reports.view', 'map.view',
+                   'event.register', 'vehicle.edit', 'vehicle.editVin', 'vehicle.delete',
+                   'audit.run', 'audit.override', 'audit.schedule'];
+
 // ¿El usuario tiene acceso a refacciones? Usa access_parts si está definido;
-// si no, el valor por defecto del rol.
+// si no, el valor por defecto del rol. El administrador SIEMPRE tiene acceso.
 function user_has_parts(array $u): bool {
+  if (($u['role'] ?? '') === 'admin') return true;
   if (array_key_exists('access_parts', $u) && $u['access_parts'] !== null) {
     return (bool)$u['access_parts'];
   }
   return !empty(PARTS_DEFAULT[$u['role']] ?? false);
+}
+
+// ¿El usuario tiene acceso a vehículos? Usa access_veh si está definido; si no,
+// el valor por defecto del rol. El administrador SIEMPRE tiene acceso.
+function user_has_veh(array $u): bool {
+  $role = $u['role'] ?? '';
+  if ($role === 'admin') return true;
+  if (array_key_exists('access_veh', $u) && $u['access_veh'] !== null) {
+    return (bool)$u['access_veh'];
+  }
+  return !in_array($role, VEH_DEFAULT_EXCEPT, true);
 }
 
 // ¿El usuario tiene edición opcional concedida?
@@ -57,6 +81,9 @@ function user_can(array $u, string $perm): bool {
     return in_array('refacciones.edit', $base, true) || user_has_optional_edit($u)
         || in_array('audit.run', $base, true);
   }
+
+  // Módulo de VEHÍCULOS: sin acceso a vehículos no se concede ningún permiso suyo.
+  if (in_array($perm, VEH_PERMS, true) && !user_has_veh($u)) return false;
 
   // Edición de fichas de vehículos: permiso base O edición opcional concedida.
   if ($perm === 'vehicle.edit') {
@@ -96,6 +123,11 @@ function do_login(string $username, string $password): array {
       'username' => $u['username'],
       'name' => trim($u['first_name'] . ' ' . $u['last_name']) ?: $u['username'],
       'role' => $u['role'],
+      // Ajustes por usuario: el equipo los necesita para mostrar solo los módulos
+      // que le corresponden (antes solo los conocía el servidor).
+      'accessParts' => (array_key_exists('access_parts', $u) && $u['access_parts'] !== null) ? (bool)$u['access_parts'] : null,
+      'accessVeh'   => (array_key_exists('access_veh', $u) && $u['access_veh'] !== null) ? (bool)$u['access_veh'] : null,
+      'canEdit'     => !empty($u['can_edit']),
     ],
   ];
 }
@@ -111,7 +143,9 @@ function current_user(): ?array {
   $token = $m[1];
 
   $st = db()->prepare(
-    'SELECT u.id, u.username, u.first_name, u.last_name, u.role, u.access_parts, u.can_edit, s.expires_at
+    // u.* (no columnas sueltas): así sigue funcionando aunque la columna access_veh
+    // aún no exista en la base (se lee con ?? null).
+    'SELECT u.*, s.expires_at
        FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id
       WHERE s.token = ? LIMIT 1');
   $st->execute([$token]);
@@ -127,8 +161,9 @@ function current_user(): ?array {
     'name' => trim($r['first_name'] . ' ' . $r['last_name']) ?: $r['username'],
     'role' => $r['role'],
     // Ajustes por usuario (pueden ser NULL si no se definieron).
-    'access_parts' => $r['access_parts'] === null ? null : (bool)$r['access_parts'],
-    'can_edit' => (bool)$r['can_edit'],
+    'access_parts' => ($r['access_parts'] ?? null) === null ? null : (bool)$r['access_parts'],
+    'access_veh'   => ($r['access_veh'] ?? null) === null ? null : (bool)$r['access_veh'],
+    'can_edit' => !empty($r['can_edit']),
   ];
 }
 
