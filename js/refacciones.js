@@ -57,13 +57,18 @@ const REP_RE1 = new RegExp(`${REP_INI}((?=\\S*\\d)\\S+)${REP_FIN}`);
 // Ubicación con espacios internos ("2ADUANA I", "2PISOA  O", "2A-HYP  R"): 2 palabras.
 const REP_RE2 = new RegExp(`${REP_INI}(\\S+\\s+\\S+)${REP_FIN}`);
 
+// En este reporte (Aeropuerto) el "00-" FORMA PARTE del número de parte
+// ("00-24380594"); en Aeroplasa Auto no lleva prefijo. El reporte lo imprime con
+// relleno de espacios ("00- 24380594"), que NO es parte del número: se pega sin espacio.
+const REP_GRUPO_EN_PARTE = true;
+
 function parseReporteLinea(linea) {
   const m = linea.match(REP_RE1) || linea.match(REP_RE2);
   if (!m) return null;
   const num = (s) => Number(String(s).replace(/,/g, ""));
   return {
     grupo: m[1],
-    numParte: m[2].trim(),
+    numParte: (REP_GRUPO_EN_PARTE ? `${m[1]}-` : "") + m[2].trim(),
     descripcion: m[3].replace(/\s+/g, " ").trim(),
     existencia: Number(m[4]),
     ubicacion: m[5].replace(/\s+/g, " ").trim(),
