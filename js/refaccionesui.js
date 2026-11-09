@@ -841,7 +841,8 @@ async function cargarExistencias(file) {
     // completo" del rotativo salía con muy pocas partes. Ahora queda guardado y
     // se rehidrata al entrar, de modo que el valor total siempre es correcto.
     guardarCatalogoExistencias(existencias);
-    setCargaStatus(`✓ Existencias leídas: ${existencias.length} partes.`, "ok");
+    const nota = notaLecturaReporte(existencias);
+    setCargaStatus(`✓ Existencias leídas: ${existencias.length} partes.${nota.texto}`, nota.ok ? "ok" : "warn");
   } catch (e) {
     existencias = [];
     setCargaStatus("No se pudo leer el archivo de existencias: " + (e.message || e), "error");
@@ -1382,9 +1383,10 @@ async function cargarExistenciasSoloEtiquetas(file) {
     const text = await readTextFile(file);
     etqAnaqueles = parseExistenciasCsv(text);
     const n = etqAnaqueles.length;
+    const nota = notaLecturaReporte(etqAnaqueles);
     setStatusEl("ref-solo-etq-status",
-      n ? `✓ ${n} partes leídas de «${file.name}». Ajusta los márgenes si hace falta e imprime.`
-        : "El archivo no contiene partes reconocibles.", n ? "ok" : "error");
+      n ? `✓ ${n} partes leídas de «${file.name}».${nota.texto} Ajusta los márgenes si hace falta e imprime.`
+        : "El archivo no contiene partes reconocibles.", n ? (nota.ok ? "ok" : "warn") : "error");
     const hay = n > 0;
     const b1 = document.getElementById("ref-solo-etq-print");
     const b2 = document.getElementById("ref-solo-etq-prueba");
@@ -2636,10 +2638,44 @@ function puedeContar() {
 function readTextFile(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
-    r.onload = () => resolve(String(r.result || ""));
+    r.onload = () => {
+      // Los reportes del sistema suelen venir en Windows-1252 (no UTF-8): leerlos
+      // como UTF-8 dejaba "�" en lugar de los acentos (BUJ�A, V�STAGO). Se intenta
+      // UTF-8 ESTRICTO y, si el archivo no es UTF-8 válido, se usa Windows-1252.
+      const buf = r.result;
+      try {
+        resolve(new TextDecoder("utf-8", { fatal: true }).decode(buf));
+      } catch (e) {
+        try { resolve(new TextDecoder("windows-1252").decode(buf)); }
+        catch (e2) { resolve(new TextDecoder("utf-8").decode(buf)); }
+      }
+    };
     r.onerror = () => reject(new Error("No se pudo leer el archivo."));
-    r.readAsText(file, "utf-8");
+    r.readAsArrayBuffer(file);
   });
+}
+
+// Texto de COMPROBACIÓN tras leer un reporte "Inventario x Almacén": compara el
+// valor leído contra el total que trae el propio reporte y avisa de renglones que
+// no se pudieron interpretar. Devuelve { texto, ok } (vacío si no es ese formato).
+function notaLecturaReporte(arr) {
+  if (!arr || arr.formato !== "reporte") return { texto: "", ok: true };
+  let ok = true;
+  const partes = [];
+  if (arr.totalReporte != null) {
+    const dif = Math.abs(arr.valorLeido - arr.totalReporte);
+    if (dif <= 1) {
+      partes.push(`valor leído ${money(arr.valorLeido)} = total del reporte ✓`);
+    } else {
+      ok = false;
+      partes.push(`⚠ valor leído ${money(arr.valorLeido)} NO cuadra con el total del reporte ${money(arr.totalReporte)} (diferencia ${money(dif)})`);
+    }
+  }
+  if (arr.descartadas && arr.descartadas.length) {
+    ok = false;
+    partes.push(`⚠ ${arr.descartadas.length} renglón(es) no reconocido(s), p. ej.: «${arr.descartadas[0].slice(0, 70)}»`);
+  }
+  return { texto: partes.length ? " " + partes.join(" · ") : "", ok };
 }
 
 function setCargaStatus(msg, kind) { setStatusEl("ref-carga-status", msg, kind); }

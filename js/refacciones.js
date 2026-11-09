@@ -20,6 +20,12 @@ export function parseExistenciasCsv(text) {
   if (!text) return [];
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
 
+  // Formato C: REPORTE "Inventario x Almacén" (renglones con prefijo de grupo "00-").
+  // Se revisa PRIMERO: sus importes traen comas de miles ("8,616.04") y por eso la
+  // detección de CSV de abajo lo confundiría.
+  const lineas = text.split(/\r?\n/);
+  if (esReporteAlmacen(lineas)) return parseExistenciasReporte(lineas);
+
   // Detectar el formato: si hay comas/; en varias líneas → CSV; si no → texto por columnas.
   const sample = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 20);
   const comma = sample.filter(l => l.includes(",")).length;
@@ -28,6 +34,90 @@ export function parseExistenciasCsv(text) {
 
   return esCsv ? parseExistenciasDelimited(text) : parseExistenciasFixed(text);
 }
+
+// <<REPORTE-ALMACEN-INI>>
+// Formato C: REPORTE "Inventario x Almacén" (texto por columnas con grupo).
+// Cada renglón se ve así (espacios variables):
+//   " 00- 24356860             CUBIERTA-ACA TR AJSTR EXT ASNT       1 2P11A12NIU2        141.26         141.26          03/09/2026"
+//   grupo- | nº parte | descripción | existencia | ubicación | precio U. | valor | fecha
+// Al final trae "Total Valor del Inventario x Grupo / x Almace", que se usa para
+// COMPROBAR que se leyó todo (la suma de valores debe cuadrar con ese total).
+//
+// Se lee de DERECHA a IZQUIERDA (fecha, 2 importes, ubicación, existencia): son los
+// campos de forma fija. Lo que sobra a la izquierda es nº de parte + descripción,
+// separados por 3+ espacios (el nº de parte puede traer espacios sueltos:
+// "MOTOR LM", "PAQ HIDRO"; y la descripción puede traer dobles espacios).
+const REP_AMT = "-?(?:\\d{1,3}(?:,\\d{3})+|\\d+)\\.\\d{2}";
+const REP_FECHA = "\\d{2}\\/\\d{2}\\/\\d{4}";
+const REP_INI = "^\\s*(\\d{2,3})-\\s*(\\S(?:.*?\\S)?)\\s{3,}(.*?)\\s+(-?\\d{1,7})\\s+";
+const REP_FIN = `\\s+(${REP_AMT})\\s+(${REP_AMT})\\s+(${REP_FECHA})\\s*$`;
+// Ubicación sin espacios (el caso normal). Debe traer algún dígito, para no confundir
+// una letra suelta ("O", "I") de una ubicación con espacios con la ubicación completa.
+const REP_RE1 = new RegExp(`${REP_INI}((?=\\S*\\d)\\S+)${REP_FIN}`);
+// Ubicación con espacios internos ("2ADUANA I", "2PISOA  O", "2A-HYP  R"): 2 palabras.
+const REP_RE2 = new RegExp(`${REP_INI}(\\S+\\s+\\S+)${REP_FIN}`);
+
+function parseReporteLinea(linea) {
+  const m = linea.match(REP_RE1) || linea.match(REP_RE2);
+  if (!m) return null;
+  const num = (s) => Number(String(s).replace(/,/g, ""));
+  return {
+    grupo: m[1],
+    numParte: m[2].trim(),
+    descripcion: m[3].replace(/\s+/g, " ").trim(),
+    existencia: Number(m[4]),
+    ubicacion: m[5].replace(/\s+/g, " ").trim(),
+    precioUnit: num(m[6]),
+    valorTotal: num(m[7]),
+    fecha: m[8],
+  };
+}
+
+function esReporteAlmacen(lineas) {
+  let n = 0;
+  for (const l of lineas) {
+    if (parseReporteLinea(l)) { if (++n >= 3) return true; }
+  }
+  return false;
+}
+
+function parseExistenciasReporte(lineas) {
+  const out = [];
+  const descartadas = [];
+  const totales = { grupo: 0, almacen: null };
+  const reTotal = new RegExp(`Total\\s+Valor\\s+del\\s+Inventario\\s+x\\s+(\\w+)\\s+(${REP_AMT})`, "i");
+  for (const raw of lineas) {
+    const linea = String(raw || "").replace(/\f/g, "");
+    if (!linea.trim()) continue;
+    const mt = linea.match(reTotal);
+    if (mt) {
+      const v = Number(mt[2].replace(/,/g, ""));
+      if (/^almac/i.test(mt[1])) totales.almacen = v; else totales.grupo += v;
+      continue;
+    }
+    // Renglón de datos (empieza con "00-" etc.).
+    if (!/^\s*\d{2,3}-/.test(linea)) continue;
+    const p = parseReporteLinea(linea);
+    if (!p || !p.numParte) { descartadas.push(linea.trim()); continue; }
+    out.push({
+      numParte: p.numParte,
+      descripcion: p.descripcion,
+      existencia: p.existencia,
+      ubicacion: p.ubicacion,
+      precioUnit: p.precioUnit,
+      valorTotal: p.valorTotal,
+      fecha: p.fecha,
+    });
+  }
+  // Datos para comprobar la lectura (se muestran en pantalla):
+  out.formato = "reporte";
+  out.descartadas = descartadas;
+  out.valorLeido = out.reduce((s, p) => s + (p.valorTotal || 0), 0);
+  // Total del reporte: el de "x Almacén" si existe; si no, la suma de los "x Grupo".
+  out.totalReporte = totales.almacen != null ? totales.almacen : (totales.grupo || null);
+  return out;
+}
+// <<REPORTE-ALMACEN-FIN>>
 
 // Formato B: TEXTO POR COLUMNAS (el del sistema interno de refacciones).
 // Estrategia robusta por regex, línea por línea:
@@ -53,6 +143,8 @@ function parseExistenciasFixed(text) {
     const numParte = mp[1].trim();
     // Descartar líneas de cabecera/separadores accidentales.
     if (/^(no\.?\s*de?\s*parte|grupo|descripcion|pagina|listado|firma)/i.test(numParte)) continue;
+    // Renglones de totales del reporte ("Total Valor del Inventario x ..."): no son partes.
+    if (/^total$/i.test(numParte)) continue;
 
     let resto = mp[2];
     // Precio (defensivo) PRIMERO: si el renglón trae un importe con decimales
