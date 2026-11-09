@@ -2,7 +2,7 @@
 //   1) Cargar EXISTENCIAS (CSV) + MARBETES (PDF) del sistema interno.
 //   2) CRUZAR por número de parte y mostrar vista previa.
 //   3) Guardar el cruce en el inventario de partes (store.bulkUpsertParts).
-//   4) Imprimir ETIQUETAS QR (Janel 32×64, 12/hoja).
+//   4) Imprimir ETIQUETAS QR (3 columnas × 8 filas = 24 por hoja carta).
 //   5) CONTEO físico: escanear QR (o teclear nº de parte) + teclear la cantidad.
 //   6) Reporte de DIFERENCIAS (conteo vs. existencia del sistema).
 //

@@ -370,7 +370,7 @@ export function parsePartQr(text) {
   return null;
 }
 
-// --- Generación de ETIQUETAS QR (3 columnas × 7 filas = 21 por hoja carta) ---
+// --- Generación de ETIQUETAS QR (3 columnas × 8 filas = 24 por hoja carta) ---
 // Abre una ventana imprimible. Cada etiqueta: QR (con numParte|desc|ubic) a la
 // izquierda + número de parte y descripción a la derecha. La hoja adhesiva es
 // completa (sin troquel), por eso se mantienen los controles de margen/separación
@@ -381,18 +381,25 @@ export async function printPartLabels(parts, opts = {}) {
   const list = (parts || []).filter(p => p.numParte);
   if (!list.length) throw new Error("No hay partes con número para generar etiquetas.");
 
-  // Medidas por defecto (ajustables). 3 columnas × 7 filas = 21 por hoja carta.
+  // Medidas por defecto (ajustables). 3 columnas × 8 filas = 24 por hoja carta.
   const cfg = {
     etiqAncho: opts.etiqAncho ?? 64,   // mm (ancho de cada etiqueta)
-    etiqAlto:  opts.etiqAlto  ?? 32,   // mm (alto de cada etiqueta)
     cols: opts.cols ?? 3,
-    filas: opts.filas ?? 7,            // 7 filas → 21 etiquetas por hoja carta
+    filas: opts.filas ?? 8,            // 8 filas → 24 etiquetas por hoja carta
     margenSup: opts.margenSup ?? 12,   // mm desde arriba a la 1ª fila
     margenIzq: opts.margenIzq ?? 6,    // mm desde la izquierda a la 1ª columna
+    margenInf: opts.margenInf ?? 6,    // mm libres abajo (la mayoría de impresoras no imprime en el borde)
     sepH: opts.sepH ?? 2,              // mm separación horizontal entre etiquetas
     sepV: opts.sepV ?? 2,              // mm separación vertical entre etiquetas
     prueba: !!opts.prueba,             // modo "hoja de prueba" (dibuja bordes)
   };
+  // ALTO de cada etiqueta: se calcula para que las filas QUEPAN en la hoja carta
+  // (279 mm) con los márgenes y separaciones indicados, sin pasar de 32 mm. Con los
+  // valores por defecto (12 arriba, 6 abajo, 2 de separación) 8 filas salen de
+  // ~30.9 mm. Si se pasa etiqAlto explícito, se respeta.
+  const PAGE_H = 279;   // mm, hoja carta
+  cfg.etiqAlto = opts.etiqAlto ?? Math.min(32,
+    Math.floor(((PAGE_H - cfg.margenSup - cfg.margenInf - (cfg.filas - 1) * cfg.sepV) / cfg.filas) * 10) / 10);
 
   // Pre-generar los QR (dataURL) de todas las partes.
   const qrs = [];
