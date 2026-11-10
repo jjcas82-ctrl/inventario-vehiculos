@@ -66,12 +66,30 @@ function parseReporteLinea(linea) {
   const m = linea.match(REP_RE1) || linea.match(REP_RE2);
   if (!m) return null;
   const num = (s) => Number(String(s).replace(/,/g, ""));
+  // El "código" de ubicación del reporte es un campo de ancho fijo:
+  //   posiciones 1-8 = UBICACIÓN (rellena con espacios: "2P05A05N", "2ADUANA ")
+  //   posición   9   = CLASIFICACIÓN (R, L, E, P, O, I…)
+  //   resto          = sufijo ("U2", "DO"…), que no se usa.
+  // Ej.: "2P05A05NRU2" → ubicación "2P05A05N", clasificación "R", sobrante "U2".
+  // m[5] conserva los espacios originales, por eso se corta ANTES de colapsarlos.
+  // Si el código no sigue ese patrón (la 9.ª posición no es una letra) se deja
+  // completo como ubicación y sin clasificación.
+  const cod = m[5];
+  let ubicacion, clasificacion = "";
+  if (cod.length >= 9 && /^[A-Za-z]$/.test(cod[8])) {
+    ubicacion = cod.slice(0, 8).replace(/\s+/g, " ").trim();
+    clasificacion = cod[8].toUpperCase();
+  } else {
+    ubicacion = cod.replace(/\s+/g, " ").trim();
+  }
   return {
     grupo: m[1],
     numParte: (REP_GRUPO_EN_PARTE ? `${m[1]}-` : "") + m[2].trim(),
     descripcion: m[3].replace(/\s+/g, " ").trim(),
     existencia: Number(m[4]),
-    ubicacion: m[5].replace(/\s+/g, " ").trim(),
+    ubicacion,
+    clasificacion,
+    ubicOriginal: cod.replace(/\s+/g, " ").trim(),   // código completo, por si hay que revisarlo
     precioUnit: num(m[6]),
     valorTotal: num(m[7]),
     fecha: m[8],
@@ -109,6 +127,8 @@ function parseExistenciasReporte(lineas) {
       descripcion: p.descripcion,
       existencia: p.existencia,
       ubicacion: p.ubicacion,
+      clasificacion: p.clasificacion,
+      ubicOriginal: p.ubicOriginal,
       precioUnit: p.precioUnit,
       valorTotal: p.valorTotal,
       fecha: p.fecha,
