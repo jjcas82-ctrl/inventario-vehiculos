@@ -2675,6 +2675,14 @@ function notaLecturaReporte(arr) {
     ok = false;
     partes.push(`⚠ ${arr.descartadas.length} renglón(es) no reconocido(s), p. ej.: «${arr.descartadas[0].slice(0, 70)}»`);
   }
+  // Letras en la posición de clasificación que NO son una clasificación válida
+  // (R, L, E, P, O, I): esas partes quedan sin clasificar. Solo informativo.
+  const desc = arr.clasifDesconocida || {};
+  const nDesc = Object.values(desc).reduce((s, n) => s + n, 0);
+  if (nDesc) {
+    const detalle = Object.entries(desc).map(([l, n]) => `${l}: ${n}`).join(", ");
+    partes.push(`ℹ️ ${nDesc} parte(s) sin clasificar (letra no válida → ${detalle})`);
+  }
   return { texto: partes.length ? " " + partes.join(" · ") : "", ok };
 }
 

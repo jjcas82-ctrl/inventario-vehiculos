@@ -61,6 +61,8 @@ const REP_RE2 = new RegExp(`${REP_INI}(\\S+\\s+\\S+)${REP_FIN}`);
 // ("00-24380594"); en Aeroplasa Auto no lleva prefijo. El reporte lo imprime con
 // relleno de espacios ("00- 24380594"), que NO es parte del número: se pega sin espacio.
 const REP_GRUPO_EN_PARTE = true;
+// Clasificaciones que existen: Rápido, Lento, Estancado, Próximo obsoleto, Obsoleto, Inactivo.
+const CLASIF_REPORTE = "RLEPOI";
 
 function parseReporteLinea(linea) {
   const m = linea.match(REP_RE1) || linea.match(REP_RE2);
@@ -75,10 +77,14 @@ function parseReporteLinea(linea) {
   // Si el código no sigue ese patrón (la 9.ª posición no es una letra) se deja
   // completo como ubicación y sin clasificación.
   const cod = m[5];
-  let ubicacion, clasificacion = "";
+  let ubicacion, clasificacion = "", letraDesconocida = "";
   if (cod.length >= 9 && /^[A-Za-z]$/.test(cod[8])) {
     ubicacion = cod.slice(0, 8).replace(/\s+/g, " ").trim();
-    clasificacion = cod[8].toUpperCase();
+    // Solo se acepta como clasificación una letra que EXISTA (R, L, E, P, O, I).
+    // Otra letra (p. ej. "M") no es clasificación: queda sin clasificar y se avisa.
+    const letra = cod[8].toUpperCase();
+    if (CLASIF_REPORTE.includes(letra)) clasificacion = letra;
+    else letraDesconocida = letra;
   } else {
     ubicacion = cod.replace(/\s+/g, " ").trim();
   }
@@ -89,6 +95,7 @@ function parseReporteLinea(linea) {
     existencia: Number(m[4]),
     ubicacion,
     clasificacion,
+    letraDesconocida,
     ubicOriginal: cod.replace(/\s+/g, " ").trim(),   // código completo, por si hay que revisarlo
     precioUnit: num(m[6]),
     valorTotal: num(m[7]),
@@ -107,6 +114,7 @@ function esReporteAlmacen(lineas) {
 function parseExistenciasReporte(lineas) {
   const out = [];
   const descartadas = [];
+  const desconocidas = {};   // letra → cuántas partes (letras que NO son clasificación)
   const totales = { grupo: 0, almacen: null };
   const reTotal = new RegExp(`Total\\s+Valor\\s+del\\s+Inventario\\s+x\\s+(\\w+)\\s+(${REP_AMT})`, "i");
   for (const raw of lineas) {
@@ -122,6 +130,7 @@ function parseExistenciasReporte(lineas) {
     if (!/^\s*\d{2,3}-/.test(linea)) continue;
     const p = parseReporteLinea(linea);
     if (!p || !p.numParte) { descartadas.push(linea.trim()); continue; }
+    if (p.letraDesconocida) desconocidas[p.letraDesconocida] = (desconocidas[p.letraDesconocida] || 0) + 1;
     out.push({
       numParte: p.numParte,
       descripcion: p.descripcion,
@@ -137,6 +146,7 @@ function parseExistenciasReporte(lineas) {
   // Datos para comprobar la lectura (se muestran en pantalla):
   out.formato = "reporte";
   out.descartadas = descartadas;
+  out.clasifDesconocida = desconocidas;
   out.valorLeido = out.reduce((s, p) => s + (p.valorTotal || 0), 0);
   // Total del reporte: el de "x Almacén" si existe; si no, la suma de los "x Grupo".
   out.totalReporte = totales.almacen != null ? totales.almacen : (totales.grupo || null);
