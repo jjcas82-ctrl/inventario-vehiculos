@@ -93,9 +93,12 @@ function parseReporteLinea(linea) {
     numParte: (REP_GRUPO_EN_PARTE ? `${m[1]}-` : "") + m[2].trim(),
     descripcion: m[3].replace(/\s+/g, " ").trim(),
     existencia: Number(m[4]),
-    ubicacion,
-    clasificacion,
-    letraDesconocida,
+    // Por decisión del negocio este formato NO usa ubicación ni clasificación (el reporte
+    // las trae con códigos poco fiables): solo nº de parte y descripción. Se conserva
+    // ubicOriginal únicamente para revisión.
+    ubicacion: "",
+    clasificacion: "",
+    letraDesconocida: "",
     ubicOriginal: cod.replace(/\s+/g, " ").trim(),   // código completo, por si hay que revisarlo
     precioUnit: num(m[6]),
     valorTotal: num(m[7]),
