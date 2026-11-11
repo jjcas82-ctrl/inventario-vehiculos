@@ -1418,7 +1418,9 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
   try {
     await printPartLabels(lista, {
       prueba,
-      mostrarUbic: true,
+      // Por defecto SOLO nº de parte y descripción (la ubicación del reporte aún no
+      // está confirmada). La casilla permite imprimirla cuando ya sea confiable.
+      mostrarUbic: !!document.getElementById("ref-solo-etq-ubic")?.checked,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),
