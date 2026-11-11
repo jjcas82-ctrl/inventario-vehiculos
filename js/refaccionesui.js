@@ -775,8 +775,8 @@ function imprimirHojaConteo() {
     notify(`No hay partes contadas en el conteo ${rondaActual} para imprimir.`, { type: "warn" });
     return;
   }
-  // Ordenar por ubicación para capturar en orden.
-  lista.sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
+  // Ordenar por número de parte.
+  lista.sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
 
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString("es-MX");
@@ -1189,7 +1189,7 @@ function setRotativoStatus(msg, kind) { setStatusEl("ref-rotativo-status", msg, 
 function imprimirPlantillaConteo() {
   const lista = partesActuales()
     .filter(p => p.numParte)
-    .sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
+    .sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
   if (!lista.length) { notify("No hay partes muestreadas. Primero genera la muestra rotativa.", { type: "warn" }); return; }
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString("es-MX");
@@ -1414,7 +1414,7 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
     lista.push(e);
   }
   if (!lista.length) { notify("No hay partes que cumplan el filtro para imprimir.", { type: "warn" }); return; }
-  lista.sort((a, b) => String(a.ubicacion || "~").localeCompare(String(b.ubicacion || "~"), "es"));
+  lista.sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
   try {
     await printPartLabels(lista, {
       prueba,
@@ -1445,7 +1445,6 @@ function renderEtiquetasManuales() {
     tbody.innerHTML = etqManuales.map((p, i) => `<tr>
       <td><code>${escapeHtml(p.numParte)}</code></td>
       <td>${escapeHtml(p.descripcion || "")}</td>
-      <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
       <td style="text-align:right"><b>${p.cantidad || 1}</b></td>
       <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
     </tr>`).join("");
