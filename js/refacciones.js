@@ -530,7 +530,12 @@ export async function printPartLabels(parts, opts = {}) {
 
   // Pre-generar los QR (dataURL) de todas las partes.
   const qrs = [];
-  for (const p of list) qrs.push(await qrDataUrl(partQrPayload(p), { size: 160, margin: 1 }));
+  // Si la etiqueta NO muestra la ubicación, tampoco va dentro del QR (no se graba
+  // un dato que se decidió no usar; además el QR queda más simple de escanear).
+  for (const p of list) {
+    const dato = opts.mostrarUbic ? p : { ...p, ubicacion: "" };
+    qrs.push(await qrDataUrl(partQrPayload(dato), { size: 160, margin: 1 }));
+  }
 
   const porHoja = cfg.cols * cfg.filas;
   const celda = (p, qr) => `
