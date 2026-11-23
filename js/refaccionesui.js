@@ -2662,6 +2662,12 @@ function readTextFile(file) {
 // valor leído contra el total que trae el propio reporte y avisa de renglones que
 // no se pudieron interpretar. Devuelve { texto, ok } (vacío si no es ese formato).
 function notaLecturaReporte(arr) {
+  if (arr && arr.formato === "ubicaciones") {
+    const d = arr.descartadas || [];
+    return d.length
+      ? { texto: ` ⚠ ${d.length} renglón(es) no reconocido(s), p. ej.: «${d[0].slice(0, 70)}»`, ok: false }
+      : { texto: " Todos los renglones reconocidos ✓", ok: true };
+  }
   if (!arr || arr.formato !== "reporte") return { texto: "", ok: true };
   let ok = true;
   const partes = [];

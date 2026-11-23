@@ -26,6 +26,11 @@ export function parseExistenciasCsv(text) {
   const lineas = text.split(/\r?\n/);
   if (esReporteAlmacen(lineas)) return parseExistenciasReporte(lineas);
 
+  // Formato D: "nº parte,descripción,existencia,ubicación  fecha" (archivo del
+  // sistema con ubicaciones, sin costos). Se revisa antes del CSV genérico.
+  const ubic = parseExistenciasUbicaciones(text);
+  if (ubic) return ubic;
+
   // Detectar el formato: si hay comas/; en varias líneas → CSV; si no → texto por columnas.
   const sample = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 20);
   const comma = sample.filter(l => l.includes(",")).length;
@@ -33,6 +38,54 @@ export function parseExistenciasCsv(text) {
   const esCsv = (comma + semi) >= Math.max(3, sample.length * 0.6);
 
   return esCsv ? parseExistenciasDelimited(text) : parseExistenciasFixed(text);
+}
+
+// Formato D: archivo del sistema con SOLO nº de parte, descripción, existencia y
+// ubicación (sin costos). Cada registro:
+//   00-24356860,CUBIERTA-ACA TR AJSTR EXT ASNT,1,P11A12N3U2        03/09/2026
+// - El nº de parte lleva el prefijo de grupo ("00-"); a veces con espacio ("00- 1158")
+//   que no es parte del número.
+// - La descripción puede traer comas y comillas ("ESPEJO CPL.,RETROVISOR",
+//   "V?STAGO VLV LLANTA"""), por eso se lee desde la DERECHA: fecha, ubicación,
+//   existencia; lo que queda entre la 1.ª coma y la existencia es la descripción.
+// - Hay registros PEGADOS sin salto de línea ("...03/09/202600-24,..."): se separan
+//   después de cada fecha que va seguida de otro "dd-".
+// Devuelve null si el texto no tiene este formato.
+const UBIC_LINEA_RE = /^\s*(\d{2,3})-\s*([^,]*?)\s*,(.*),\s*(-?\d+)\s*,\s*(?:(?!\d{2}\/\d{2}\/\d{4})([^,\s]+))?\s*(\d{2}\/\d{2}\/\d{4})?\s*$/;
+
+function limpiarDescCsv(s) {
+  let t = String(s || "").trim();
+  if (t.startsWith('"')) {
+    t = t.slice(1);
+    if (t.endsWith('"')) t = t.slice(0, -1);
+    t = t.replace(/""/g, '"');
+  }
+  return t.replace(/\s+/g, " ").trim();
+}
+
+function parseExistenciasUbicaciones(text) {
+  const separado = String(text).replace(/(\d{2}\/\d{2}\/\d{4})(?=[ \t]*\d{2,3}-)/g, "$1\n");
+  const lineas = separado.split(/\r\n|\r|\n/).filter(l => l.trim());
+  if (!lineas.length) return null;
+  const out = [];
+  const descartadas = [];
+  for (const l of lineas) {
+    const m = l.match(UBIC_LINEA_RE);
+    if (!m) { descartadas.push(l.trim()); continue; }
+    out.push({
+      numParte: `${m[1]}-${m[2]}`,
+      descripcion: limpiarDescCsv(m[3]),
+      existencia: Number(m[4]),
+      ubicacion: (m[5] || "").trim(),
+      clasificacion: "",
+      fecha: m[6] || "",
+    });
+  }
+  // Solo es este formato si casi todos los renglones lo cumplen.
+  if (out.length < 3 || out.length < lineas.length * 0.9) return null;
+  out.formato = "ubicaciones";
+  out.descartadas = descartadas;
+  return out;
 }
 
 // <<REPORTE-ALMACEN-INI>>
