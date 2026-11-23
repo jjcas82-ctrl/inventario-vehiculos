@@ -632,7 +632,7 @@ export async function printPartLabels(parts, opts = {}) {
       .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:6mm}
       .etq .np{font-size:9pt;font-weight:700;line-height:1.1;word-break:break-all}
       .etq .ds{font-size:7pt;line-height:1.05;margin-top:0.5mm}
-      .etq .ub{font-size:10pt;font-weight:700;line-height:1.1;margin-top:3mm}
+      .etq .ub{font-size:10pt;font-weight:700;line-height:1.1;margin-top:2mm}
       .etq .cl{margin-top:auto;font-size:6.5pt;font-weight:700;white-space:nowrap;display:flex;align-items:flex-end;gap:0.8mm}
       .etq .cl .ln{flex:1;min-width:6mm;height:2.6mm;border-bottom:0.25mm solid #000}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}
