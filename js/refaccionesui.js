@@ -1445,6 +1445,7 @@ function renderEtiquetasManuales() {
     tbody.innerHTML = etqManuales.map((p, i) => `<tr>
       <td><code>${escapeHtml(p.numParte)}</code></td>
       <td>${escapeHtml(p.descripcion || "")}</td>
+      <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
       <td style="text-align:right"><b>${p.cantidad || 1}</b></td>
       <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
     </tr>`).join("");
@@ -1504,6 +1505,7 @@ async function imprimirEtiquetasManuales() {
   try {
     await printPartLabels(lista, {
       mostrarUbic: true,
+      leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),
