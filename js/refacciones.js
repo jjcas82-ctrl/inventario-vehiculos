@@ -624,7 +624,7 @@ export async function printPartLabels(parts, opts = {}) {
         margin:0 ${cfg.sepH}mm ${cfg.sepV}mm 0;padding:1mm;overflow:hidden;vertical-align:top;
         ${cfg.prueba ? "border:0.2mm dashed #999;" : ""}}
       .etq .qr{width:${cfg.etiqAlto - 4}mm;height:${cfg.etiqAlto - 4}mm;flex:0 0 auto}
-      .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:3.5mm}
+      .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:6mm}
       .etq .np{font-size:9pt;font-weight:700;line-height:1.1;word-break:break-all}
       .etq .ds{font-size:7pt;line-height:1.05;margin-top:0.5mm}
       .etq .ub{font-size:10pt;font-weight:700;line-height:1.1;margin-top:3mm}
