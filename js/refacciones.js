@@ -16,6 +16,24 @@ import { extractPdfLines } from "./cdo.js"; // reutiliza el lector de PDF ya exi
 //      → parte | descripción | cantidad + ubicación (pegadas) | fecha
 //      La cantidad es el número que precede a la ubicación; la ubicación es un
 //      código alfanumérico; la fecha (dd/mm/aaaa) es opcional al final.
+// Clave para cruzar un nº de parte del Aeropuerto/Automotriz ("00-24380594") con el de
+// Aeroplasa Auto ("24380594"): mayúsculas, sin espacios y sin el prefijo de grupo.
+export function claveParteSinGrupo(numParte) {
+  return String(numParte || "").toUpperCase().replace(/\s+/g, "").replace(/^\d{2,3}-/, "");
+}
+// Mapa clave → ubicación a partir de las partes leídas del archivo de Aeroplasa Auto
+// (su ubicación es la correcta). Si una parte sale repetida, gana la 1.ª con ubicación.
+export function mapaUbicaciones(partesAuto) {
+  const m = new Map();
+  for (const p of partesAuto || []) {
+    const u = String(p.ubicacion || "").trim();
+    if (!u || esUbicacionCientifica(u)) continue;
+    const k = String(p.numParte || "").toUpperCase().replace(/\s+/g, "");
+    if (k && !m.has(k)) m.set(k, u);
+  }
+  return m;
+}
+
 export function parseExistenciasCsv(text) {
   if (!text) return [];
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
@@ -548,6 +566,7 @@ export async function printPartLabels(parts, opts = {}) {
         <div class="np">${esc(p.numParte)}</div>
         <div class="ds">${esc((p.descripcion || "").slice(0, 40))}</div>
         ${opts.mostrarUbic && p.ubicacion ? `<div class="ub">${esc(p.ubicacion)}</div>` : ""}
+        ${opts.leyendaClasif ? `<div class="cl">CLASIFICACION: <span class="ln"></span></div>` : ""}
       </div>
     </div>`;
 
@@ -573,10 +592,12 @@ export async function printPartLabels(parts, opts = {}) {
         margin:0 ${cfg.sepH}mm ${cfg.sepV}mm 0;padding:1mm;overflow:hidden;vertical-align:top;
         ${cfg.prueba ? "border:0.2mm dashed #999;" : ""}}
       .etq .qr{width:${cfg.etiqAlto - 4}mm;height:${cfg.etiqAlto - 4}mm;flex:0 0 auto}
-      .etq .txt{flex:1;min-width:0}
+      .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column}
       .etq .np{font-size:9pt;font-weight:700;line-height:1.1;word-break:break-all}
       .etq .ds{font-size:7pt;line-height:1.05;margin-top:0.5mm}
       .etq .ub{font-size:10pt;font-weight:700;line-height:1.1;margin-top:0.8mm}
+      .etq .cl{margin-top:auto;font-size:7pt;font-weight:700;white-space:nowrap}
+      .etq .cl .ln{display:inline-block;width:11mm;border-bottom:0.25mm solid #000}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}
       .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;cursor:pointer}
       @media print{.barra{display:none}}
