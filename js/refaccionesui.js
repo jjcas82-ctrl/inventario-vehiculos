@@ -11,7 +11,7 @@
 
 import { store, AGENCIAS_REF, ARCHIVO_PREVIO, ARCHIVO_PREVIO_LABEL } from "./storage.js";
 import {
-  parseExistenciasCsv, parseMarbetesFile, cruzar,
+  parseExistenciasCsv, parseMarbetesFile, cruzar, mapaUbicaciones, buscarUbicacion,
   parsePartQr, printPartLabels, diagnosticarMarbetes,
 } from "./refacciones.js";
 import { Scanner } from "./scanner.js";
@@ -225,6 +225,15 @@ export function initRefacciones() {
     soloFile.addEventListener("change", async () => {
       const f = soloFile.files && soloFile.files[0];
       if (f) await cargarExistenciasSoloEtiquetas(f);
+    });
+  }
+  const ubBtn = document.getElementById("ref-solo-ubic-file-btn");
+  const ubFile = document.getElementById("ref-solo-ubic-file");
+  if (ubBtn && ubFile) {
+    ubBtn.addEventListener("click", () => { ubFile.value = ""; ubFile.click(); });
+    ubFile.addEventListener("change", async () => {
+      const f = ubFile.files && ubFile.files[0];
+      if (f) await cargarUbicacionesAuto(f);
     });
   }
   const soloPrint = document.getElementById("ref-solo-etq-print");
@@ -1385,7 +1394,7 @@ async function cargarExistenciasSoloEtiquetas(file) {
     const n = etqAnaqueles.length;
     const nota = notaLecturaReporte(etqAnaqueles);
     setStatusEl("ref-solo-etq-status",
-      n ? `✓ ${n} partes leídas de «${file.name}».${nota.texto} Ajusta los márgenes si hace falta e imprime.`
+      n ? `✓ ${n} partes leídas de «${file.name}».${nota.texto} ${resumenUbicaciones()} Ajusta los márgenes si hace falta e imprime.`
         : "El archivo no contiene partes reconocibles.", n ? (nota.ok ? "ok" : "warn") : "error");
     const hay = n > 0;
     const b1 = document.getElementById("ref-solo-etq-print");
@@ -1395,6 +1404,31 @@ async function cargarExistenciasSoloEtiquetas(file) {
   } catch (e) {
     etqAnaqueles = [];
     setStatusEl("ref-solo-etq-status", "No se pudo leer el archivo: " + (e.message || e), "error");
+  }
+}
+
+// Ubicaciones tomadas del archivo de Aeroplasa Auto (las correctas): clave → ubicación.
+let ubicAuto = new Map();
+
+function resumenUbicaciones() {
+  if (!ubicAuto.size) return "";
+  const total = etqAnaqueles.length;
+  if (!total) return `${ubicAuto.size} ubicaciones leídas de Auto.`;
+  const con = etqAnaqueles.filter(p => buscarUbicacion(ubicAuto, p.numParte)).length;
+  return `${ubicAuto.size} ubicaciones leídas de Auto. Coinciden ${con} de ${total} partes; las ${total - con} restantes usan la ubicación de su propio archivo (vacía en el Aeropuerto).`;
+}
+
+async function cargarUbicacionesAuto(file) {
+  setStatusEl("ref-solo-ubic-status", "Leyendo archivo de Aeroplasa Auto…", "info");
+  try {
+    const text = await readTextFile(file);
+    ubicAuto = mapaUbicaciones(parseExistenciasCsv(text));
+    setStatusEl("ref-solo-ubic-status",
+      ubicAuto.size ? `✓ «${file.name}»: ${resumenUbicaciones()}` : "El archivo no trae ubicaciones reconocibles.",
+      ubicAuto.size ? "ok" : "error");
+  } catch (e) {
+    ubicAuto = new Map();
+    setStatusEl("ref-solo-ubic-status", "No se pudo leer el archivo: " + (e.message || e), "error");
   }
 }
 
@@ -1411,15 +1445,18 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
     const k = `${e.numParte}|${e.ubicacion || ""}`;
     if (vistos.has(k)) continue;
     vistos.add(k);
-    lista.push(e);
+    // La ubicación sale SOLO del archivo de Aeroplasa Auto (la del reporte no es confiable).
+    lista.push({ ...e, ubicacion: buscarUbicacion(ubicAuto, e.numParte) || e.ubicacion || "" });
   }
   if (!lista.length) { notify("No hay partes que cumplan el filtro para imprimir.", { type: "warn" }); return; }
+  if (!ubicAuto.size) notify("No cargaste el archivo de Aeroplasa Auto: las etiquetas del Aeropuerto saldrán sin ubicación.", { type: "warn" });
   lista.sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
   try {
     await printPartLabels(lista, {
       prueba,
-      // Nº de parte, descripción, ubicación (la del archivo cargado; vacía en el reporte del Aeropuerto) y leyenda de clasificación.
+      // Nº de parte, descripción, ubicación (del archivo de Auto) y leyenda de clasificación.
       mostrarUbic: true,
+      leyendaClasif: true,
       leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
@@ -1445,6 +1482,7 @@ function renderEtiquetasManuales() {
     tbody.innerHTML = etqManuales.map((p, i) => `<tr>
       <td><code>${escapeHtml(p.numParte)}</code></td>
       <td>${escapeHtml(p.descripcion || "")}</td>
+      <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
       <td style="text-align:right"><b>${p.cantidad || 1}</b></td>
       <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
     </tr>`).join("");
@@ -1504,6 +1542,7 @@ async function imprimirEtiquetasManuales() {
   try {
     await printPartLabels(lista, {
       mostrarUbic: true,
+      leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),
