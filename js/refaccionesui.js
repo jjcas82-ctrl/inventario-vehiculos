@@ -1448,7 +1448,7 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
     await printPartLabels(lista, {
       prueba,
       // Nº de parte, descripción, ubicación (la del archivo cargado; vacía en el reporte del Aeropuerto) y leyenda de clasificación.
-      mostrarUbic: false,   // formato final de la marca: nº de parte, descripción y clasificación
+      mostrarUbic: true,    // formato final de la marca: nº de parte, descripción, ubicación y clasificación
       leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
@@ -1474,6 +1474,7 @@ function renderEtiquetasManuales() {
     tbody.innerHTML = etqManuales.map((p, i) => `<tr>
       <td><code>${escapeHtml(p.numParte)}</code></td>
       <td>${escapeHtml(p.descripcion || "")}</td>
+      <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
       <td style="text-align:right"><b>${p.cantidad || 1}</b></td>
       <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
     </tr>`).join("");
@@ -1532,7 +1533,7 @@ async function imprimirEtiquetasManuales() {
   }
   try {
     await printPartLabels(lista, {
-      mostrarUbic: false,   // formato final de la marca: nº de parte, descripción y clasificación
+      mostrarUbic: true,    // formato final de la marca: nº de parte, descripción, ubicación y clasificación
       leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
