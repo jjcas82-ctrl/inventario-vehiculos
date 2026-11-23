@@ -11,7 +11,7 @@
 
 import { store, AGENCIAS_REF, ARCHIVO_PREVIO, ARCHIVO_PREVIO_LABEL } from "./storage.js";
 import {
-  parseExistenciasCsv, parseMarbetesFile, cruzar, claveParteSinGrupo, mapaUbicaciones,
+  parseExistenciasCsv, parseMarbetesFile, cruzar, mapaUbicaciones, buscarUbicacion,
   parsePartQr, printPartLabels, diagnosticarMarbetes,
 } from "./refacciones.js";
 import { Scanner } from "./scanner.js";
@@ -1414,8 +1414,8 @@ function resumenUbicaciones() {
   if (!ubicAuto.size) return "";
   const total = etqAnaqueles.length;
   if (!total) return `${ubicAuto.size} ubicaciones leídas de Auto.`;
-  const con = etqAnaqueles.filter(p => ubicAuto.has(claveParteSinGrupo(p.numParte))).length;
-  return `${ubicAuto.size} ubicaciones leídas de Auto. Coinciden ${con} de ${total} partes; las ${total - con} restantes saldrán sin ubicación.`;
+  const con = etqAnaqueles.filter(p => buscarUbicacion(ubicAuto, p.numParte)).length;
+  return `${ubicAuto.size} ubicaciones leídas de Auto. Coinciden ${con} de ${total} partes; las ${total - con} restantes usan la ubicación de su propio archivo (vacía en el Aeropuerto).`;
 }
 
 async function cargarUbicacionesAuto(file) {
@@ -1446,16 +1446,17 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
     if (vistos.has(k)) continue;
     vistos.add(k);
     // La ubicación sale SOLO del archivo de Aeroplasa Auto (la del reporte no es confiable).
-    lista.push({ ...e, ubicacion: ubicAuto.get(claveParteSinGrupo(e.numParte)) || "" });
+    lista.push({ ...e, ubicacion: buscarUbicacion(ubicAuto, e.numParte) || e.ubicacion || "" });
   }
   if (!lista.length) { notify("No hay partes que cumplan el filtro para imprimir.", { type: "warn" }); return; }
-  if (!ubicAuto.size) notify("No cargaste el archivo de Aeroplasa Auto: las etiquetas saldrán sin ubicación.", { type: "warn" });
+  if (!ubicAuto.size) notify("No cargaste el archivo de Aeroplasa Auto: las etiquetas del Aeropuerto saldrán sin ubicación.", { type: "warn" });
   lista.sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
   try {
     await printPartLabels(lista, {
       prueba,
       // Nº de parte, descripción, ubicación (del archivo de Auto) y leyenda de clasificación.
       mostrarUbic: true,
+      leyendaClasif: true,
       leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
@@ -1481,6 +1482,7 @@ function renderEtiquetasManuales() {
     tbody.innerHTML = etqManuales.map((p, i) => `<tr>
       <td><code>${escapeHtml(p.numParte)}</code></td>
       <td>${escapeHtml(p.descripcion || "")}</td>
+      <td><code>${escapeHtml(p.ubicacion || "")}</code></td>
       <td style="text-align:right"><b>${p.cantidad || 1}</b></td>
       <td style="text-align:right"><button class="btn btn-ghost ref-manual-del" data-i="${i}" style="padding:2px 8px">✕</button></td>
     </tr>`).join("");
@@ -1540,6 +1542,7 @@ async function imprimirEtiquetasManuales() {
   try {
     await printPartLabels(lista, {
       mostrarUbic: true,
+      leyendaClasif: true,
       margenSup: numVal("ref-solo-etq-sup", 12),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),

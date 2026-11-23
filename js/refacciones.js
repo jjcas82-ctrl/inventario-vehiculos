@@ -25,13 +25,24 @@ export function claveParteSinGrupo(numParte) {
 // (su ubicación es la correcta). Si una parte sale repetida, gana la 1.ª con ubicación.
 export function mapaUbicaciones(partesAuto) {
   const m = new Map();
+  m.loose = new Map();   // clave tolerante (sin guiones/puntos/ceros a la izquierda)
   for (const p of partesAuto || []) {
     const u = String(p.ubicacion || "").trim();
     if (!u || esUbicacionCientifica(u)) continue;
     const k = String(p.numParte || "").toUpperCase().replace(/\s+/g, "");
-    if (k && !m.has(k)) m.set(k, u);
+    if (!k) continue;
+    if (!m.has(k)) m.set(k, u);
+    const lk = normLoose(k);
+    if (lk && !m.loose.has(lk)) m.loose.set(lk, u);
   }
   return m;
+}
+// Ubicación de Auto para un nº de parte del Aeropuerto/Automotriz ("00-24380594"):
+// primero exacta sin el prefijo de grupo; si no, comparación tolerante de formato.
+export function buscarUbicacion(mapa, numParte) {
+  if (!mapa || !mapa.size) return "";
+  const k = claveParteSinGrupo(numParte);
+  return mapa.get(k) || (mapa.loose && mapa.loose.get(normLoose(k))) || "";
 }
 
 export function parseExistenciasCsv(text) {
