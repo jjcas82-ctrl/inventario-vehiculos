@@ -1833,6 +1833,15 @@ function listaDiferencias() {
   return out;
 }
 
+// Partes contadas cuyo conteo CUADRA con la existencia (diferencia 0). No son
+// diferencias, pero sí se auditaron: el resultado final las lista como evidencia.
+function listaCuadran() {
+  return partesActuales()
+    .filter(p => diffValor(p) === 0)
+    .map(p => ({ ...p, dif: 0, impacto: 0, tipo: "cuadra" }))
+    .sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
+}
+
 // Lista TODAS las piezas registradas en EXHIBICIÓN / puntos de venta, una fila
 // por (parte, punto), con su observación. Estas piezas SUMAN al conteo físico
 // (Opción A), por eso deben quedar como EVIDENCIA en los reportes: así quien
@@ -2348,6 +2357,7 @@ function resumenFinal() {
     sobrantes: posit.length,   // sobrante = ajuste positivo
     ajustePositivo, ajusteNegativo,
     noComprobadas, difs, conDif,
+    cuadran: listaCuadran(),
   };
 }
 
@@ -2459,6 +2469,10 @@ function imprimirResultadoFinal() {
     ? `<h2 style="color:${color}">${titulo} — ${arr.length} parte(s)</h2>
        <table>${cabTabla}<tbody>${filasDe(arr)}</tbody></table>`
     : "";
+  const seccionCuadran = r.cuadran.length
+    ? `<h2 style="color:#065f46">Sin diferencia (contado = existencia) — ${r.cuadran.length} parte(s)</h2>
+       <table>${cabTabla}<tbody>${filasDe(r.cuadran)}</tbody></table>`
+    : "";
   const seccionOtras = otras.length
     ? `<h2>Otras (no comprobadas / sin existencia) — ${otras.length}</h2>
        <table>${cabTabla}<tbody>${filasDe(otras)}</tbody></table>`
@@ -2525,14 +2539,16 @@ function imprimirResultadoFinal() {
       <div class="box"><b>${money(r.valorDiferencia)}</b><span>Monto total de la diferencia</span></div>
       <div class="box"><b>${r.ajustePositivo.partes} ${plural(r.ajustePositivo.partes, "parte", "partes")} · +${r.ajustePositivo.unidades} ${plural(r.ajustePositivo.unidades, "pieza", "piezas")}</b><span>Ajuste positivo (sobran piezas)</span></div>
       <div class="box"><b>${r.ajusteNegativo.partes} ${plural(r.ajusteNegativo.partes, "parte", "partes")} · −${r.ajusteNegativo.unidades} ${plural(r.ajusteNegativo.unidades, "pieza", "piezas")}</b><span>Ajuste negativo (faltan piezas)</span></div>
+      <div class="box"><b>${r.cuadran.length}</b><span>Sin diferencia</span></div>
       <div class="box"><b>${r.noComprobadas}</b><span>No comprobadas</span></div>
-      <div class="box"><b>${r.difs.length}</b><span>Partes en el reporte</span></div>
+      <div class="box"><b>${r.difs.length + r.cuadran.length}</b><span>Partes en el reporte</span></div>
     </div>
     ${(posit.length || negat.length || otras.length)
       ? `${seccion("Ajuste POSITIVO (sobran piezas: contado &gt; existencia)", posit, "#b45309")}
          ${seccion("Ajuste NEGATIVO (faltan piezas: existencia &gt; contado)", negat, "#b91c1c")}
          ${seccionOtras}`
       : "<p>Sin diferencias. El inventario cuadra.</p>"}
+    ${seccionCuadran}
     ${seccionExhib}
     ${firmasHtml}
     </body></html>`);
