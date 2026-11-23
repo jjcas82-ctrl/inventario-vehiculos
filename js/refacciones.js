@@ -16,35 +16,6 @@ import { extractPdfLines } from "./cdo.js"; // reutiliza el lector de PDF ya exi
 //      → parte | descripción | cantidad + ubicación (pegadas) | fecha
 //      La cantidad es el número que precede a la ubicación; la ubicación es un
 //      código alfanumérico; la fecha (dd/mm/aaaa) es opcional al final.
-// Clave para cruzar un nº de parte del Aeropuerto/Automotriz ("00-24380594") con el de
-// Aeroplasa Auto ("24380594"): mayúsculas, sin espacios y sin el prefijo de grupo.
-export function claveParteSinGrupo(numParte) {
-  return String(numParte || "").toUpperCase().replace(/\s+/g, "").replace(/^\d{2,3}-/, "");
-}
-// Mapa clave → ubicación a partir de las partes leídas del archivo de Aeroplasa Auto
-// (su ubicación es la correcta). Si una parte sale repetida, gana la 1.ª con ubicación.
-export function mapaUbicaciones(partesAuto) {
-  const m = new Map();
-  m.loose = new Map();   // clave tolerante (sin guiones/puntos/ceros a la izquierda)
-  for (const p of partesAuto || []) {
-    const u = String(p.ubicacion || "").trim();
-    if (!u || esUbicacionCientifica(u)) continue;
-    const k = String(p.numParte || "").toUpperCase().replace(/\s+/g, "");
-    if (!k) continue;
-    if (!m.has(k)) m.set(k, u);
-    const lk = normLoose(k);
-    if (lk && !m.loose.has(lk)) m.loose.set(lk, u);
-  }
-  return m;
-}
-// Ubicación de Auto para un nº de parte del Aeropuerto/Automotriz ("00-24380594"):
-// primero exacta sin el prefijo de grupo; si no, comparación tolerante de formato.
-export function buscarUbicacion(mapa, numParte) {
-  if (!mapa || !mapa.size) return "";
-  const k = claveParteSinGrupo(numParte);
-  return mapa.get(k) || (mapa.loose && mapa.loose.get(normLoose(k))) || "";
-}
-
 export function parseExistenciasCsv(text) {
   if (!text) return [];
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
