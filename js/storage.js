@@ -306,8 +306,20 @@ function read() {
 }
 
 function write(db) {
-  _cache = db;
-  localStorage.setItem(KEY, JSON.stringify(db));
+  // Primero se intenta GUARDAR; solo si se guardó se actualiza la copia en
+  // memoria. Si el navegador se queda sin espacio (catálogos muy grandes), antes
+  // la memoria quedaba con datos que no se habían guardado y se perdían al
+  // recargar sin aviso. Ahora se avisa (evento inv-storage-full) y se conserva lo
+  // último guardado.
+  try {
+    localStorage.setItem(KEY, JSON.stringify(db));
+    _cache = db;
+  } catch (e) {
+    _cache = null;   // se vuelve a leer lo último guardado
+    try {
+      window.dispatchEvent(new CustomEvent("inv-storage-full", { detail: e && e.name }));
+    } catch (e2) {}
+  }
 }
 
 export const store = {

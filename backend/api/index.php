@@ -24,7 +24,8 @@
 //   PUT    /parts/{numParte}      (crear/editar)   [refacciones.edit]
 //   POST   /parts/bulk            (carga masiva)   [refacciones.edit]
 //   POST   /parts/{numParte}/conteo (conteo)       [refacciones.count]
-//   DELETE /parts                 (vaciar)         [refacciones.edit]
+//   POST   /parts/{numParte}/exhibicion            [refacciones.count]
+//   DELETE /parts                 (vaciar)         [refacciones.edit + candado]
 //   GET    /ping                  (prueba de vida)
 
 require __DIR__ . '/lib/db.php';

@@ -47,13 +47,20 @@ CREATE TABLE IF NOT EXISTS auditorias (
   started_at TEXT, finished_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS refacciones (
-  num_parte TEXT PRIMARY KEY, descripcion TEXT NOT NULL DEFAULT '',
+  agencia TEXT NOT NULL DEFAULT '', num_parte TEXT NOT NULL, descripcion TEXT NOT NULL DEFAULT '',
   ubicacion TEXT NOT NULL DEFAULT '', grupo TEXT NOT NULL DEFAULT '',
   marbete TEXT NOT NULL DEFAULT '', existencia INTEGER, conteo INTEGER,
   conteo_by TEXT NOT NULL DEFAULT '', conteo_at TEXT,
+  conteos TEXT, exhibiciones TEXT, exhibicion INTEGER, exhib_obs TEXT,
+  precio_unit REAL, clasificacion TEXT NOT NULL DEFAULT '', rotativo_sesion TEXT NOT NULL DEFAULT '',
   en_marbetes INTEGER NOT NULL DEFAULT 0, en_existencias INTEGER NOT NULL DEFAULT 0,
   origin TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (agencia, num_parte)
+);
+CREATE TABLE IF NOT EXISTS refacciones_auditoria (
+  agencia TEXT PRIMARY KEY, datos TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS bitacora (

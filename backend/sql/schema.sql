@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS refacciones (
   conteos      LONGTEXT     NULL,   -- { "1": n, "2": n, "3": n }
   exhibiciones LONGTEXT     NULL,   -- { "Punto X": n, ... }
   exhibicion   INT          NULL,   -- total en exhibición (suma de exhibiciones)
+  exhib_obs    LONGTEXT     NULL,   -- { "Punto X": "observación" }
   -- Datos económicos / clasificación de rotación (del CSV de existencias).
   precio_unit  DECIMAL(12,2) NULL,
   clasificacion VARCHAR(4)  NOT NULL DEFAULT '',   -- R/L/E/P/O/I
@@ -213,6 +214,9 @@ ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS clasificacion VARCHAR(4) NOT NU
 -- Sello de la SESIÓN de muestreo rotativo (agrupa las partes de una misma
 -- muestra; permite continuar/contar el rotativo en otro dispositivo).
 ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS rotativo_sesion VARCHAR(40) NOT NULL DEFAULT '';
+-- Observaciones de exhibición por punto ({ "Punto X": "texto" }), para que la
+-- evidencia de los reportes salga igual en todos los equipos.
+ALTER TABLE refacciones ADD COLUMN IF NOT EXISTS exhib_obs LONGTEXT NULL;
 -- Recomponer la PK: quitar la antigua (si era solo num_parte) y poner la compuesta.
 -- Nota: MariaDB no soporta "DROP PRIMARY KEY IF EXISTS"; este bloque asume la
 -- migración de una tabla antigua. Si la tabla ya tiene la PK compuesta, el ALTER

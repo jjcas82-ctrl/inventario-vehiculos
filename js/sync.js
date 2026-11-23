@@ -88,15 +88,28 @@ export async function pushPart(agency, numParte) {
   const data = { ...p, agency };
   await trySend({ type: "part", key: `${agency}|${numParte}`, data }, () => api.putPart(numParte, data));
 }
-export async function pushParts(agency, partsArr) {
+export async function pushParts(agency, partsArr, opts = {}) {
   // Carga masiva: se intenta en bloque; si falla, se encola como bulk.
+  //   opts.resetCounts / opts.replace: ver api.bulkParts (nueva muestra rotativa).
   const data = (partsArr || []).map(p => ({ ...p, agency }));
-  await trySend({ type: "partsBulk", key: `bulk|${agency}`, data }, () => api.bulkParts(data));
+  const o = { resetCounts: !!opts.resetCounts, replace: !!opts.replace };
+  await trySend({ type: "partsBulk", key: `bulk|${agency}|${o.resetCounts ? "r" : ""}${o.replace ? "x" : ""}`, data, opts: o }, () => api.bulkParts(data, o));
 }
-export async function pushPartConteo(agency, numParte, conteo) {
+// Conteo de una parte. Lleva la RONDA y el SELLO de la muestra rotativa: si el
+// conteo se quedó en la cola y mientras tanto se generó otra muestra, el servidor
+// lo rechaza (409) en vez de aplicarlo al inventario nuevo.
+export async function pushPartConteo(agency, numParte, conteo, ronda = 1, sello = "") {
   await trySend(
-    { type: "partConteo", key: `${agency}|${numParte}`, data: { numParte, conteo, agency } },
-    () => api.setPartConteo(numParte, conteo, agency));
+    { type: "partConteo", key: `${agency}|${numParte}|${ronda}`, data: { numParte, conteo, agency, ronda, sello } },
+    () => api.setPartConteo(numParte, conteo, agency, ronda, sello));
+}
+// Exhibición de una parte en un punto (fusión por punto en el servidor). Usa el
+// permiso de CONTEO, así el auditor también puede registrarla.
+export async function pushPartExhibicion(agency, numParte, punto, cantidad, observacion = "", sello = "") {
+  await trySend(
+    { type: "partExhibicion", key: `${agency}|${numParte}|${punto}`,
+      data: { numParte, agency, punto, cantidad, observacion, sello } },
+    () => api.setPartExhibicion(numParte, agency, punto, cantidad, observacion, sello));
 }
 // Sube la SESIÓN de auditoría de refacciones de una agencia (tipo, rondas,
 // muestra rotativa, firmas, cierre…), para poder continuarla en otro equipo.
@@ -123,7 +136,8 @@ function opLabel(op) {
     case "stage":      return "la etapa de " + (op.key || "");
     case "part":       return "la refacción " + (op.key || "");
     case "partsBulk":  return `la carga de refacciones (${Array.isArray(op.data) ? op.data.length : "?"} partes)`;
-    case "partConteo": return "el conteo de " + (op.key || "");
+    case "partConteo": return "el conteo de " + String(op.key || "").split("|").slice(0, 2).join("|");
+    case "partExhibicion": return "la exhibición de " + String(op.key || "").split("|").slice(0, 2).join("|");
     case "partsAudit": return "la sesión de inventario de refacciones";
     case "agencies":   return "las agencias";
     default:           return "un cambio";
@@ -155,8 +169,9 @@ async function runOp(op) {
     case "event":      return api.postEvent(op.data);
     case "stage":      return api.setVehicleStage(op.data.vin, op.data.stage);
     case "part":       return api.putPart(op.data.numParte, op.data);
-    case "partsBulk":  return api.bulkParts(op.data);
-    case "partConteo": return api.setPartConteo(op.data.numParte, op.data.conteo, op.data.agency);
+    case "partsBulk":  return api.bulkParts(op.data, op.opts || {});
+    case "partConteo": return api.setPartConteo(op.data.numParte, op.data.conteo, op.data.agency, op.data.ronda || 1, op.data.sello || "");
+    case "partExhibicion": return api.setPartExhibicion(op.data.numParte, op.data.agency, op.data.punto, op.data.cantidad, op.data.observacion, op.data.sello);
     case "partsAudit": return api.putPartsAudit(op.data.agency, op.data.datos);
     case "agencies":   return api.saveAgencies(op.data);
     default: return;
@@ -170,16 +185,25 @@ export async function flushQueue() {
   if (!q.length) return 0;
   let done = 0;
   const rest = [];
+  const rechazadas = [];
   for (const op of q) {
     try {
       await runOp(op);
       done++;
     } catch (e) {
-      if (e && e.offline) { rest.push(op); }   // sigue sin conexión → conservar
-      // error de API → descartar la operación (no reintentar en bucle)
+      if (e && e.offline) { rest.push(op); continue; }   // sigue sin conexión → conservar
+      // Error de la API → se descarta (no reintentar en bucle), pero SE AVISA:
+      // antes se perdía en silencio y el usuario creía que se había subido.
+      rechazadas.push(`${opLabel(op)}: ${(e && e.message) || "rechazado por el servidor"}`);
     }
   }
   writeQueue(rest);
+  if (rechazadas.length) {
+    const ej = rechazadas.slice(0, 3).join(" · ");
+    try {
+      _onError(`${rechazadas.length} cambio(s) pendiente(s) no se pudieron subir al servidor y quedaron solo en este equipo: ${ej}${rechazadas.length > 3 ? " …" : ""}`);
+    } catch (e2) {}
+  }
   return done;
 }
 
@@ -289,9 +313,13 @@ async function pullPartsAudit() {
     // Si el servidor trae una MUESTRA ROTATIVA distinta a la local (otro equipo
     // inició un rotativo nuevo), esa muestra manda aunque el updatedAt local
     // parezca más reciente: así todos los equipos convergen a la misma muestra.
+    // Pero si ESTE equipo tiene su propia muestra más reciente (p. ej. la generó
+    // y aún no se subió), no se pisa con la anterior del servidor.
     const selloDistinto = !!remota.rotativoSesion &&
       remota.rotativoSesion !== local.rotativoSesion;
-    if (!local.tipo || selloDistinto || isNewer(remota.updatedAt, local.updatedAt)) {
+    const remotaMasNueva = isNewer(remota.updatedAt, local.updatedAt);
+    const muestraRemotaManda = selloDistinto && (!local.rotativoSesion || remotaMasNueva);
+    if (!local.tipo || muestraRemotaManda || (!selloDistinto && remotaMasNueva)) {
       store.setPartsAudit(agency, remota);
     }
   }
@@ -312,26 +340,41 @@ async function pullPartsAudit() {
 function sanearParteServidor(sp, local) {
   const out = { ...sp };
   const vacio = (o) => !o || typeof o !== "object" || !Object.keys(o).length;
+  // Solo se rescata información local si es del MISMO inventario (mismo sello de
+  // muestra). Si el sello cambió, lo local es de una muestra anterior y NO debe
+  // pasar a la nueva.
+  const mismoInventario = !!local &&
+    String(local.rotativoSesion || "") === String(out.rotativoSesion || "");
 
   // --- Exhibición ---
+  // Se rescata el detalle local SOLO si el servidor dice que hay piezas (total > 0)
+  // pero sin detalle. Si el total es 0/null, la exhibición se quitó: no se revive.
   const totalExh = Number(out.exhibicion || 0);
-  if (vacio(out.exhibiciones)) {
-    if (local && !vacio(local.exhibiciones)) {
+  if (vacio(out.exhibiciones) && totalExh > 0) {
+    if (mismoInventario && !vacio(local.exhibiciones)) {
       out.exhibiciones = local.exhibiciones;                 // conserva el detalle local
-      if (local.exhibObs) out.exhibObs = local.exhibObs;
-      out._exhReparada = true;                               // hay que curar el servidor
-    } else if (totalExh > 0) {
+    } else {
       out.exhibiciones = { "Exhibición": totalExh };          // sintetiza para que cuadre
-      out._exhReparada = true;                               // hay que curar el servidor
     }
   }
-  // Recalcula el total a partir del detalle resultante (coherencia).
-  if (!vacio(out.exhibiciones)) {
+  if (vacio(out.exhibiciones)) {
+    out.exhibiciones = {};
+    out.exhibicion = totalExh > 0 ? totalExh : null;
+  } else {
+    // Recalcula el total a partir del detalle (coherencia).
     out.exhibicion = Object.values(out.exhibiciones).reduce((s, v) => s + Number(v || 0), 0);
+  }
+  // Observaciones: las del servidor; si no trae (columna aún sin crear), las locales
+  // del mismo inventario.
+  if (vacio(out.exhibiciones)) {
+    out.exhibObs = {};
+  } else if (vacio(out.exhibObs)) {
+    out.exhibObs = (mismoInventario && !vacio(local.exhibObs)) ? local.exhibObs : {};
   }
 
   // --- Conteos por ronda ---
-  if (vacio(out.conteos) && local && !vacio(local.conteos)) {
+  // Solo se conserva el histórico local si el servidor tiene conteo de esa parte.
+  if (vacio(out.conteos) && out.conteo != null && mismoInventario && !vacio(local.conteos)) {
     out.conteos = local.conteos;
   }
   return out;
@@ -362,16 +405,7 @@ function mergeParts(serverList) {
     for (const [numParte, sp] of serverMap) {
       const local = store.getPart(agency, numParte);
       if (!local || isNewer(sp.updatedAt, local.updatedAt)) {
-        const saneada = sanearParteServidor(sp, local);
-        const reparada = saneada._exhReparada;
-        delete saneada._exhReparada;                 // flag interno, no se guarda
-        store.upsertPart(agency, saneada);
-        // Si tuvimos que REPARAR el detalle de exhibición (el servidor lo trajo
-        // vacío pero había total), re-subimos la versión saneada para CURAR el
-        // dato en el servidor y que no se vuelva a propagar vacío a otros equipos.
-        if (reparada) {
-          try { pushPart(agency, numParte); } catch (e) {}
-        }
+        store.upsertPart(agency, sanearParteServidor(sp, local));
       }
     }
     // 2) Reemplazo: quitar las locales que el servidor YA NO tiene. Excepción:

@@ -49,6 +49,7 @@ function handle_users(array $user, string $method, array $parts): void {
     $accessParts = array_key_exists('accessParts', $b) && $b['accessParts'] !== null ? (int)(bool)$b['accessParts'] : null;
     $accessVeh = array_key_exists('accessVeh', $b) && $b['accessVeh'] !== null ? (int)(bool)$b['accessVeh'] : null;
     $role = (string)($b['role'] ?? 'operador');
+    if (!isset(PERMISSIONS[$role])) json_error(422, 'Rol no válido.');
     // Un usuario (no admin) debe tener acceso al menos a un módulo.
     $tmp = ['role' => $role, 'access_parts' => $accessParts, 'access_veh' => $accessVeh];
     if (!user_has_parts($tmp) && !user_has_veh($tmp)) {
@@ -73,6 +74,7 @@ function handle_users(array $user, string $method, array $parts): void {
     $b = body();
     // Protección: tras el cambio, el usuario debe conservar al menos un módulo
     // (vehículos o refacciones). El admin siempre tiene ambos.
+    if (isset($b['role']) && !isset(PERMISSIONS[(string)$b['role']])) json_error(422, 'Rol no válido.');
     if (isset($b['role']) || array_key_exists('accessParts', $b) || array_key_exists('accessVeh', $b)) {
       $curU = db()->prepare('SELECT * FROM usuarios WHERE id=?'); $curU->execute([$id]);
       $tmp = $curU->fetch();
