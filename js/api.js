@@ -176,13 +176,25 @@ export async function putPart(numParte, data) {
   // `data` ya incluye `agency` (lo agrega sync.pushPart).
   return apiFetch(`parts/${encodeURIComponent(numParte)}`, { method: "PUT", body: data });
 }
-export async function bulkParts(parts) {
+export async function bulkParts(parts, opts = {}) {
   // Cada parte del arreglo lleva su `agency` (lo agrega sync.pushParts).
-  return apiFetch("parts/bulk", { method: "POST", body: { parts } });
+  //   opts.resetCounts → el servidor reinicia conteos/exhibiciones (nueva muestra).
+  //   opts.replace     → el servidor borra las partes de la agencia que no vienen.
+  const body = { parts };
+  if (opts.resetCounts) body.resetCounts = true;
+  if (opts.replace) body.replace = true;
+  return apiFetch("parts/bulk", { method: "POST", body });
 }
-export async function setPartConteo(numParte, conteo, agency, ronda) {
+export async function setPartConteo(numParte, conteo, agency, ronda, rotativoSesion) {
   return apiFetch(`parts/${encodeURIComponent(numParte)}/conteo`, {
-    method: "POST", body: { conteo, agency, ronda },
+    method: "POST", body: { conteo, agency, ronda, rotativoSesion: rotativoSesion || "" },
+  });
+}
+// Exhibición / punto de venta de una parte (fusión por punto; cantidad 0 = quitar).
+export async function setPartExhibicion(numParte, agency, punto, cantidad, observacion, rotativoSesion) {
+  return apiFetch(`parts/${encodeURIComponent(numParte)}/exhibicion`, {
+    method: "POST",
+    body: { agency, punto, cantidad, observacion: observacion || "", rotativoSesion: rotativoSesion || "" },
   });
 }
 // Sesión de auditoría de refacciones por agencia (para continuar en otro equipo).

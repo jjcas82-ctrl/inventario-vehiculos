@@ -20,7 +20,7 @@ import { escapeHtml } from "./agencies.js";
 import { logAction } from "./syslog.js";
 import * as auth from "./auth.js";
 import * as api from "./api.js";
-import { pushParts, pushPartConteo, pushPart, pushPartsAudit } from "./sync.js";
+import { pushParts, pushPartConteo, pushPartsAudit, pushPartExhibicion } from "./sync.js";
 
 let initialized = false;
 let scanner = null;
@@ -53,6 +53,12 @@ function tipoActual() {
 }
 function esRotativo() { return tipoActual() === "rotativo"; }
 function esCompleto() { return tipoActual() === "completo"; }
+// Sello de la muestra rotativa vigente ("" si no es rotativo). Viaja con cada
+// conteo/exhibición para que el servidor rechace capturas de una muestra anterior.
+function selloActual() {
+  if (!esRotativo()) return "";
+  return (store.getPartsAudit(ag()) || {}).rotativoSesion || "";
+}
 
 // ¿La agencia activa tiene un inventario EN CURSO (no cerrado)? Lo está si tiene
 // una sesión con tipo elegido Y partes cargadas Y aún no se cerró (sin finishedAt).
@@ -90,6 +96,12 @@ function partesActuales() {
 export function initRefacciones() {
   if (initialized) return;
   initialized = true;
+
+  // Aviso si el navegador se queda sin espacio para guardar (catálogos grandes).
+  window.addEventListener("inv-storage-full", () => {
+    notify("⚠ El navegador no tiene espacio para guardar el último cambio en este equipo. " +
+      "Respalda y cierra inventarios anteriores, o libera espacio, y vuelve a intentarlo.", { type: "error", timeout: 12000 });
+  });
 
   // --- Carga de archivos ---
   const btnExist = document.getElementById("ref-existencias-btn");
@@ -396,6 +408,15 @@ function renderWizard() {
 // cambia). En rotativo fijamos 1 conteo; en completo, por defecto 3.
 // Candado compartido: devuelve true si se DEBE bloquear la acción de iniciar otro
 // inventario (hay uno activo y el usuario no es admin). Avisa al usuario.
+// Confirmación extra para el ADMIN: si el inventario en curso ya tiene partes
+// contadas, generar otra muestra borra esos conteos (aquí y en el servidor).
+function confirmaBorrarConteos(accion) {
+  const activo = inventarioActivo();
+  if (!activo || !activo.contadas) return true;
+  return confirm(`⚠ ${ag()} tiene un inventario ${activo.tipo} en curso con ${activo.contadas} de ${activo.total} parte(s) YA CONTADAS.\n\n` +
+    `Si continúas con "${accion}", esos conteos y exhibiciones se BORRAN en este equipo y en el servidor.\n\n¿Continuar?`);
+}
+
 function candadoBloquea(accion) {
   const activo = inventarioActivo();
   if (activo && !puedeSaltarCandado()) {
@@ -442,6 +463,8 @@ function iniciarNuevoInventario() {
     notify("Solo quien puede EDITAR refacciones (admin/refacciones) puede iniciar un nuevo inventario.", { type: "warn" });
     return;
   }
+  // Candado: con un inventario en curso, solo el administrador puede vaciarlo.
+  if (candadoBloquea("iniciar un nuevo inventario")) return;
   const n = store.listParts(ag()).length;
   const resp = (prompt(
     `Vas a VACIAR el inventario de trabajo de "${ag()}" (${n} parte(s) y sus conteos) para empezar de cero.\n` +
@@ -575,7 +598,7 @@ function registrarExhibicion() {
   const p = store.setPartExhibicion(ag(), numParte, punto, cant, by, observacion);
   const etiqueta = punto === "Sin ubicación" ? "sin ubicación (fuera de lugar)" : punto;
   logAction("parts.exhibicion", `Exhibición/ubicación de ${numParte} (${ag()}): ${cant} en ${etiqueta}${observacion ? ` · obs: ${observacion}` : ""}`, by);
-  try { pushPart(ag(), numParte); } catch (e) {}
+  try { pushPartExhibicion(ag(), numParte, punto, cant, observacion, selloActual()); } catch (e) {}
   setExhStatus(`✓ ${numParte}: ${cant} en ${etiqueta} (total: ${p.exhibicion}).`, "ok");
   if (parteEl) parteEl.value = "";
   if (cantEl) cantEl.value = "";
@@ -642,7 +665,7 @@ function quitarExhibicion(numParte, punto) {
   const by = auth.currentUser()?.name || "—";
   store.setPartExhibicion(ag(), numParte, punto, 0, by);   // 0 → elimina el punto
   logAction("parts.exhibicion.del", `Exhibición quitada: ${numParte} en ${punto} (${ag()})`, by);
-  try { pushPart(ag(), numParte); } catch (e) {}
+  try { pushPartExhibicion(ag(), numParte, punto, 0, "", selloActual()); } catch (e) {}
   setExhStatus(`Quitada la exhibición de ${numParte} en ${punto}.`, "ok");
   renderExhibicion();
   renderConteo();
@@ -1002,6 +1025,7 @@ function muestrearRotativo() {
   if (!esRotativo()) { notify("Este paso es solo para inventario rotativo.", { type: "warn" }); return; }
   if (!puedeEditar()) { notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" }); return; }
   if (candadoBloquea("generar una muestra nueva")) return;
+  if (!confirmaBorrarConteos("generar una muestra nueva")) return;
   if (!existencias.length) {
     setRotativoStatus("Primero carga el archivo de existencias (CSV).", "error");
     notify("Carga el archivo de existencias antes de muestrear.", { type: "warn" });
@@ -1085,7 +1109,9 @@ function muestrearRotativo() {
   store.bulkUpsertParts(ag(), toSave, { merge: false });
   store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir, rotativoSesion: sesion });
   logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""} · inventario completo ${toSave.length} partes`, by);
-  try { pushParts(ag(), toSave); pushPartsAudit(ag()); } catch (e) {}
+  // Nueva muestra: el servidor reinicia conteos/exhibiciones y deja el inventario
+  // igual al archivo cargado (borra lo que ya no viene).
+  try { pushParts(ag(), toSave, { resetCounts: true, replace: true }); pushPartsAudit(ag()); } catch (e) {}
   const nota = excluidas ? ` Se excluyeron ${excluidas} ya auditadas antes.` : "";
   setRotativoStatus(`Muestra creada: ${pedir} número(s) de parte al azar de ${total}.${nota} Imprime la plantilla de conteo.`, "ok");
   notify(`Muestra rotativa creada: ${pedir} partes.`, { type: "success", timeout: 6000 });
@@ -1103,6 +1129,7 @@ function cargarRotativoManual() {
   if (!esRotativo()) { notify("Este paso es solo para inventario rotativo.", { type: "warn" }); return; }
   if (!puedeEditar()) { notify("Tu rol no permite cargar inventario de refacciones.", { type: "warn" }); return; }
   if (candadoBloquea("cargar otra muestra")) return;
+  if (!confirmaBorrarConteos("cargar otra muestra")) return;
   if (!existencias.length) {
     setRotativoStatus("Primero carga el archivo de existencias (CSV) para traer descripción y existencia.", "error");
     notify("Carga el archivo de existencias antes de agregar las partes.", { type: "warn" });
@@ -1170,7 +1197,9 @@ function cargarRotativoManual() {
   store.bulkUpsertParts(ag(), toSave, { merge: false });
   store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: elegidos.size, modoMuestreo: "manual", rotativoSesion: sesion });
   logAction("parts.rotativo.manual", `Rotativo manual (${ag()}): ${elegidos.size} partes${repetidas.length ? ` · ${repetidas.length} repetidas` : ""}${noEncontradas.length ? ` · ${noEncontradas.length} no encontradas` : ""} · inventario completo ${toSave.length} partes`, by);
-  try { pushParts(ag(), toSave); pushPartsAudit(ag()); } catch (e) {}
+  // Nueva muestra: el servidor reinicia conteos/exhibiciones y deja el inventario
+  // igual al archivo cargado (borra lo que ya no viene).
+  try { pushParts(ag(), toSave, { resetCounts: true, replace: true }); pushPartsAudit(ag()); } catch (e) {}
   let msg = `Cargadas ${elegidos.size} parte(s) a auditar.`;
   if (noEncontradas.length) msg += ` ${noEncontradas.length} no estaban en existencias (omitidas).`;
   if (repetidas.length) msg += ` ${repetidas.length} ya auditadas antes.`;
@@ -1651,7 +1680,7 @@ function registrarConteoManual() {
   p = store.setPartConteo(ag(), numParte, conteo, by, rondaActual);
   logAction("parts.count", `Conteo ${rondaActual} de ${numParte} (${ag()}): ${conteo}`, by);
   // SINCRONIZACIÓN: sube el conteo al servidor (o encola si no hay internet).
-  try { pushPartConteo(ag(), numParte, conteo); } catch (e) {}
+  try { pushPartConteo(ag(), numParte, conteo, rondaActual, selloActual()); } catch (e) {}
   beep(true);
   if (inp) inp.value = "";
   if (cantEl) cantEl.value = "";
@@ -1676,15 +1705,22 @@ function reiniciarConteo() {
     notify("Solo quien puede EDITAR refacciones (admin/refacciones) puede reiniciar el conteo.", { type: "warn" });
     return;
   }
+  // Candado: con un inventario en curso, borrar sus conteos es solo del admin
+  // (el servidor aplica la misma regla).
+  if (candadoBloquea("reiniciar el conteo")) return;
   const partes = store.listParts(ag()).filter(p => p.conteo != null || (p.conteos && Object.keys(p.conteos).length));
   if (!partes.length) { notify("No hay conteos registrados.", { type: "info" }); return; }
   // Confirmación reforzada: escribir la palabra para evitar ejecuciones por error.
   const resp = (prompt(`Vas a BORRAR todos los conteos (todas las rondas) de ${partes.length} parte(s) en "${ag()}".\nEl inventario cargado (existencias) se conserva.\n\nEscribe BORRAR para confirmar:`, "") || "").trim().toUpperCase();
   if (resp !== "BORRAR") { if (resp !== "") notify("Cancelado: no se escribió BORRAR.", { type: "info" }); return; }
   const by = auth.currentUser()?.name || "—";
+  const reiniciadas = [];
   for (const p of partes) {
-    store.upsertPart(ag(), { numParte: p.numParte, conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null });
+    reiniciadas.push(store.upsertPart(ag(), { numParte: p.numParte, conteo: null, conteos: {}, conteoRonda: null, conteoBy: null, conteoAt: null }));
   }
+  // Propaga el reinicio al servidor (sin esto, los conteos seguían arriba y
+  // volvían a bajar en otros equipos). Conserva exhibiciones y sello de muestra.
+  try { pushParts(ag(), reiniciadas, { resetCounts: true }); } catch (e) {}
   // Reiniciar la ronda a 1 (conserva el nº de rondas configurado).
   const a = store.getPartsAudit(ag()) || {};
   store.setPartsAudit(ag(), { rondas: a.rondas || 1, rondaActual: 1 });
@@ -1935,7 +1971,8 @@ function tipoLabel(t) {
 
 function imprimirDiferencias() {
   const difs = listaDiferencias();
-  if (!difs.length) { notify("No hay diferencias que reportar. El conteo cuadra.", { type: "success" }); return; }
+  // Sin diferencias, el reporte se imprime igual si hay EVIDENCIA de exhibición.
+  if (!difs.length && !listaExhibiciones().length) { notify("No hay diferencias que reportar. El conteo cuadra.", { type: "success" }); return; }
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString();
   const filas = difs.map(d => {
@@ -1991,7 +2028,7 @@ function imprimirDiferencias() {
     <div class="meta">Generado: ${esc(fecha)} · Por: ${esc(by)} · ${difs.length} parte(s) con diferencia</div>
     <table><thead><tr>
       <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Conteo</th><th>En exhib.</th><th>Dif.</th><th>Tipo</th>
-    </tr></thead><tbody>${filas}</tbody></table>
+    </tr></thead><tbody>${filas || `<tr><td colspan="8">Sin diferencias: el conteo cuadra con la existencia.</td></tr>`}</tbody></table>
     ${seccionExhib}
     </body></html>`);
   win.document.close();

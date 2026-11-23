@@ -275,8 +275,11 @@ export class Scanner {
   pause() { this._paused = true; }
   resume() {
     this._paused = false;
-    this._lastEmit = null;
-    this._lastEmitAt = 0;
+    // Se CONSERVA el último código leído: al reanudar, la etiqueta recién
+    // registrada suele seguir frente a la cámara y se volvía a leer al instante.
+    // Ese mismo código se ignora durante 2.5 s después de reanudar; cualquier otro
+    // código se lee de inmediato.
+    this._resumeAt = Date.now();
   }
 
   _emit(text) {
@@ -290,6 +293,7 @@ export class Scanner {
     // 600 ms es suficiente para filtrar la ráfaga sin bloquear la re-lectura
     // legítima de una parte parecida en el siguiente escaneo.
     if (clean === this._lastEmit && now - (this._lastEmitAt || 0) < 600) return;
+    if (clean === this._lastEmit && now - (this._resumeAt || 0) < 2500) return;
     this._lastEmit = clean;
     this._lastEmitAt = now;
     // El consumidor decide si es VIN válido y si detener la cámara.
