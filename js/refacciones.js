@@ -576,7 +576,7 @@ export function parsePartQr(text) {
   return null;
 }
 
-// --- Generación de ETIQUETAS QR (3 columnas × 8 filas = 24 por hoja carta) ---
+// --- Generación de ETIQUETAS QR (3 columnas × 9 filas = 27 por hoja carta) ---
 // Abre una ventana imprimible. Cada etiqueta: QR (con numParte|desc|ubic) a la
 // izquierda + número de parte y descripción a la derecha. La hoja adhesiva es
 // completa (sin troquel), por eso se mantienen los controles de margen/separación
@@ -587,11 +587,11 @@ export async function printPartLabels(parts, opts = {}) {
   const list = (parts || []).filter(p => p.numParte);
   if (!list.length) throw new Error("No hay partes con número para generar etiquetas.");
 
-  // Medidas por defecto (ajustables). 3 columnas × 8 filas = 24 por hoja carta.
+  // Medidas por defecto (ajustables). 3 columnas × 9 filas = 27 por hoja carta.
   const cfg = {
     etiqAncho: opts.etiqAncho ?? 59,   // mm (ancho de cada etiqueta = 5.9 cm)
     cols: opts.cols ?? 3,
-    filas: opts.filas ?? 8,            // 8 filas → 24 etiquetas por hoja carta
+    filas: opts.filas ?? 9,            // 9 filas → 27 etiquetas por hoja carta
     margenSup: opts.margenSup ?? 12,   // mm desde arriba a la 1ª fila
     margenIzq: opts.margenIzq ?? 6,    // mm desde la izquierda a la 1ª columna
     margenInf: opts.margenInf ?? 6,    // mm libres abajo (la mayoría de impresoras no imprime en el borde)
