@@ -63,23 +63,44 @@ function limpiarDescCsv(s) {
   return t.replace(/\s+/g, " ").trim();
 }
 
+// Variante SIN prefijo de grupo (Aeroplasa Auto): "24380594,DESC,1,P11A12N3U2  03/09/2026".
+// La ubicación debe traer alguna letra, para no confundir columnas numéricas de
+// otros CSV (precio, valor) con la ubicación.
+const UBIC_LINEA_SP_RE = /^\s*([0-9A-Z][^,]*?)\s*,(.*),\s*(-?\d+)\s*,\s*((?=[^,\s]*[A-Za-z])[^,\s]+)\s*(\d{2}\/\d{2}\/\d{4})?\s*$/i;
+
 function parseExistenciasUbicaciones(text) {
-  const separado = String(text).replace(/(\d{2}\/\d{2}\/\d{4})(?=[ \t]*\d{2,3}-)/g, "$1\n");
+  // Separa registros pegados: una fecha seguida directamente de otro registro.
+  const separado = String(text).replace(/(\d{2}\/\d{2}\/\d{4})(?=[ \t]*[^\s,\/][^,\r\n]*,)/g, "$1\n");
   const lineas = separado.split(/\r\n|\r|\n/).filter(l => l.trim());
   if (!lineas.length) return null;
   const out = [];
   const descartadas = [];
   for (const l of lineas) {
     const m = l.match(UBIC_LINEA_RE);
-    if (!m) { descartadas.push(l.trim()); continue; }
-    out.push({
-      numParte: `${m[1]}-${m[2]}`,
-      descripcion: limpiarDescCsv(m[3]),
-      existencia: Number(m[4]),
-      ubicacion: (m[5] || "").trim(),
-      clasificacion: "",
-      fecha: m[6] || "",
-    });
+    if (m) {
+      out.push({
+        numParte: `${m[1]}-${m[2]}`,
+        descripcion: limpiarDescCsv(m[3]),
+        existencia: Number(m[4]),
+        ubicacion: (m[5] || "").trim(),
+        clasificacion: "",
+        fecha: m[6] || "",
+      });
+      continue;
+    }
+    const n = l.match(UBIC_LINEA_SP_RE);
+    if (n) {
+      out.push({
+        numParte: n[1].trim(),
+        descripcion: limpiarDescCsv(n[2]),
+        existencia: Number(n[3]),
+        ubicacion: n[4].trim(),
+        clasificacion: "",
+        fecha: n[5] || "",
+      });
+      continue;
+    }
+    descartadas.push(l.trim());
   }
   // Solo es este formato si casi todos los renglones lo cumplen.
   if (out.length < 3 || out.length < lineas.length * 0.9) return null;
@@ -310,7 +331,7 @@ function parseExistenciasDelimited(text) {
 
     const descripcion = (r[idx.desc] ?? "").toString().replace(/"/g, "").trim();
     const existencia = num(r[idx.cant]) ?? 0;
-    const ubicRaw = (r[idx.ubic] ?? "").toString().replace(/"/g, "").trim();
+    const ubicRaw = (r[idx.ubic] ?? "").toString().replace(/"/g, "").replace(/\s+\d{2}\/\d{2}\/\d{4}\s*$/, "").trim();
     const { ubicacion, recuperada } = repararUbicacion(ubicRaw);
     const clasificacion = (r[idx.clasif] ?? "").toString().replace(/"/g, "").trim().toUpperCase();
     const precioUnit = num(r[idx.precioU]);
