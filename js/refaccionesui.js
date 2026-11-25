@@ -1413,8 +1413,14 @@ async function cargarExistenciasSoloEtiquetas(file) {
     etqAnaqueles = parseExistenciasCsv(text);
     const n = etqAnaqueles.length;
     const nota = notaLecturaReporte(etqAnaqueles);
+    // Cuántas partes traen ubicación (la etiqueta solo la imprime si viene en el archivo).
+    const conUbic = etqAnaqueles.filter(p => String(p.ubicacion || "").trim()).length;
+    const notaUbic = !n ? "" : (conUbic
+      ? ` Con ubicación: ${conUbic} de ${n}.`
+      : " ⚠ El archivo NO trae ubicación reconocible: las etiquetas saldrán sin ubicación.");
+    if (n && !conUbic) nota.ok = false;
     setStatusEl("ref-solo-etq-status",
-      n ? `✓ ${n} partes leídas de «${file.name}».${nota.texto} Ajusta los márgenes si hace falta e imprime.`
+      n ? `✓ ${n} partes leídas de «${file.name}».${nota.texto}${notaUbic} Ajusta los márgenes si hace falta e imprime.`
         : "El archivo no contiene partes reconocibles.", n ? (nota.ok ? "ok" : "warn") : "error");
     const hay = n > 0;
     const b1 = document.getElementById("ref-solo-etq-print");
