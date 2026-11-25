@@ -2,7 +2,7 @@
 //   1) Cargar EXISTENCIAS (CSV) + MARBETES (PDF) del sistema interno.
 //   2) CRUZAR por número de parte y mostrar vista previa.
 //   3) Guardar el cruce en el inventario de partes (store.bulkUpsertParts).
-//   4) Imprimir ETIQUETAS QR (3 columnas × 9 filas = 27 por hoja carta).
+//   4) Imprimir ETIQUETAS QR (3 columnas × 10 filas = 30 por hoja carta).
 //   5) CONTEO físico: escanear QR (o teclear nº de parte) + teclear la cantidad.
 //   6) Reporte de DIFERENCIAS (conteo vs. existencia del sistema).
 //
@@ -1463,10 +1463,10 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
       // Nº de parte, descripción, ubicación (la del archivo cargado; vacía en el reporte del Aeropuerto) y leyenda de clasificación.
       mostrarUbic: true,    // formato final de la marca: nº de parte, descripción, ubicación y clasificación
       leyendaClasif: true,
-      margenSup: numVal("ref-solo-etq-sup", 12),
+      margenSup: numVal("ref-solo-etq-sup", 8),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),
-      sepV: numVal("ref-solo-etq-sepv", 2),
+      sepV: numVal("ref-solo-etq-sepv", 1),
     });
     if (!prueba) logAction("parts.labels.shelf", `Etiquetas para anaqueles impresas (${lista.length} partes)`, auth.currentUser()?.name || "—");
   } catch (e) {
@@ -1548,10 +1548,10 @@ async function imprimirEtiquetasManuales() {
     await printPartLabels(lista, {
       mostrarUbic: true,    // formato final de la marca: nº de parte, descripción, ubicación y clasificación
       leyendaClasif: true,
-      margenSup: numVal("ref-solo-etq-sup", 12),
+      margenSup: numVal("ref-solo-etq-sup", 8),
       margenIzq: numVal("ref-solo-etq-izq", 6),
       sepH: numVal("ref-solo-etq-seph", 2),
-      sepV: numVal("ref-solo-etq-sepv", 2),
+      sepV: numVal("ref-solo-etq-sepv", 1),
     });
     logAction("parts.labels.manual", `Etiqueta(s) suelta(s) impresa(s): ${lista.length} de ${etqManuales.length} refacción(es)`, auth.currentUser()?.name || "—");
   } catch (e) {
