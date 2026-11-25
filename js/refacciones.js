@@ -652,8 +652,8 @@ export async function printPartLabels(parts, opts = {}) {
       .etq .qr{width:${cfg.etiqAlto - 4}mm;height:${cfg.etiqAlto - 4}mm;flex:0 0 auto}
       .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:6mm}
       .etq .np{font-size:10.5pt;font-weight:700;line-height:1.1;word-break:break-all}
-      .etq .ds{font-size:8pt;line-height:1.05;margin-top:0.5mm}
-      .etq .ub{font-size:11pt;font-weight:700;line-height:1.1;margin-top:2mm}
+      .etq .ds{font-size:8pt;line-height:1.05;margin-top:0.5mm;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      .etq .ub{font-size:11pt;font-weight:700;line-height:1.1;margin-top:2mm;flex:0 0 auto}
       .etq .cl{margin-top:auto;font-size:7.5pt;font-weight:700;white-space:nowrap;display:flex;align-items:flex-end;gap:0.8mm}
       .etq .cl .ln{flex:1;min-width:6mm;height:2.6mm;border-bottom:0.25mm solid #000}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}

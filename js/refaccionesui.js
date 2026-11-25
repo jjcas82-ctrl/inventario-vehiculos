@@ -1415,8 +1415,11 @@ async function cargarExistenciasSoloEtiquetas(file) {
     const nota = notaLecturaReporte(etqAnaqueles);
     // Cuántas partes traen ubicación (la etiqueta solo la imprime si viene en el archivo).
     const conUbic = etqAnaqueles.filter(p => String(p.ubicacion || "").trim()).length;
+    const danadas = etqAnaqueles.filter(p => ubicDanada(p.ubicacion)).length;
     const notaUbic = !n ? "" : (conUbic
-      ? ` Con ubicación: ${conUbic} de ${n}.`
+      ? ` Con ubicación: ${conUbic} de ${n}.` + (danadas
+        ? ` ⚠ ${danadas} ubicación(es) dañada(s) por Excel (p. ej. «2.04E+303»): esas etiquetas salen sin ubicación; corrígelas en el archivo.`
+        : "")
       : " ⚠ El archivo NO trae ubicación reconocible: las etiquetas saldrán sin ubicación.");
     if (n && !conUbic) nota.ok = false;
     setStatusEl("ref-solo-etq-status",
@@ -1433,6 +1436,8 @@ async function cargarExistenciasSoloEtiquetas(file) {
   }
 }
 
+function ubicDanada(u) { return /^\d\.\d+E\+?\d+$/i.test(String(u || "").trim()); }
+
 async function imprimirEtiquetasAnaqueles(prueba = false) {
   if (!etqAnaqueles.length) { notify("Primero sube el archivo de existencias.", { type: "warn" }); return; }
   const soloConExist = document.getElementById("ref-solo-etq-conexist")?.checked;
@@ -1446,7 +1451,9 @@ async function imprimirEtiquetasAnaqueles(prueba = false) {
     const k = `${e.numParte}|${e.ubicacion || ""}`;
     if (vistos.has(k)) continue;
     vistos.add(k);
-    lista.push(e);
+    // Una ubicación que Excel convirtió a notación científica ("2.04E+303") no es
+    // real: no se imprime (sería una ubicación equivocada en el anaquel).
+    lista.push(ubicDanada(e.ubicacion) ? { ...e, ubicacion: "" } : e);
   }
   if (!lista.length) { notify("No hay partes que cumplan el filtro para imprimir.", { type: "warn" }); return; }
   lista.sort((a, b) => String(a.numParte || "").localeCompare(String(b.numParte || ""), "es", { numeric: true }));
