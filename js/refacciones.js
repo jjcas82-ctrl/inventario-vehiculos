@@ -568,7 +568,7 @@ export async function printPartLabels(parts, opts = {}) {
 
   // Medidas por defecto (ajustables). 3 columnas × 8 filas = 24 por hoja carta.
   const cfg = {
-    etiqAncho: opts.etiqAncho ?? 64,   // mm (ancho de cada etiqueta)
+    etiqAncho: opts.etiqAncho ?? 63.5, // mm (ancho de cada etiqueta = 2.5 pulgadas)
     cols: opts.cols ?? 3,
     filas: opts.filas ?? 8,            // 8 filas → 24 etiquetas por hoja carta
     margenSup: opts.margenSup ?? 12,   // mm desde arriba a la 1ª fila
@@ -630,10 +630,10 @@ export async function printPartLabels(parts, opts = {}) {
         ${cfg.prueba ? "border:0.2mm dashed #999;" : ""}}
       .etq .qr{width:${cfg.etiqAlto - 4}mm;height:${cfg.etiqAlto - 4}mm;flex:0 0 auto}
       .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:6mm}
-      .etq .np{font-size:9pt;font-weight:700;line-height:1.1;word-break:break-all}
-      .etq .ds{font-size:7pt;line-height:1.05;margin-top:0.5mm}
-      .etq .ub{font-size:10pt;font-weight:700;line-height:1.1;margin-top:2mm}
-      .etq .cl{margin-top:auto;font-size:6.5pt;font-weight:700;white-space:nowrap;display:flex;align-items:flex-end;gap:0.8mm}
+      .etq .np{font-size:10.5pt;font-weight:700;line-height:1.1;word-break:break-all}
+      .etq .ds{font-size:8pt;line-height:1.05;margin-top:0.5mm}
+      .etq .ub{font-size:11pt;font-weight:700;line-height:1.1;margin-top:2mm}
+      .etq .cl{margin-top:auto;font-size:7.5pt;font-weight:700;white-space:nowrap;display:flex;align-items:flex-end;gap:0.8mm}
       .etq .cl .ln{flex:1;min-width:6mm;height:2.6mm;border-bottom:0.25mm solid #000}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}
       .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;cursor:pointer}
