@@ -589,7 +589,7 @@ export async function printPartLabels(parts, opts = {}) {
 
   // Medidas por defecto (ajustables). 3 columnas × 8 filas = 24 por hoja carta.
   const cfg = {
-    etiqAncho: opts.etiqAncho ?? 63.5, // mm (ancho de cada etiqueta = 2.5 pulgadas)
+    etiqAncho: opts.etiqAncho ?? 59,   // mm (ancho de cada etiqueta = 5.9 cm)
     cols: opts.cols ?? 3,
     filas: opts.filas ?? 8,            // 8 filas → 24 etiquetas por hoja carta
     margenSup: opts.margenSup ?? 12,   // mm desde arriba a la 1ª fila
@@ -604,7 +604,8 @@ export async function printPartLabels(parts, opts = {}) {
   // valores por defecto (12 arriba, 6 abajo, 2 de separación) 8 filas salen de
   // ~30.9 mm. Si se pasa etiqAlto explícito, se respeta.
   const PAGE_H = 279;   // mm, hoja carta
-  cfg.etiqAlto = opts.etiqAlto ?? Math.min(32,
+  // Alto fijo de 2.54 cm (1 pulgada), salvo que no quepan las filas en la hoja.
+  cfg.etiqAlto = opts.etiqAlto ?? Math.min(25.4,
     Math.floor(((PAGE_H - cfg.margenSup - cfg.margenInf - (cfg.filas - 1) * cfg.sepV) / cfg.filas) * 10) / 10);
 
   // Pre-generar los QR (dataURL) de todas las partes.
@@ -647,13 +648,13 @@ export async function printPartLabels(parts, opts = {}) {
       .hoja{width:216mm;height:279mm;padding:${cfg.margenSup}mm 0 0 ${cfg.margenIzq}mm;page-break-after:always;}
       .etq{display:inline-flex;align-items:center;gap:2mm;
         width:${cfg.etiqAncho}mm;height:${cfg.etiqAlto}mm;
-        margin:0 ${cfg.sepH}mm ${cfg.sepV}mm 0;padding:1mm;overflow:hidden;vertical-align:top;
+        margin:0 ${cfg.sepH}mm ${cfg.sepV}mm 0;padding:1mm 1.5mm 1mm 1mm;overflow:hidden;vertical-align:top;
         ${cfg.prueba ? "border:0.2mm dashed #999;" : ""}}
-      .etq .qr{width:${cfg.etiqAlto - 4}mm;height:${cfg.etiqAlto - 4}mm;flex:0 0 auto}
-      .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:6mm}
+      .etq .qr{width:${cfg.etiqAlto - 7}mm;height:${cfg.etiqAlto - 7}mm;flex:0 0 auto}
+      .etq .txt{flex:1;min-width:0;align-self:stretch;display:flex;flex-direction:column;padding-top:1.5mm;padding-bottom:1.8mm;overflow:hidden}
       .etq .np{font-size:10.5pt;font-weight:700;line-height:1.1;word-break:break-all}
       .etq .ds{font-size:8pt;line-height:1.05;margin-top:0.5mm;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-      .etq .ub{font-size:11pt;font-weight:700;line-height:1.1;margin-top:2mm;flex:0 0 auto}
+      .etq .ub{font-size:11pt;font-weight:700;line-height:1.1;margin-top:0.8mm;flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:clip}
       .etq .cl{margin-top:auto;font-size:7.5pt;font-weight:700;white-space:nowrap;display:flex;align-items:flex-end;gap:0.8mm}
       .etq .cl .ln{flex:1;min-width:6mm;height:2.6mm;border-bottom:0.25mm solid #000}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}
