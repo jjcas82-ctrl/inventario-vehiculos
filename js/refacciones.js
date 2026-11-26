@@ -625,7 +625,9 @@ export async function printPartLabels(parts, opts = {}) {
         <div class="np">${esc(p.numParte)}</div>
         <div class="ds">${esc((p.descripcion || "").slice(0, 40))}</div>
         ${opts.mostrarUbic && p.ubicacion ? `<div class="ub">${esc(p.ubicacion)}</div>` : ""}
-        ${opts.leyendaClasif ? `<div class="cl">CLASIFICACION: <span class="ln"></span></div>` : ""}
+        ${opts.leyendaClasif ? `<div class="cl">CLASIFICACION: ${String(p.clasificacion || "").trim()
+          ? `<span class="cv">${esc(String(p.clasificacion).trim().toUpperCase())}</span>`
+          : `<span class="ln"></span>`}</div>` : ""}
       </div>
     </div>`;
 
@@ -657,6 +659,7 @@ export async function printPartLabels(parts, opts = {}) {
       .etq .ub{font-size:11pt;font-weight:700;line-height:1.1;margin-top:0.8mm;flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:clip}
       .etq .cl{margin-top:auto;font-size:7.5pt;font-weight:700;white-space:nowrap;display:flex;align-items:flex-end;gap:0.8mm}
       .etq .cl .ln{flex:1;min-width:6mm;height:2.6mm;border-bottom:0.25mm solid #000}
+      .etq .cl .cv{font-size:9pt;font-weight:800;line-height:1}
       .barra{padding:8px;background:#0f204a;color:#fff;text-align:center}
       .barra button{padding:8px 16px;font-size:14px;border:0;border-radius:6px;cursor:pointer}
       @media print{.barra{display:none}}

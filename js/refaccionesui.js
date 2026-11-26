@@ -1417,7 +1417,7 @@ async function cargarExistenciasSoloEtiquetas(file) {
     const conUbic = etqAnaqueles.filter(p => String(p.ubicacion || "").trim()).length;
     const danadas = etqAnaqueles.filter(p => ubicDanada(p.ubicacion)).length;
     const notaUbic = !n ? "" : (conUbic
-      ? ` Con ubicación: ${conUbic} de ${n}.` + (danadas
+      ? ` Con ubicación: ${conUbic} de ${n}. Con clasificación: ${etqAnaqueles.filter(p => String(p.clasificacion || "").trim()).length} de ${n}.` + (danadas
         ? ` ⚠ ${danadas} ubicación(es) dañada(s) por Excel (p. ej. «2.04E+303»): esas etiquetas salen sin ubicación; corrígelas en el archivo.`
         : "")
       : " ⚠ El archivo NO trae ubicación reconocible: las etiquetas saldrán sin ubicación.");
