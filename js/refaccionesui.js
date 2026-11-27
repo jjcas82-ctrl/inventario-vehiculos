@@ -1829,12 +1829,39 @@ function renderPendientesUbicacion() {
 
   cont.innerHTML = claves.map(u => {
     const items = grupos.get(u);
-    const filas = items.map(p => `<li><code>${escapeHtml(p.numParte)}</code> — ${escapeHtml((p.descripcion || "").slice(0, 45))}</li>`).join("");
+    // Cada parte es un botón: al tocarla (y confirmar) se pasa a la captura manual.
+    const filas = items.map(p => `<li><button type="button" class="ref-pend-pick" data-np="${escapeHtml(p.numParte)}"
+        title="Tocar para capturar este número de parte"
+        style="background:none;border:0;padding:3px 0;cursor:pointer;text-align:left;font:inherit;color:inherit">
+        <code style="color:var(--primary);text-decoration:underline">${escapeHtml(p.numParte)}</code> — ${escapeHtml((p.descripcion || "").slice(0, 45))}</button></li>`).join("");
     return `<details class="loc-card" style="margin:6px 0" open>
       <summary style="cursor:pointer;font-weight:700">${escapeHtml(u)} <span class="muted" style="font-weight:400">(${items.length})</span></summary>
       <ul style="margin:6px 0 0 18px;font-size:13px">${filas}</ul>
     </details>`;
   }).join("");
+  cont.querySelectorAll(".ref-pend-pick").forEach(b =>
+    b.addEventListener("click", () => elegirParteParaCaptura(b.dataset.np)));
+}
+
+// Pasa un número de parte de la lista de pendientes a la CAPTURA MANUAL, previa
+// confirmación (muestra parte, descripción y ubicación para evitar equivocarse).
+// Después deja el cursor en la cantidad para teclearla y registrar.
+function elegirParteParaCaptura(numParte) {
+  if (!numParte) return;
+  if (!puedeContar()) { notify("Tu rol no permite registrar conteos de refacciones.", { type: "warn" }); return; }
+  const p = store.getPart(ag(), numParte) || {};
+  const detalle = [p.descripcion, p.ubicacion ? `Ubicación: ${p.ubicacion}` : ""].filter(Boolean).join("\n");
+  if (!confirm(`¿Capturar este número de parte?\n\n${numParte}${detalle ? "\n" + detalle : ""}`)) return;
+  const inp = document.getElementById("ref-conteo-parte");
+  const cantEl = document.getElementById("ref-conteo-cant");
+  if (inp) inp.value = numParte;
+  if (cantEl) cantEl.value = "";
+  setScanStatus(`Número de parte ${numParte} listo: teclea la cantidad contada y pulsa Registrar.`, "info");
+  const destino = cantEl || inp;
+  if (destino) {
+    destino.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => destino.focus(), 300);
+  }
 }
 
 // ======================= DIFERENCIAS =======================
