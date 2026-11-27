@@ -281,6 +281,14 @@ export function initRefacciones() {
   document.querySelectorAll('input[name="ref-rotativo-modo"]').forEach(r => {
     r.addEventListener("change", aplicarModoRotativo);
   });
+  document.querySelectorAll('input[name="ref-rotativo-criterio"]').forEach(r => {
+    r.addEventListener("change", () => { aplicarModoRotativo(); renderMontosRotativo(); });
+  });
+  ["ref-rotativo-pct", "ref-rotativo-cant", "ref-rotativo-evitar"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", renderMontosRotativo);
+    if (el) el.addEventListener("change", renderMontosRotativo);
+  });
   const btnPlantilla = document.getElementById("ref-plantilla-print");
   if (btnPlantilla) btnPlantilla.addEventListener("click", imprimirPlantillaConteo);
 
@@ -321,6 +329,7 @@ export function renderRefacciones() {
   aplicarVisibilidadTipo();
   renderRondas();
   renderCargaResumen();
+  if (esRotativo()) aplicarModoRotativo();
   renderConteo();
   renderExhibicion();
   renderDiferencias();
@@ -495,6 +504,8 @@ function limpiarFormularioRefacciones() {
   // Muestreo rotativo: lista manual de números de parte y cantidad al azar.
   const lista = byId("ref-rotativo-lista"); if (lista) lista.value = "";
   const cant = byId("ref-rotativo-cant");   if (cant) cant.value = "";
+  const pct = byId("ref-rotativo-pct");     if (pct) pct.value = "";
+  document.querySelectorAll('input[name="ref-rotativo-criterio"]').forEach(r => { r.checked = (r.value === "pct"); });
   // Volver el modo a "Al azar" (valor por defecto) y marcar "evitar ya auditadas".
   document.querySelectorAll('input[name="ref-rotativo-modo"]').forEach(r => {
     r.checked = (r.value === "azar");
@@ -864,6 +875,7 @@ async function cargarExistencias(file) {
     // completo" del rotativo salía con muy pocas partes. Ahora queda guardado y
     // se rehidrata al entrar, de modo que el valor total siempre es correcto.
     guardarCatalogoExistencias(existencias);
+    renderMontosRotativo();
     const nota = notaLecturaReporte(existencias);
     setCargaStatus(`✓ Existencias leídas: ${existencias.length} partes.${nota.texto}`, nota.ok ? "ok" : "warn");
   } catch (e) {
@@ -1003,6 +1015,81 @@ function aplicarModoRotativo() {
   const manual = document.getElementById("ref-rotativo-manual");
   if (azar) azar.hidden = modo !== "azar";
   if (manual) manual.hidden = modo !== "manual";
+  const crit = criterioRotativo();
+  const pb = document.getElementById("ref-rotativo-pct-box");
+  const cb = document.getElementById("ref-rotativo-cant-box");
+  if (pb) pb.hidden = crit !== "pct";
+  if (cb) cb.hidden = crit !== "cant";
+  renderMontosRotativo();
+}
+
+// ---- Muestreo por % del VALOR del inventario ----
+function criterioRotativo() {
+  return (document.querySelector('input[name="ref-rotativo-criterio"]:checked') || {}).value || "pct";
+}
+// Valor de una parte = precio unitario × existencia (o el valor total del archivo).
+function valorParte(e) {
+  const ex = Number(e.existencia) || 0;
+  if (e.precioUnit != null && Number.isFinite(Number(e.precioUnit))) return Number(e.precioUnit) * ex;
+  if (e.valorTotal != null && Number.isFinite(Number(e.valorTotal))) return Number(e.valorTotal);
+  return 0;
+}
+// Inventario sobre el que se muestrea: el archivo recién leído o, si ya se
+// muestreó, el catálogo guardado de la agencia.
+function baseMuestreo() {
+  return (existencias && existencias.length) ? existencias : catalogoExistencias();
+}
+// Elige al azar partes hasta CUBRIR el monto objetivo. Recorre las partes en orden
+// aleatorio y suma su valor; si una parte rebasa mucho lo que falta, se salta y se
+// busca otra más chica, para quedar lo más cerca posible del objetivo.
+function muestraPorValor(candidatos, objetivo) {
+  const orden = muestraAlAzar(candidatos, candidatos.length);
+  const out = [];
+  let suma = 0;
+  for (const e of orden) {
+    if (suma >= objetivo) break;
+    const v = valorParte(e);
+    if (v <= 0) continue;
+    const falta = objetivo - suma;
+    if (v > falta * 1.5 && v > objetivo * 0.05) continue;   // demasiado grande: probar otra
+    out.push(e); suma += v;
+  }
+  // Si no se alcanzó (solo quedaban partes grandes), se completa con la más chica que cubra.
+  if (suma < objetivo) {
+    const elegidas = new Set(out.map(e => e.numParte));
+    const resto = orden.filter(e => !elegidas.has(e.numParte) && valorParte(e) > 0)
+      .sort((a, b) => valorParte(a) - valorParte(b));
+    for (const e of resto) {
+      if (suma >= objetivo) break;
+      out.push(e); suma += valorParte(e);
+    }
+  }
+  return { muestra: out, suma };
+}
+
+// Panel derecho del muestreo: valor del inventario, objetivo y muestra actual.
+function renderMontosRotativo() {
+  const el = document.getElementById("ref-rotativo-montos");
+  if (!el) return;
+  const base = baseMuestreo().filter(e => e && e.numParte && Number(e.existencia) > 0);
+  const total = base.reduce((s, e) => s + valorParte(e), 0);
+  const sinPrecio = base.filter(e => valorParte(e) <= 0).length;
+  const pct = Number(document.getElementById("ref-rotativo-pct")?.value);
+  const crit = criterioRotativo();
+  const sello = (store.getPartsAudit(ag()) || {}).rotativoSesion;
+  const muestra = sello ? store.listParts(ag()).filter(p => p.rotativoSesion === sello) : [];
+  const valMuestra = muestra.reduce((s, p) => s + valorParte(p), 0);
+  const filas = [];
+  filas.push(`<div class="stat stat-wide"><b>${money(total)}</b><span>Valor del inventario cargado (${base.length} partes con existencia${sinPrecio ? ` · ${sinPrecio} sin precio` : ""})</span></div>`);
+  if (crit === "pct" && pct > 0 && total > 0) {
+    filas.push(`<div class="stat stat-wide"><b style="color:var(--primary)">${money(total * Math.min(pct, 100) / 100)}</b><span>Monto a auditar (${Math.min(pct, 100)} % del valor)</span></div>`);
+  }
+  if (muestra.length) {
+    const pr = total > 0 ? (valMuestra / total * 100) : 0;
+    filas.push(`<div class="stat stat-wide"><b>${money(valMuestra)}</b><span>Muestra actual: ${muestra.length} partes · ${pr.toFixed(1)} % del valor</span></div>`);
+  }
+  if (!base.length) filas.push(`<p class="hint" style="margin:4px 0">Carga el archivo de existencias para ver los montos.</p>`);
+  el.innerHTML = filas.join("");
 }
 
 // Muestreo al azar (Fisher–Yates parcial) de `n` elementos de un array.
@@ -1031,18 +1118,35 @@ function muestrearRotativo() {
     notify("Carga el archivo de existencias antes de muestrear.", { type: "warn" });
     return;
   }
+  const crit = criterioRotativo();
   const cantEl = document.getElementById("ref-rotativo-cant");
-  const n = Number((cantEl?.value || "").trim());
+  const pctEl = document.getElementById("ref-rotativo-pct");
+  const pct = Number((pctEl?.value || "").trim());
+  const n = crit === "cant" ? Number((cantEl?.value || "").trim()) : 1;
   // Candidatos: partes con número y existencia > 0 (las que tiene sentido auditar).
   let candidatos = existencias.filter(e => e.numParte && Number(e.existencia) > 0);
   if (!candidatos.length) {
     setRotativoStatus("No hay partes con existencia (>0) para muestrear en el archivo cargado.", "error");
     return;
   }
-  if (!Number.isFinite(n) || n < 1) {
+  if (crit === "cant" && (!Number.isFinite(n) || n < 1)) {
     setRotativoStatus("Indica cuántos números de parte vas a auditar (1 o más).", "error");
     cantEl?.focus();
     return;
+  }
+  // Valor total del inventario (todas las partes con existencia) y monto objetivo.
+  const valorTotalInv = existencias.filter(e => e.numParte && Number(e.existencia) > 0)
+    .reduce((s, e) => s + valorParte(e), 0);
+  if (crit === "pct") {
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+      setRotativoStatus("Indica el porcentaje del valor a auditar (mayor a 0 y hasta 100).", "error");
+      pctEl?.focus();
+      return;
+    }
+    if (valorTotalInv <= 0) {
+      setRotativoStatus("El archivo no trae precios: no se puede muestrear por valor. Usa el CSV con «Precio U.» o elige «Cantidad de partes».", "error");
+      return;
+    }
   }
 
   // Evitar repetir partes ya auditadas en rotativos anteriores (si está marcado).
@@ -1062,10 +1166,20 @@ function muestrearRotativo() {
   }
 
   const total = candidatos.length;
-  const pedir = Math.min(n, total);
-  if (n > total && !confirm(`Pediste ${n} pero solo hay ${total} partes disponibles${excluidas ? ` (se excluyeron ${excluidas} ya auditadas antes)` : ""}. ¿Auditar las ${total}?`)) return;
-
-  const muestra = muestraAlAzar(candidatos, pedir);
+  let muestra, notaValor = "";
+  if (crit === "pct") {
+    const objetivo = valorTotalInv * pct / 100;
+    const disponible = candidatos.reduce((s, e) => s + valorParte(e), 0);
+    if (disponible < objetivo && !confirm(`Las partes disponibles${excluidas ? ` (sin las ${excluidas} ya auditadas)` : ""} suman ${money(disponible)}, menos que el objetivo de ${money(objetivo)}. ¿Auditar todas las disponibles?`)) return;
+    const r = muestraPorValor(candidatos, objetivo);
+    muestra = r.muestra;
+    notaValor = ` Valor de la muestra: ${money(r.suma)} (${(r.suma / valorTotalInv * 100).toFixed(1)} % de ${money(valorTotalInv)}; objetivo ${pct} %).`;
+    if (!muestra.length) { setRotativoStatus("No se pudo armar la muestra: ninguna parte disponible tiene precio.", "error"); return; }
+  } else {
+    if (n > total && !confirm(`Pediste ${n} pero solo hay ${total} partes disponibles${excluidas ? ` (se excluyeron ${excluidas} ya auditadas antes)` : ""}. ¿Auditar las ${total}?`)) return;
+    muestra = muestraAlAzar(candidatos, Math.min(n, total));
+  }
+  const pedir = muestra.length;
   const by = auth.currentUser()?.name || "—";
   // Sello de SESIÓN de la muestra: el flujo rotativo (conteo, diferencias,
   // resultado) opera SOLO sobre las partes con este sello, pero el inventario
@@ -1107,13 +1221,14 @@ function muestrearRotativo() {
   // las partes y marcando la muestra.
   store.clearParts(ag());
   store.bulkUpsertParts(ag(), toSave, { merge: false });
-  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir, rotativoSesion: sesion });
+  store.setPartsAudit(ag(), { tipo: "rotativo", rondas: 1, rondaActual: 1, cantidadRotativo: pedir, rotativoSesion: sesion,
+    criterioRotativo: crit, porcentajeRotativo: crit === "pct" ? pct : null });
   logAction("parts.rotativo.sample", `Muestreo rotativo (${ag()}): ${pedir} de ${total} partes al azar${excluidas ? ` (${excluidas} ya auditadas excluidas)` : ""} · inventario completo ${toSave.length} partes`, by);
   // Nueva muestra: el servidor reinicia conteos/exhibiciones y deja el inventario
   // igual al archivo cargado (borra lo que ya no viene).
   try { pushParts(ag(), toSave, { resetCounts: true, replace: true }); pushPartsAudit(ag()); } catch (e) {}
   const nota = excluidas ? ` Se excluyeron ${excluidas} ya auditadas antes.` : "";
-  setRotativoStatus(`Muestra creada: ${pedir} número(s) de parte al azar de ${total}.${nota} Imprime la plantilla de conteo.`, "ok");
+  setRotativoStatus(`Muestra creada: ${pedir} número(s) de parte al azar de ${total}.${notaValor}${nota} Imprime la plantilla de conteo.`, "ok");
   notify(`Muestra rotativa creada: ${pedir} partes.`, { type: "success", timeout: 6000 });
   // Limpia buffers de carga (ya quedó en el store).
   existencias = []; marbetes = []; lastCruce = null;
