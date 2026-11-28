@@ -699,20 +699,13 @@ function rondaInfo() {
 function renderRondas() {
   const { rondas, rondaActual } = rondaInfo();
   const rot = esRotativo();
-  // En rotativo el nº de conteos es fijo (1): se oculta el selector de rondas.
-  const rondasBox = document.getElementById("ref-rondas-box");
-  if (rondasBox) {
-    const ctl = rondasBox.querySelector(".row");
-    if (ctl) {
-      // Oculta el selector y botones de rondas en rotativo; deja el badge.
-      rondasBox.querySelectorAll("#ref-rondas-sel, #ref-ronda-siguiente, #ref-ronda-finalizar, label")
-        .forEach(el => { el.style.display = rot ? "none" : ""; });
-    }
-  }
+  // El rotativo también puede tener 2º y 3er conteo (solo de las diferencias):
+  // se muestra el selector igual que en el completo.
+  void rot;
   const sel = document.getElementById("ref-rondas-sel");
   if (sel && Number(sel.value) !== rondas) sel.value = String(rondas);
   const badge = document.getElementById("ref-ronda-actual");
-  if (badge) badge.textContent = rot ? "Conteo único (rotativo)" : `Conteo ${rondaActual} de ${rondas}`;
+  if (badge) badge.textContent = `Conteo ${rondaActual} de ${rondas}`;
   const btnSig = document.getElementById("ref-ronda-siguiente");
   if (btnSig) {
     btnSig.hidden = rondaActual >= rondas;   // en la última ronda no hay "siguiente"
@@ -722,7 +715,8 @@ function renderRondas() {
   const hint = document.getElementById("ref-ronda-hint");
   if (hint) {
     hint.textContent = rondaActual === 1
-      ? "1er conteo: cuenta TODAS las partes con marbete."
+      ? (rot ? "1er conteo: cuenta TODAS las partes de la muestra. Si eliges 2 o 3 conteos, los siguientes recuentan solo las diferencias."
+             : "1er conteo: cuenta TODAS las partes con marbete.")
       : `Conteo ${rondaActual}: recuenta SOLO las partes que siguen con diferencia (resaltadas como pendientes).`;
   }
 }
@@ -2131,6 +2125,14 @@ function imprimirDiferencias() {
   if (!difs.length && !listaExhibiciones().length) { notify("No hay diferencias que reportar. El conteo cuadra.", { type: "success" }); return; }
   const by = auth.currentUser()?.name || "—";
   const fecha = new Date().toLocaleString();
+  // Con 2 o 3 conteos, el reporte muestra el valor de CADA conteo (evidencia del
+  // recuento) y la diferencia se calcula con el último.
+  const { rondaActual: rondaRep } = rondaInfo();
+  const colsRonda = rondaRep > 1 ? Array.from({ length: rondaRep }, (_, k) => k + 1) : [];
+  const celdasRonda = (d) => colsRonda.map(r => {
+    const v = (d.conteos || {})[String(r)];
+    return `<td style="text-align:right">${v == null ? "—" : esc(String(v))}</td>`;
+  }).join("");
   const filas = difs.map(d => {
     const exh = Number(d.exhibicion || 0);
     return `
@@ -2139,7 +2141,7 @@ function imprimirDiferencias() {
       <td>${esc(d.descripcion || "")}</td>
       <td>${esc(d.ubicacion || "")}</td>
       <td style="text-align:right">${d.existencia == null ? "—" : esc(String(d.existencia))}</td>
-      <td style="text-align:right">${d.conteo == null ? "—" : esc(String(d.conteo))}</td>
+      ${colsRonda.length ? celdasRonda(d) : `<td style="text-align:right">${d.conteo == null ? "—" : esc(String(d.conteo))}</td>`}
       <td style="text-align:right">${exh > 0 ? esc(String(exh)) : "—"}</td>
       <td style="text-align:right">${d.dif == null ? "—" : (d.dif > 0 ? "+" : "") + d.dif}</td>
       <td>${esc(tipoTexto(d.tipo))}</td>
@@ -2167,7 +2169,7 @@ function imprimirDiferencias() {
   const win = window.open("", "_blank", "width=900,height=1000");
   if (!win) { notify("El navegador bloqueó la ventana. Permite ventanas emergentes.", { type: "warn" }); return; }
   win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
-    <title>Reporte de diferencias — Refacciones</title>
+    <title>Reporte de diferencias${colsRonda.length ? ` (conteo ${rondaRep})` : ""} — Refacciones</title>
     <style>
       *{box-sizing:border-box} body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#111}
       h1{font-size:18px;margin:0 0 4px} h2{color:#0f204a} .meta{color:#555;font-size:12px;margin-bottom:12px}
@@ -2180,11 +2182,11 @@ function imprimirDiferencias() {
       @media print{.barra{display:none}}
     </style></head><body>
     <div class="barra"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
-    <h1>Reporte de diferencias — Inventario de refacciones</h1>
-    <div class="meta">Generado: ${esc(fecha)} · Por: ${esc(by)} · ${difs.length} parte(s) con diferencia</div>
+    <h1>Reporte de diferencias${colsRonda.length ? ` — después del conteo ${rondaRep}` : ""} — Inventario de refacciones</h1>
+    <div class="meta">Generado: ${esc(fecha)} · Por: ${esc(by)} · ${difs.length} parte(s) con diferencia${colsRonda.length ? ` · después del conteo ${rondaRep} (la diferencia usa el último conteo)` : ""}</div>
     <table><thead><tr>
-      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th><th>Conteo</th><th>En exhib.</th><th>Dif.</th><th>Tipo</th>
-    </tr></thead><tbody>${filas || `<tr><td colspan="8">Sin diferencias: el conteo cuadra con la existencia.</td></tr>`}</tbody></table>
+      <th>No. parte</th><th>Descripción</th><th>Ubicación</th><th>Existencia</th>${colsRonda.length ? colsRonda.map(r => `<th>Conteo ${r}</th>`).join("") : "<th>Conteo</th>"}<th>En exhib.</th><th>Dif.</th><th>Tipo</th>
+    </tr></thead><tbody>${filas || `<tr><td colspan="${8 + Math.max(0, colsRonda.length - 1)}">Sin diferencias: el conteo cuadra con la existencia.</td></tr>`}</tbody></table>
     ${seccionExhib}
     </body></html>`);
   win.document.close();
