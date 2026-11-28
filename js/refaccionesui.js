@@ -2545,6 +2545,9 @@ function resumenFinal() {
     valorInventario,                                  // valor del subconjunto auditado
     valorInventarioTotal, partesTotal: todasAgencia.length, partesTotalConPrecio,
     esRotativo: esRotativo(),
+    // % del valor del inventario completo que cubre lo auditado (rotativo).
+    pctAuditado: valorInventarioTotal > 0 ? (valorInventario / valorInventarioTotal * 100) : null,
+    pctObjetivo: (store.getPartsAudit(ag()) || {}).porcentajeRotativo ?? null,
     valorDiferencia,
     faltantes: negat.length,   // faltante = ajuste negativo
     sobrantes: posit.length,   // sobrante = ajuste positivo
@@ -2576,7 +2579,7 @@ function renderFinal() {
   // del subconjunto auditado. En completo, uno solo (son lo mismo).
   const valorTotalCell = r.esRotativo
     ? `<div class="stat stat-wide"><b>${money(r.valorInventarioTotal)}</b><span>Valor del inventario COMPLETO cargado (${r.partesTotal} partes)</span></div>
-       <div class="stat stat-wide"><b style="color:var(--primary)">${money(r.valorInventario)}</b><span>Valor del subconjunto AUDITADO / rotativo (${r.totalPartes} partes)</span></div>`
+       <div class="stat stat-wide"><b style="color:var(--primary)">${money(r.valorInventario)}${r.pctAuditado != null ? ` · ${r.pctAuditado.toFixed(1)} %` : ""}</b><span>Valor AUDITADO / rotativo (${r.totalPartes} partes)${r.pctAuditado != null ? ` = ${r.pctAuditado.toFixed(1)} % del valor del inventario` : ""}${r.pctObjetivo != null ? ` · objetivo ${r.pctObjetivo} %` : ""}</span></div>`
     : `<div class="stat stat-wide"><b>${money(r.valorInventario)}</b><span>Valor total del inventario${r.partesConPrecio < r.totalPartes ? " (parcial)" : ""}</span></div>`;
   el.innerHTML = `
     ${aviso}
@@ -2727,7 +2730,8 @@ function imprimirResultadoFinal() {
     <div class="resumen">
       ${r.esRotativo
         ? `<div class="box"><b>${money(r.valorInventarioTotal)}</b><span>Valor inventario COMPLETO (${r.partesTotal} partes)</span></div>
-           <div class="box"><b>${money(r.valorInventario)}</b><span>Valor subconjunto AUDITADO (${r.totalPartes} partes)</span></div>`
+           <div class="box"><b>${money(r.valorInventario)}</b><span>Valor AUDITADO (${r.totalPartes} partes)</span></div>
+           <div class="box"><b>${r.pctAuditado != null ? r.pctAuditado.toFixed(1) + " %" : "—"}</b><span>Porcentaje auditado del valor del inventario${r.pctObjetivo != null ? ` (objetivo ${r.pctObjetivo} %)` : ""}</span></div>`
         : `<div class="box"><b>${money(r.valorInventario)}</b><span>Valor total del inventario</span></div>`}
       <div class="box"><b>${money(r.valorDiferencia)}</b><span>Monto total de la diferencia</span></div>
       <div class="box"><b>${r.ajustePositivo.partes} ${plural(r.ajustePositivo.partes, "parte", "partes")} · +${r.ajustePositivo.unidades} ${plural(r.ajustePositivo.unidades, "pieza", "piezas")}</b><span>Ajuste positivo (sobran piezas)</span></div>
